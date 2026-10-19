@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      miuix 各 AAR 的 manifest 里写死 minSdkVersion=33，而 Praxis 目标 minSdk=28。
+      overrideLibrary 让 manifest merger 放行这三个库，避免合并期直接失败。
+      运行时低版本只会走 Praxis 自己的降级路径（见 theme/PraxisTheme.kt 的
+      glassSupported 判定），不会调到 miuix 的模糊/着色器实现。
+    -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.core,top.yukonga.miuix.kmp.ui,top.yukonga.miuix.kmp.blur,top.yukonga.miuix.kmp.shader,top.yukonga.miuix.kmp.icons,top.yukonga.miuix.kmp.preference,top.yukonga.miuix.kmp.nav" />
+
+    <!--
+      网络：AI 服务商请求（Phase 3）。ACCESS_NETWORK_STATE 用于在离线时
+      直接把请求判成 AiErrorKind.NETWORK，而不是等 socket 超时。
+      前台服务权限为后续长任务（流式生成、工具批量执行）预留；
+      清单里只声明，不声明任何 service 就不会被拉起。
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <application
+        android:name=".PraxisApplication"
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        tools:targetApi="31"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Praxis.Starting">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:theme="@style/Theme.Praxis.Starting"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

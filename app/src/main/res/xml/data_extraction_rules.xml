@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 12+ 的备份/迁移规则。
+
+    Praxis 的库里有会话内容与（将来的）服务商密钥，一律排除出云备份与设备迁移：
+    allowBackup 已在清单里关掉，这里是第二道闸 —— 某些 ROM 会把 allowBackup
+    当成「建议」而非硬开关。
+-->
+<data-extraction-rules>
+    <!-- path="." 显式写出：aapt2 的 schema 校验要求 exclude 带 path，省略写法在部分版本会报错。 -->
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>

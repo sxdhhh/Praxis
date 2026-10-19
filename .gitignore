@@ -1,0 +1,21 @@
+local.properties
+.gradle/
+build/
+*/build/
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+
+# Kotlin 增量编译缓存（体积大且随机器变化）
+.kotlin/
+**/.kotlin/
+
+# 签名材料：只留在仓库外的 /root/.keys/，口令走环境变量
+*.jks
+*.keystore
+keystore.properties

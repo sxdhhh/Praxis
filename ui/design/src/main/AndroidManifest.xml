@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.core,top.yukonga.miuix.kmp.ui,top.yukonga.miuix.kmp.blur,top.yukonga.miuix.kmp.shader,top.yukonga.miuix.kmp.icons,top.yukonga.miuix.kmp.preference,top.yukonga.miuix.kmp.nav" />
+</manifest>
