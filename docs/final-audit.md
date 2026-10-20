@@ -12,13 +12,13 @@
 |---|---|---|
 | 模块数 | **18** 个 Gradle 项目 | `settings.gradle.kts` |
 | 源码规模 | 125 个 .kt / 14,250 行 | `stat.py` 统计 |
-| 单元测试 | **167 例，0 失败** | 见下表 |
+| 单元测试 | **172 例，0 失败** | 见下表 |
 | `assembleDebug` | 成功，APK 81.4 MB | 8m09s（全量重编） |
 | `lintDebug` | **0 error**（22 informational + 1 warning） | 见「lint 警告」节 |
 | 版本 | `1.0.0` / versionCode `10` | 合并后 Manifest 实测 |
 | 构建环境 | 本机 proot，`-Xmx1100m`，`--offline` | 单次 2.5–8 分钟 |
 
-### 测试分布（167 例）
+### 测试分布（172 例）
 
 | 模块 | 用例 | 覆盖内容 |
 |---|---:|---|
@@ -84,7 +84,7 @@
 |---|---|---|
 | **未装机验证** | 视觉/交互/真机行为全部未验证 | 用户明确要求「`/home/` 全部文档预期达成之前不装机」。而文档里有一部分（语音/MCP/ToolPkg）已被主动放弃，所以「全部达成」需要一次显式确认。 |
 | 工作流可视化编辑器 | 目前只有内置示例 + 运行，不能拖拽建节点 | 编辑器要解决节点增删 + 引用完整性 + 参数校验，纯文本配置更好做。等引擎真机跑稳再上画布。 |
-| 模型配置加密存储 | `apiKey` 存 DataStore 明文 | 已知妥协：`EncryptedSharedPreferences` 在多 ROM 有 Tink 初始化失败的案例。宁可可用不要崩溃，加固留后续。 |
+| ~~模型配置加密存储~~ | **R17 已完成** | 改用 Android Keystore + AES/GCM（不引 Tink），加密失败降级明文，旧数据自动迁移。见下节。 |
 | 记忆检索无向量 | 靠关键词 + 标签 + RRF | 内置 embedding 会让 APK 涨几十 MB，且真机算力受限。千级以内的记忆用 RRF 足够。 |
 | 终端宽字符 | 只做 CJK=2 的确定规则 | 完整 Unicode EastAsianWidth 表体积大，且实际终端场景以 ASCII + CJK 为主。 |
 
@@ -109,6 +109,32 @@
 
 ---
 
+## 五之二、服务商密钥加密（R17）
+
+| 项 | 实现 |
+|---|---|
+| 方案 | Android Keystore + AES/GCM/NoPadding（128-bit tag） |
+| 为什么不用 EncryptedSharedPreferences | 依赖 Tink，多 ROM 有初始化抛异常导致**设置页打不开**的案例 |
+| 存储格式 | `base64(iv):base64(ciphertext)`，IV 每次随机 |
+| 加密失败 | 降级存明文（保可用性） |
+| 解密失败 | 返回空串 = 「未配置」，提示用户重填（不崩） |
+| 旧数据 | `looksEncrypted()` 判别，启动时 `migrateApiKeyIfNeeded()` 自动升级 |
+| 备份 | `backup_rules.xml` / `data_extraction_rules.xml` 已全量排除，不存在跨设备解密问题 |
+| 测试 | 5 例（只测判别函数；encrypt/decrypt 需真机 Keystore） |
+
+## 五之二、服务商密钥加密（R17）
+
+| 项 | 实现 |
+|---|---|
+| 方案 | Android Keystore + AES/GCM/NoPadding（128-bit tag） |
+| 不用 EncryptedSharedPreferences 的理由 | 依赖 Tink，多 ROM 有初始化抛异常导致设置页打不开的案例 |
+| 存储格式 | base64(iv):base64(ciphertext)，IV 每次随机 |
+| 加密失败 | 降级存明文（保可用性） |
+| 解密失败 | 返回空串 = 未配置，提示用户重填（不崩） |
+| 旧数据 | looksEncrypted() 判别，启动时 migrateApiKeyIfNeeded() 自动升级 |
+| 备份 | 两个 backup 规则文件已全量排除，不存在跨设备解密问题 |
+| 测试 | 5 例（只测判别函数；encrypt/decrypt 需真机 Keystore） |
+
 ## 六、lint 唯一警告
 
 ```
@@ -122,7 +148,7 @@ NotShrinkingResources: If enabling minification, also set isShrinkResources = tr
 
 ## 七、装机前必须确认的三件事
 
-1. **放弃清单是否接受**：`core:speech` / MCP / ToolPkg / 编辑器 / 加密存储。
+1. **放弃清单是否接受**：`core:speech` / MCP / ToolPkg / 可视化编辑器。（密钥加密已在 R17 完成，不在放弃清单内）
    这五项不做，是判断而非遗漏（原因见第三节）。
 2. **release 签名是否要现在配**：目前缺 `PRAXIS_KEYSTORE` / `PRAXIS_STORE_PASS` /
    `PRAXIS_KEY_PASS` 时，release 产物**保持未签名**——这是有意的（让「忘了配签名」
