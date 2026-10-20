@@ -68,6 +68,9 @@ class TerminalBuffer(
     var style: CellStyle = CellStyle.Default
         private set
 
+    /** 已写到行尾，下一个字符需先换行（真实终端的“延迟折行”语义）。 */
+    private var pendingWrap: Boolean = false
+
     var scrollTop: Int = 0
         private set
     var scrollBottom: Int = rows - 1
@@ -95,14 +98,42 @@ class TerminalBuffer(
         style = next
     }
 
-    /** 写入一个字符，按宽度规则推进光标。 */
+    /**
+     * 写入一个字符，按宽度规则推进光标。
+     *
+     * ## 折行用「待折行」标志而不是把光标夹到最后一列
+     *
+     * 真实终端的行为是「写在最后一列不立即换行，等下一个字符再换」。
+     * 早前实现用 `cursorColumn = columns - 1` 表达这件事，结果是**下一个字符
+     * 会覆盖同一格**：写 "abc" 到 3 列屏再写 X，得到 "abX"，c 被吃掉。
+     *
+     * 正确做法是置一个 [pendingWrap] 标志：光标留在原地（不再夹），
+     * 下个字符到达时先换行再写。这样既保留了「不立即换行」，也不丢字符。
+     *
+     * ## columns == 1 时宽字符无法容纳
+     *
+     * 宽字符需要 2 列。屏宽为 1 时（极窄分屏/横屏小窗）它永远放不下，
+     * 折行后仍是 0，会写出越界索引。这种情况**丢弃该字符**而非猛写：
+     * 越界写入会被 writeCell 静默吞掉，但光标计算会错，后续输出全乱。
+     */
     fun putChar(c: Char) {
         val width = charWidth(c)
         if (width <= 0) return
 
-        // 行尾放不下宽字符时先折行，不要让宽字符跨行拆开。
+        // 上一字符已写到行尾、还没换行：此时才真正换。
+        if (pendingWrap) {
+            cursorColumn = 0
+            lineFeed()
+            pendingWrap = false
+        }
+
+        // 本行剩余空间放不下这个字符（宽字符只剩 1 格，或屏宽不足以容纳）。
         if (cursorColumn + width > columns) {
-            carriageReturn()
+            if (width > columns) {
+                // 屏宽本身装不下一个宽字符：丢弃，不写越界索引。
+                return
+            }
+            cursorColumn = 0
             lineFeed()
         }
 
@@ -116,14 +147,17 @@ class TerminalBuffer(
             cursorColumn += 1
         }
 
+        // 恰好写到行尾：不立即换行，只标记，等下一个字符。
         if (cursorColumn >= columns) {
             cursorColumn = columns - 1
-            // 折行延迟到下一个字符写入时发生（与真实终端一致：写在最后一列不立即换行）。
+            pendingWrap = true
         }
     }
 
     /** 换行到下一行；在滚动区底部时滚动。 */
     fun lineFeed() {
+        // 显式换行即已消费掉「待折行」状态，否则下个字符会多换一行。
+        pendingWrap = false
         if (cursorRow == scrollBottom) {
             scrollUp(1)
         } else if (cursorRow < rows - 1) {
@@ -133,28 +167,33 @@ class TerminalBuffer(
 
     /** 回车。 */
     fun carriageReturn() {
+        pendingWrap = false
         cursorColumn = 0
     }
 
     /** 退格：仅左移，不删字符（真实终端行为）。 */
     fun backspace() {
+        pendingWrap = false
         if (cursorColumn > 0) cursorColumn -= 1
     }
 
     /** 制表：跳到下一个 8 的倍数。 */
     fun tab() {
+        pendingWrap = false
         val next = ((cursorColumn / TAB_WIDTH) + 1) * TAB_WIDTH
         cursorColumn = next.coerceAtMost(columns - 1)
     }
 
     /** 移动到绝对坐标（1 基，ANSI 语义）。 */
     fun moveTo(row: Int, column: Int) {
+        pendingWrap = false
         cursorRow = (row - 1).coerceIn(0, rows - 1)
         cursorColumn = (column - 1).coerceIn(0, columns - 1)
     }
 
     /** 相对移动（ANSI CUP 的简写：A/B/C/D）。 */
     fun moveBy(rowDelta: Int, columnDelta: Int) {
+        pendingWrap = false
         cursorRow = (cursorRow + rowDelta).coerceIn(0, rows - 1)
         cursorColumn = (cursorColumn + columnDelta).coerceIn(0, columns - 1)
     }
@@ -166,6 +205,7 @@ class TerminalBuffer(
         if (t >= b) return
         scrollTop = t
         scrollBottom = b
+        pendingWrap = false
         cursorRow = t
         cursorColumn = 0
     }

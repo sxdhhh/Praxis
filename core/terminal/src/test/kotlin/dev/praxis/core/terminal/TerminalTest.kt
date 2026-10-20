@@ -165,6 +165,51 @@ class TerminalBufferTest {
         assertEquals(0, TerminalBuffer.charWidth(27.toChar()))
     }
 
+    // ---- 以下三条针对折行缺陷（R19）----
+
+    @Test
+    fun `char after full line is not lost`() {
+        // 曾经：满行后 cursorColumn 被夹到 columns-1，下一个字符覆盖同一格。
+        // 写 "abc" 到 3 列屏再写 X → 得到 "abX"，c 被吃掉。
+        val buffer = TerminalBuffer(columns = 3, rows = 3)
+
+        "abc".forEach { buffer.putChar(it) }
+        // 此时光标仍在最后一列、尚未换行（延迟折行）。
+        assertEquals(0, buffer.cursorRow)
+
+        buffer.putChar('X')
+
+        // 关键：abc 必须完整保留，X 落到下一行。
+        assertEquals("abc", rowText(buffer, 0))
+        assertEquals("X", rowText(buffer, 1))
+    }
+
+    @Test
+    fun `explicit newline after full line does not double wrap`() {
+        // pendingWrap 必须被显式换行消费掉，否则下一个字符会多空一行。
+        val buffer = TerminalBuffer(columns = 3, rows = 4)
+
+        "abc".forEach { buffer.putChar(it) }
+        buffer.lineFeed()          // 显式换行
+        buffer.carriageReturn()
+        buffer.putChar('z')
+
+        assertEquals("z", rowText(buffer, 1))
+    }
+
+    @Test
+    fun `wide char on single column screen is dropped without crash`() {
+        // 屏宽 1 时宽字符永远放不下；折行后仍是第 0 列，会写越界索引。
+        val buffer = TerminalBuffer(columns = 1, rows = 2)
+
+        buffer.putChar('中')
+
+        // 不崩、不越界，光标停在合法位置。
+        assertEquals(0, buffer.cursorRow)
+        assertEquals(0, buffer.cursorColumn)
+        assertEquals(false, buffer.isContinuation(0, 0))
+    }
+
     @Test
     fun `erase in display clears everything`() {
         val buffer = TerminalBuffer(columns = 5, rows = 2)
