@@ -43,7 +43,7 @@
 | 期 | 验收点 | 状态 | 落点 |
 |---|---|:-:|---|
 | P1 | 顶部渐变模糊 | 已达成 | `AppScaffold` 的 `progressiveTextureBlur` |
-| P1 | 底栏玻璃折射 | **未达成** | 底栏用 miuix `FloatingNavigationBar` 的实色 `surface`；kyant 玻璃层 701 行零接线 |
+| P1 | 底栏玻璃折射 | **代码已接线，真机未验证** | `LocalPageBackdrop` 下发内容层采样源 → 底栏 `drawBackdrop(vibrancy→blur→lens)` |
 | P1 | 低版本降级 | 已达成 | `LowAppScaffold` + `LowFrostedTopBar` |
 | P2 | 丝滑滚动（到顶/到底） | 已达成（仅 Lazy 版） | `AutoFollowScrollLazy`（Chat/Terminal 已用）；非 Lazy 版零调用 |
 | P2 | 拖拽列表防回流 | 已达成 | `isWaitingForUpdate` 守卫 |
@@ -62,18 +62,45 @@
 **注意**：这里说的是「代码存在且通过单测」，**不等于真机视觉验收通过**。
 视觉类（模糊、玻璃、动画）只能装机后确认，本轮未装机。
 
-### 本轮（R21）修正：上表中两项此前标错了
+### 底栏玻璃：从「误标已达成」到「真接线」（R21 → R22）
 
-此前把「底栏玻璃折射」写成「已达成」，依据是 `LocalKyantBackdrop` + kyant backdrop 依赖
-都存在。**这是错的**：依赖与工具函数存在 ≠ 已接线。实测结论：
+R21 发现指标写错了：当时依据是「`LocalKyantBackdrop` + kyant backdrop 依赖都存在」，
+**但依赖与工具函数存在 ≠ 已接线**。实测事实：
 
-| 事实 | 证据 |
+| 当时的实际情况 | 证据 |
 |---|---|
-| 底栏没有任何 backdrop 代码 | `PraxisBottomBar.kt` 只有 miuix 的 `FloatingNavigationBar(color=surface)` |
-| `LocalKyantBackdrop` 从未被 provide | 全仓 `CompositionLocalProvider` 无一提供它 |
+| 底栏没有任何 backdrop 代码 | 只有 `FloatingNavigationBar(color=surface)` |
+| `LocalKyantBackdrop` 从未被 provide | 全仓无一个 `CompositionLocalProvider` 提供它 |
 | 玻璃控件全走纯色回退 | `rememberPageBackdropOrFallback` 自身零调用 |
 | `LiquidToggle` / `LiquidSlider` 压根不存在 | 只在 KDoc 里被提到 |
-| 701 行 kyant 液态玻璃代码全零接线 | `tools/audit_unwired.py` |
+
+R22 已打通完整链路：
+
+```
+AppScaffold:153  rememberLayerBackdrop { drawRect(surface); drawContent() }
+        ↓ LocalPageBackdrop provide（:202，仅在 layerBackdrop 的 Box 之外下发）
+PraxisApp:160    bottomBar 槽（不在 content 里，避免底栏被录进采样源）
+        ↓
+BottomBarGlass   rememberBottomBarBackdrop() → Modifier.bottomBarGlass(...)
+        ↓ drawBackdrop(vibrancy ⇒ blur(18dp) ⇒ lens(16/22dp, ca=0.1))
+PraxisBottomBar  底色转全透明，玻璃负责全部背景
+```
+
+三个具体设计点：
+
+1. **采样源必须来自内容层**。底栏在内容之上、内部没有内容；自建 backdrop 采到的是它自己，
+   折射出来只是一块半透明实色。
+
+2. **底栏必须画在 `layerBackdrop` 之外**。所以 `AppScaffold` 新增 `bottomBar` 槽，
+   分两层 Box：内层挂 `layerBackdrop` 给内容，外层放底栏 —— 否则玻璃会采到自己（自采样重影）。
+
+3. **玻璃代码单独一个文件（`BottomBarGlass.kt`）**。`miuix-blur` 的 AAR 声明 `minSdk=33`，
+   而本项目 minSdk 是 28。把 blur 调用封在独立文件后面，低版本走不进那个分支，
+   引用 `android.graphics.RuntimeShader` 的类就永远不会被解析。
+
+**未验证部分**：以上是代码链路与编译期接线已验证（APK 的 dex 里 `BottomBarGlassKt`
+与 `PraxisBottomBar` 同在一个 dex，引用关系成立）。
+**折射、模糊、镜片边缘的视觉效果一条都没看过** —— 必须装机才能确认。
 
 ### 为什么会漏掉：单测验证不了「有没有人调」
 
@@ -83,6 +110,7 @@
 ```sh
 python3 tools/audit_unwired.py            # 报告
 python3 tools/audit_unwired.py --strict   # CI 用，有新增未接线项则退出 1
+
 ```
 
 白名单 `KNOWN_UNWIRED` 必须写原因；已接线的项若不从白名单删除，脚本会主动报「白名单过期」。
@@ -196,7 +224,9 @@ lint 建议把 `mipmap-anydpi-v26` 并入 `mipmap-anydpi`。**实测照做会让
 
 1. **放弃清单是否接受**：`core:speech` / MCP / ToolPkg / 可视化编辑器。（密钥加密已在 R17 完成，不在放弃清单内）
    这五项不做，是判断而非遗漏（原因见第三节）。
+
 2. **release 签名是否要现在配**：目前缺 `PRAXIS_KEYSTORE` / `PRAXIS_STORE_PASS` /
    `PRAXIS_KEY_PASS` 时，release 产物**保持未签名**——这是有意的（让「忘了配签名」
    在安装阶段暴露，而不是产出一个看起来正常的包）。
+
 3. **装机用 debug 还是 release**：debug 包名 `dev.praxis.debug`，可与旧版共存。
