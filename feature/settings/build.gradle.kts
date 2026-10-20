@@ -16,6 +16,7 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:tool"))
     implementation(project(":core:memory"))
+    implementation(project(":core:workflow"))
 
     implementation(libs.androidx.core.ktx)
 

@@ -51,6 +51,8 @@ fun FeatureHost(
     chatPersistence: ChatPersistence,
     /** 记忆存储。设置域的记忆页要用；由 :app 注入。 */
     memoryStore: dev.praxis.core.memory.MemoryStore,
+    /** 工作流引擎。设置域的工作流页要用；由 :app 注入。 */
+    workflowEngine: dev.praxis.core.workflow.WorkflowEngine,
     onOpenSession: (String) -> Unit,
     toolSpecs: List<dev.praxis.core.tool.ToolSpec>,
     currentTier: dev.praxis.core.tool.PermissionTier,
@@ -95,6 +97,7 @@ fun FeatureHost(
                 onToolToggle = onToolToggle,
                 onOpen = onSettingsEntry,
                 memoryStore = memoryStore,
+                workflowEngine = workflowEngine,
                 modifier = modifier,
             )
 

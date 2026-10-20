@@ -46,6 +46,15 @@ val appModule = module {
     }
     single { dev.praxis.core.memory.MemoryRetriever() }
     single { dev.praxis.core.memory.MemoryWritePipeline(get()) }
+
+    // 工作流：工具端口由 :app 桥接（core:workflow 不依赖 core:tool）。
+    single<dev.praxis.core.workflow.WorkflowToolPort> {
+        dev.praxis.data.ToolWorkflowPort(
+            registry = get(),
+            contextProvider = { get<dev.praxis.core.tool.ToolPermissionState>().snapshot() },
+        )
+    }
+    single { dev.praxis.core.workflow.WorkflowEngine(get()) }
     // 聊天层只拿单向端口（只管读），不让它写记忆。
     single<dev.praxis.feature.chat.MemoryPort> {
         dev.praxis.data.MemoryPortImpl(

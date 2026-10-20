@@ -34,6 +34,8 @@ fun SettingsHost(
     onOpen: (SettingsEntry) -> Unit,
     /** 记忆存储。由 :app 注入，与 repository 同口径。 */
     memoryStore: dev.praxis.core.memory.MemoryStore,
+    /** 工作流引擎。由 :app 注入。 */
+    workflowEngine: dev.praxis.core.workflow.WorkflowEngine,
     modifier: Modifier = Modifier,
 ) {
     val entry = SettingsEntry.byKey(entryKey)
@@ -48,6 +50,8 @@ fun SettingsHost(
         SettingsEntry.Model -> ModelRoute(repository, modifier)
 
         SettingsEntry.Memory -> MemoryRoute(memoryStore, modifier)
+
+        SettingsEntry.Workflow -> WorkflowRoute(workflowEngine, modifier)
 
         SettingsEntry.Tools -> dev.praxis.feature.settings.tools.ToolsScreen(
             tools = toolSpecs,

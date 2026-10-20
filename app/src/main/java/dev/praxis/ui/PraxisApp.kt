@@ -75,6 +75,7 @@ fun PraxisApp(
     val chatPersistence: dev.praxis.feature.chat.ChatPersistence = org.koin.compose.koinInject()
     val memoryPort: dev.praxis.feature.chat.MemoryPort = org.koin.compose.koinInject()
     val memoryStore: dev.praxis.core.memory.MemoryStore = org.koin.compose.koinInject()
+    val workflowEngine: dev.praxis.core.workflow.WorkflowEngine = org.koin.compose.koinInject()
 
     // 当前会话 id 必须跨进程重建保留：否则重启后回到旧会话，用户以为刚才的对话丢了。
     var sessionId by rememberSaveable { mutableStateOf("main") }
@@ -146,6 +147,7 @@ fun PraxisApp(
                         settingsRepository = settingsRepository,
                         chatPersistence = chatPersistence,
                         memoryStore = memoryStore,
+                        workflowEngine = workflowEngine,
                         onOpenSession = { newId ->
                             sessionId = newId
                             // 回对话首页（把会话列表弹掉），而不是压新栈。
