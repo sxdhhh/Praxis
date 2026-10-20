@@ -126,6 +126,7 @@ dependencies {
     implementation(project(":core:tool"))
     implementation(project(":core:memory"))
     implementation(project(":core:workflow"))
+    implementation(project(":core:plugin"))
     implementation(project(":ui:theme"))
     implementation(project(":ui:design"))
     implementation(project(":ui:widgets"))

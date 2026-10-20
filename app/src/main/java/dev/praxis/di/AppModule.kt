@@ -47,6 +47,12 @@ val appModule = module {
     single { dev.praxis.core.memory.MemoryRetriever() }
     single { dev.praxis.core.memory.MemoryWritePipeline(get()) }
 
+    // 技能：文件读取实现在 :app，解析/注册在 core:plugin。
+    single<dev.praxis.core.plugin.SkillSource> {
+        dev.praxis.data.FileSkillSource(androidContext())
+    }
+    single { dev.praxis.core.plugin.SkillRegistry(get()) }
+
     // 工作流：工具端口由 :app 桥接（core:workflow 不依赖 core:tool）。
     single<dev.praxis.core.workflow.WorkflowToolPort> {
         dev.praxis.data.ToolWorkflowPort(

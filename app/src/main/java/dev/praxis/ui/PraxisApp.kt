@@ -76,6 +76,12 @@ fun PraxisApp(
     val memoryPort: dev.praxis.feature.chat.MemoryPort = org.koin.compose.koinInject()
     val memoryStore: dev.praxis.core.memory.MemoryStore = org.koin.compose.koinInject()
     val workflowEngine: dev.praxis.core.workflow.WorkflowEngine = org.koin.compose.koinInject()
+    val skillRegistry: dev.praxis.core.plugin.SkillRegistry = org.koin.compose.koinInject()
+
+    // 技能列表在启动时扫一次（之后由设置页的「重新扫描」触发）。
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        skillRegistry.reload()
+    }
 
     // 当前会话 id 必须跨进程重建保留：否则重启后回到旧会话，用户以为刚才的对话丢了。
     var sessionId by rememberSaveable { mutableStateOf("main") }
@@ -95,6 +101,10 @@ fun PraxisApp(
                 chatRepository = chatPersistence,
                 sessionId = sessionId,
                 memoryPort = memoryPort,
+                // 每轮现拼：用户在设置页刚关掉的技能，下一句就不该再生效。
+                skillsPromptProvider = {
+                    skillRegistry.composePrompt(skillRegistry.all().map { it.name }.toSet())
+                },
             )
         }
 

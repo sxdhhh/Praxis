@@ -58,6 +58,14 @@ class ChatViewModel(
      * ViewModel 的单测不应该被迫起一个 Room 实例。
      */
     private val memoryPort: MemoryPort? = null,
+    /**
+     * 已启用技能拼成的提示词片段（可为空）。
+     *
+     * 用 `suspend () -> String` 而不是 String：技能列表可能在设置页被改，
+     * 每轮现取才能保证「刚关掉的技能下一句就不生效」。
+     * 空串表示不插 system。
+     */
+    private val skillsPromptProvider: (suspend () -> String)? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatState())
@@ -264,6 +272,33 @@ class ChatViewModel(
     }
 
     /**
+     * 把已启用技能拼成一条 system 消息。
+     *
+     * ## 为什么单独一条而不是拼进记忆那条
+     *
+     * 记忆是「关于用户的事实」，技能是「该怎么做事的指令」。
+     * 混在一条里，模型难以区分「这是背景」与「这是要求」，
+     * 而混错方向的代价不同：把事实当指令会执行错动作。
+     *
+     * ## 为什么放最前
+     *
+     * 与记忆同理：插在最后等于告诉模型「这是最新指令」，
+     * 会压掉用户当前这句的意图。
+     */
+    private suspend fun withSkills(messages: List<ChatMessage>): List<ChatMessage> {
+        val provider = skillsPromptProvider ?: return messages
+        val section = runCatching { provider() }.getOrDefault("")
+        if (section.isBlank()) return messages
+
+        return listOf(
+            ChatMessage(
+                role = ChatRole.System,
+                text = "# 可用技能\n\n以下是当前启用的技能，按需遵循：\n\n" + section,
+            ),
+        ) + messages
+    }
+
+    /**
      * 把相关记忆作为一条 system 消息插到对话最前面。
      *
      * ## 四个设计决定
@@ -300,7 +335,7 @@ class ChatViewModel(
                     .stream(
                         ChatRequest(
                             model = model,
-                            messages = withMemory(history.toList()),
+                            messages = withMemory(withSkills(history.toList())),
                             tools = buildToolDescriptors(),
                         ),
                     )
