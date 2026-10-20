@@ -153,6 +153,23 @@ fun PraxisApp(
             title = title,
             onBack = onBack,
             modifier = modifier.fillMaxSize(),
+            // 底栏走独立槽位，不塞进 content。
+            //
+            // content 在 AppScaffold 的 layerBackdrop 录制范围内，把底栏放进去
+            // 会让它被录进采样源 —— 玻璃采到自己，边缘出现「玻璃折射玻璃」的重影。
+            bottomBar = {
+                PraxisBottomBar(
+                    selected = activeDomain,
+                    onSelect = { domain ->
+                        if (domain != activeDomain) {
+                            switchDomain(backStack, domain.id)
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = navBarBottom),
+                )
+            },
         ) { _ ->
             Box(Modifier.fillMaxSize()) {
                 PraxisNavHost(
@@ -202,17 +219,7 @@ fun PraxisApp(
                     )
                 }
 
-                PraxisBottomBar(
-                    selected = activeDomain,
-                    onSelect = { domain ->
-                        if (domain != activeDomain) {
-                            switchDomain(backStack, domain.id)
-                        }
-                    },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = navBarBottom),
-                )
+
             }
         }
     }

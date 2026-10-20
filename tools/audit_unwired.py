@@ -47,9 +47,13 @@ KNOWN_UNWIRED = {
     "AppScrollScaffold": "备用变体：同上",
     "AppTabScaffold": "备用变体：同上",
     "AutoFollowScroll": "Lazy 版已接线，非 Lazy 版暂无调用点",
-    "LiquidGlassButton": "kyant 液态玻璃整层未接线（底栏仍用 miuix 实色）",
-    "rememberPageBackdropOrFallback": "同上：无任何代码提供 LocalKyantBackdrop",
-    "rememberCombinedBackdrop": "同上",
+    # kyant 玻璃体系（com.kyant.backdrop）与 miuix 玻璃体系（miuix-blur）并存。
+    # 底栏用的是 miuix 那套（LocalPageBackdrop 下发 LayerBackdrop），
+    # 因为 miuix 的 Backdrop 与 AppScaffold 现有的 rememberLayerBackdrop 同源，
+    # 不需要再造一套录制链路。kyant 那三件保留为将来做「按钮级液态玻璃」的备件。
+    "LiquidGlassButton": "kyant 体系备件：底栏已改用 miuix 玻璃（LocalPageBackdrop）",
+    "rememberPageBackdropOrFallback": "kyant 体系备件：无代码提供 LocalKyantBackdrop",
+    "rememberCombinedBackdrop": "kyant 体系备件",
     "DropdownItem": "控件库候选项，页面尚未使用",
     "MiuixCheckboxWidget": "控件库候选项",
     "MiuixMultiApkCheckboxWidget": "控件库候选项",

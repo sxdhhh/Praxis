@@ -1,6 +1,7 @@
 package dev.praxis.ui.design.component
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -114,6 +115,7 @@ fun AppScaffold(
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     bottomInset: Dp = 24.dp,
+    bottomBar: (@Composable BoxScope.() -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     // 渐变模糊的采样层：先铺一层**与 Scaffold 容器同色**的打底，再记录页面内容。
@@ -146,6 +148,7 @@ fun AppScaffold(
             modifier = modifier,
             bottomInset = bottomInset,
             surfaceColor = surfaceColor,
+            bottomBar = bottomBar,
             content = content,
         )
         return
@@ -193,20 +196,38 @@ fun AppScaffold(
         CompositionLocalProvider(
             LocalScrollBottomLimit provides barExtra,
             LocalTopBarInset provides topBarInset,
+            // 把内容层的采样源下发给浮层（底栏、悬浮按钮）：
+            // 浮层自己在页面之上，它自己建的 backdrop 采到的是「它自己」，
+            // 折射出来只是一块半透明实色 —— 看着像玻璃，实际没有内容穿过。
+            dev.praxis.ui.design.glass.LocalPageBackdrop provides backdrop,
         ) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    // 内容层被记录进 backdrop，供顶栏采样做渐变模糊。
-                    .layerBackdrop(backdrop),
-            ) {
-                content(
-                    PaddingValues(
-                        // 容器不再吃顶栏高度 —— 交给滚动容器，内容才能滚到顶栏下方。
-                        top = 0.dp,
-                        bottom = innerPadding.calculateBottomPadding() + bottomInset,
+            // 外层 Box 不在 layerBackdrop 里：底栏挂在这里，就不会被录进采样源。
+            //
+            // ## 为什么要分两层（2026-10-20）
+            //
+            // 底栏是玻璃，它要采样的是**页面内容**。如果底栏和内容在同一个
+            // `layerBackdrop(backdrop)` 的 Box 里，`drawContent()` 会把底栏自己也录进去 ——
+            // 玻璃就会采到自己（自采样），边缘出现一圈「玻璃折射玻璃」的重影。
+            //
+            // 内容层单独包一层并挂 layerBackdrop，底栏放在外层：
+            // 采样源里只有内容，正是玻璃需要的。
+            Box(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        // 内容层被记录进 backdrop，供顶栏渐变模糊与底栏玻璃采样。
+                        .layerBackdrop(backdrop),
+                ) {
+                    content(
+                        PaddingValues(
+                            // 容器不再吃顶栏高度 —— 交给滚动容器，内容才能滚到顶栏下方。
+                            top = 0.dp,
+                            bottom = innerPadding.calculateBottomPadding() + bottomInset,
+                        )
                     )
-                )
+                }
+                // 底栏画在内容之上、采样源之外。
+                bottomBar?.invoke(this)
             }
         }
     }

@@ -1,6 +1,7 @@
 package dev.praxis.ui.design.component
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Scaffold
@@ -34,6 +35,7 @@ internal fun LowAppScaffold(
     modifier: Modifier,
     bottomInset: Dp,
     surfaceColor: Color,
+    bottomBar: (@Composable BoxScope.() -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     // ★★ 2026-10-05（降级）：顶栏改毛玻璃（不采样、不模糊）后，
@@ -60,6 +62,7 @@ internal fun LowAppScaffold(
             LocalScrollBottomLimit provides barExtra,
             LocalTopBarInset provides topBarInset,
         ) {
+            // 低版本没有采样源，底栏与内容同层即可（底栏用实色，不存在自采样问题）。
             Box(Modifier.fillMaxSize()) {
                 content(
                     PaddingValues(
@@ -67,6 +70,7 @@ internal fun LowAppScaffold(
                         bottom = innerPadding.calculateBottomPadding() + bottomInset,
                     )
                 )
+                bottomBar?.invoke(this)
             }
         }
     }
