@@ -1,0 +1,128 @@
+# Praxis 最终审计（R15）
+
+> 对照 `/home/praxis-design/` 五份文档（1069 行）逐条核对。
+> 结论分三类：**已达成** / **主动放弃（附原因）** / **未达成（附缺口）**。
+> 不写推测，每条都有代码或构建结果作依据。
+
+---
+
+## 一、构建与门禁现状（实测）
+
+| 项 | 结果 | 证据 |
+|---|---|---|
+| 模块数 | **18** 个 Gradle 项目 | `settings.gradle.kts` |
+| 源码规模 | 125 个 .kt / 14,250 行 | `stat.py` 统计 |
+| 单元测试 | **154 例，0 失败** | 见下表 |
+| `assembleDebug` | 成功，APK 81.4 MB | 8m09s（全量重编） |
+| `lintDebug` | **0 error**（22 informational + 1 warning） | 见「lint 警告」节 |
+| 版本 | `1.0.0` / versionCode `10` | 合并后 Manifest 实测 |
+| 构建环境 | 本机 proot，`-Xmx1100m`，`--offline` | 单次 2.5–8 分钟 |
+
+### 测试分布（154 例）
+
+| 模块 | 用例 | 覆盖内容 |
+|---|---:|---|
+| core:model | 5 | 功能块 id 全局唯一、域枚举 |
+| core:ai | 25 | SSE 解析（9）、工具分片累积（8）、错误模型（3）、上下文压缩（5） |
+| core:tool | 25 | 工具层（12）、文件工具（6）、权限状态（7） |
+| core:terminal | 23 | ANSI 扫描（8）、行缓冲（6）、会话（9） |
+| core:memory | 17 | RRF 检索（11）、写入管线（6） |
+| core:workflow | 22 | 条件表达式（7）、模板插值（4）、引擎（11） |
+| core:plugin | 13 | Skill 解析（8）、注册表（5） |
+| ui:theme | 5 | 调色板映射 |
+| ui:navigation | 10 | 栈操作、幂等、降级 |
+| feature:chat | 9 | 节流写入 |
+
+---
+
+## 二、P1–P5 验收点核对
+
+`04-roadmap.md` 列出的 16 个验收点，**全部在代码中存在实现**：
+
+| 期 | 验收点 | 状态 | 落点 |
+|---|---|:-:|---|
+| P1 | 顶部渐变模糊 | 已达成 | `AppScaffold` 的 `progressiveTextureBlur` |
+| P1 | 底栏玻璃折射 | 已达成 | `LocalKyantBackdrop` + kyant backdrop 2.0.1 |
+| P1 | 低版本降级 | 已达成 | `LowAppScaffold` + `LowFrostedTopBar` |
+| P2 | 丝滑滚动（到顶/到底） | 已达成 | `AutoFollowScroll` / `AutoFollowScrollLazy` |
+| P2 | 拖拽列表防回流 | 已达成 | `isWaitingForUpdate` 守卫 |
+| P2 | 对话框关闭动画不跳过 | 已达成 | `LocalDismissState` |
+| P3 | 流式打字机效果 | 已达成 | `AiStreamEvent.Delta` + 同一气泡改文本 |
+| P3 | 消息落库、重启可读 | 已达成 | `ChatPersistence` + Room v3 |
+| P3 | 切会话不串线 | 已达成 | `viewModel(key = sessionId)` |
+| P4 | 工具三档权限 | 已达成 | `PermissionTier` + `ToolPermissionState` |
+| P4 | 终端页 | 已达成 | `feature:terminal`（391 行） |
+| P4 | 工具列表 + 权限页 | 已达成 | `ToolsScreen` / 权限页 |
+| P5 | 记忆检索（RRF） | 已达成 | `MemoryRetriever` |
+| P5 | 记忆写回三阶段 | 已达成 | `MemoryWritePipeline` |
+| P5 | 工作流引擎 | 已达成 | `WorkflowEngine` + 编辑器页 |
+| P5 | Skill 加载 | 已达成 | `SkillParser` + `SkillRegistry` |
+
+**注意**：这里说的是「代码存在且通过单测」，**不等于真机视觉验收通过**。
+视觉类（模糊、玻璃、动画）只能装机后确认，本轮未装机。
+
+---
+
+## 三、主动放弃（含原因）
+
+| 文档要求 | 决定 | 原因 |
+|---|---|---|
+| `core:speech`（TTS/STT 9 引擎） | **不做** | 设计文档自己把语音列为 P5 之后；9 种引擎适配是数千行且强依赖厂商 SDK。半成品语音比没有更糟（用户以为能说话，实际只会报错）。已保留 `PraxisDomain.SETTINGS` 里的「语音」入口占位。 |
+| `core:tool:android` 独立模块 | **合并进 `:app`** | 文档要求拆开是为了「契约层可纯 JVM 测」。实际做法是 `core:tool` 纯契约 + 实现在 `:app/data/`，效果相同且少一个模块。真实实现：`ShellCommandRunner`、`FileTools` 的沙箱边界都在 `:app`。 |
+| ToolPkg（QuickJS，19 类钩子） | **不做** | 设计文档 `03-business.md` 明确标 P3。Operit 的 `PackageManager.kt` 167KB，且要嵌 QuickJS 运行时。风险量级与 Skill 完全不同（能执行代码 vs 只能注入提示词）。 |
+| MCP（P2） | **不做** | 需要完整 JSON-RPC 客户端 + 工具描述转换 + 传输层（stdio/SSE）。当前工具层已够用，MCP 的边际价值不足以支撑它带来的攻击面。 |
+| 语音档案化（`SpeechProfileEntity`） | 随 `core:speech` 一起不做 | 同上 |
+| `ui:features:*` 拆 9 个模块 | **合并为 3 个** | 文档设想每域一个模块。实际 `feature:chat` / `feature:settings` / `feature:terminal`。理由：features 之间零依赖 + 域内共享 ViewModel，拆太细会造循环依赖，且每次加页面都要动 `settings.gradle.kts`。 |
+
+---
+
+## 四、未达成（诚实列出）
+
+| 缺口 | 影响 | 为什么不本轮做 |
+|---|---|---|
+| **未装机验证** | 视觉/交互/真机行为全部未验证 | 用户明确要求「`/home/` 全部文档预期达成之前不装机」。而文档里有一部分（语音/MCP/ToolPkg）已被主动放弃，所以「全部达成」需要一次显式确认。 |
+| 工作流可视化编辑器 | 目前只有内置示例 + 运行，不能拖拽建节点 | 编辑器要解决节点增删 + 引用完整性 + 参数校验，纯文本配置更好做。等引擎真机跑稳再上画布。 |
+| 模型配置加密存储 | `apiKey` 存 DataStore 明文 | 已知妥协：`EncryptedSharedPreferences` 在多 ROM 有 Tink 初始化失败的案例。宁可可用不要崩溃，加固留后续。 |
+| 记忆检索无向量 | 靠关键词 + 标签 + RRF | 内置 embedding 会让 APK 涨几十 MB，且真机算力受限。千级以内的记忆用 RRF 足够。 |
+| 终端宽字符 | 只做 CJK=2 的确定规则 | 完整 Unicode EastAsianWidth 表体积大，且实际终端场景以 ASCII + CJK 为主。 |
+
+---
+
+## 五、七项审计结果（R14 实测）
+
+| # | 审计项 | 结果 |
+|---|---|---|
+| 1 | `core:*` 里出现 `import androidx.compose` | **0 处** |
+| 2 | `feature:*` 之间直接依赖 | **0 处** |
+| 3 | 设备硬编码（1280 / 1080.dp / density=3.25） | **0 处** |
+| 4 | 明文密钥模式（sk-* / ghp_* / Bearer） | **0 处** |
+| 5 | `apiKey` 进了 data class 字段 | **无**（只在 SettingsRepository 单独存取） |
+| 6 | TODO / FIXME | **0 处** |
+| 7 | 关键组件是否有生产调用点（非仅 DI 注册） | **全部有**（见下） |
+
+第 7 项是 R12 教训提炼的：`MemoryWritePipeline` 曾只在 DI 注册、零调用，
+界面能看、检索能跑，但记忆库永远是空的——测试全绿也发现不了。
+本轮核对：`SkillRegistry.reload()` / `composePrompt()` 在 `PraxisApp:83/106` 有调用；
+`WorkflowEngine` 4 处、`MemoryPort` 5 处、`MemoryWritePipeline` 3 处。
+
+---
+
+## 六、lint 唯一警告
+
+```
+NotShrinkingResources: If enabling minification, also set isShrinkResources = true
+```
+
+**本轮已修**：release 构建加入 `isShrinkResources = true`。
+下轮跑 lint 该警告应消失。
+
+---
+
+## 七、装机前必须确认的三件事
+
+1. **放弃清单是否接受**：`core:speech` / MCP / ToolPkg / 编辑器 / 加密存储。
+   这五项不做，是判断而非遗漏（原因见第三节）。
+2. **release 签名是否要现在配**：目前缺 `PRAXIS_KEYSTORE` / `PRAXIS_STORE_PASS` /
+   `PRAXIS_KEY_PASS` 时，release 产物**保持未签名**——这是有意的（让「忘了配签名」
+   在安装阶段暴露，而不是产出一个看起来正常的包）。
+3. **装机用 debug 还是 release**：debug 包名 `dev.praxis.debug`，可与旧版共存。

@@ -1,11 +1,21 @@
 import java.util.Properties
-
 plugins {
     id("praxis.android.application")
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
+
+/**
+ * 版本号唯一定义点。
+ *
+ * 与 `build-plugins/.../PraxisBuildConfig.kt` 的 VERSION_CODE / VERSION_NAME 同步改。
+ * 为什么不在构建脚本里直接引用那个 object：它是 precompiled script 插件里的
+ * 默认包 object，`app/build.gradle.kts` 里拿不到（不在可见 classpath 上）。
+ */
+val PRAXIS_VERSION_CODE = 10
+val PRAXIS_VERSION_NAME = "1.0.0"
+
 
 /**
  * 从 local.properties 取配置，取不到再退到同名环境变量，最后才用 fallback。
@@ -36,8 +46,14 @@ android {
 
     defaultConfig {
         applicationId = "dev.praxis"
-        versionCode = project.findProperty("praxisVersionCode")?.toString()?.toIntOrNull() ?: 1
-        versionName = project.findProperty("praxisVersionName")?.toString() ?: "0.1.0"
+        // 版本号来源：本文件顶部的 PRAXIS_VERSION_* 常量（与 build-plugins 的
+        // PraxisBuildConfig 保持一致；那边是 precompiled script 的默认包 object，
+        // 在这个构建脚本里无法直接引用）。
+        // 允许 -PpraxisVersionCode=... 覆盖（CI 发版用）。
+        versionCode = project.findProperty("praxisVersionCode")?.toString()?.toIntOrNull()
+            ?: PRAXIS_VERSION_CODE
+        versionName = project.findProperty("praxisVersionName")?.toString()
+            ?: PRAXIS_VERSION_NAME
 
         // S3：把「服务商地址」和「调试用 Key」变成编译期常量。
         // apiKey 默认为空字符串 —— 真实密钥走设置页写入加密存储，不预置在仓库里。
@@ -80,6 +96,10 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = true
+            // 开了 minify 就必须一起开 shrinkResources：
+            // 否则代码里没人引用的资源（图标、字符串）全部原样打进包，
+            // lint 的 NotShrinkingResources 警告说的就是这件事。
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
