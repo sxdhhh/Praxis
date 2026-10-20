@@ -12,13 +12,13 @@
 |---|---|---|
 | 模块数 | **18** 个 Gradle 项目 | `settings.gradle.kts` |
 | 源码规模 | 125 个 .kt / 14,250 行 | `stat.py` 统计 |
-| 单元测试 | **154 例，0 失败** | 见下表 |
+| 单元测试 | **167 例，0 失败** | 见下表 |
 | `assembleDebug` | 成功，APK 81.4 MB | 8m09s（全量重编） |
 | `lintDebug` | **0 error**（22 informational + 1 warning） | 见「lint 警告」节 |
 | 版本 | `1.0.0` / versionCode `10` | 合并后 Manifest 实测 |
 | 构建环境 | 本机 proot，`-Xmx1100m`，`--offline` | 单次 2.5–8 分钟 |
 
-### 测试分布（154 例）
+### 测试分布（167 例）
 
 | 模块 | 用例 | 覆盖内容 |
 |---|---:|---|
@@ -32,6 +32,8 @@
 | ui:theme | 5 | 调色板映射 |
 | ui:navigation | 10 | 栈操作、幂等、降级 |
 | feature:chat | 9 | 节流写入 |
+| :app | 13 | ToolWorkflowPort（7）、MemoryPortImpl（6） |
+| :app | 13 | ToolWorkflowPort（7）、MemoryPortImpl（6） |
 
 ---
 
