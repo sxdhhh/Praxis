@@ -45,6 +45,11 @@ class WorkflowEngine(
         val outputs = ArrayList<String>(2)
         val vars = LinkedHashMap(variables)
 
+        // 入口指向不存在的节点也要报错，而不是静默跑完 0 个节点。
+        if (trigger.nextId != null && byId[trigger.nextId] == null) {
+            return fail("入口指向不存在的节点：${trigger.nextId}", emptyList(), variables)
+        }
+
         val startedAt = nowMs()
         var current: WorkflowNode? = byId[trigger.nextId]
         var visited = 0
@@ -99,7 +104,10 @@ class WorkflowEngine(
                     // 模板插值把错误消息当作正常数据用下去。
                     node.outputKey?.let { vars[it] = out }
                     steps += StepRecord(node.id, node.title, out)
-                    current = byId[node.nextId]
+                    if (node.nextId != null && byId[node.nextId] == null) {
+                        return fail("节点「${node.title}」指向不存在的后继：${node.nextId}", steps, vars)
+                    }
+                    current = resolveNext(byId, node.nextId)
                 }
 
                 is WorkflowNode.Condition -> {
@@ -109,14 +117,24 @@ class WorkflowEngine(
                         nodeTitle = node.title,
                         detail = "${node.expression} → $matched",
                     )
-                    current = byId[if (matched) node.thenId else node.elseId]
+                    // 条件走到的分支如果指向不存在的节点，必须报错。
+                    // 尤其 elseId 为 null 是合法的「到此结束」，但 elseId 写错
+                    // （指向一个不存在 id）不能与它混为一谈。
+                    val branchId = if (matched) node.thenId else node.elseId
+                    current = resolveNext(byId, branchId)
+                    if (branchId != null && current == null) {
+                        return fail("条件「${node.title}」指向不存在的分支：$branchId", steps, vars)
+                    }
                 }
 
                 is WorkflowNode.Transform -> {
                     val value = renderTemplate(node.template, vars)
                     vars[node.outputKey] = value
                     steps += StepRecord(node.id, node.title, value)
-                    current = byId[node.nextId]
+                    if (node.nextId != null && byId[node.nextId] == null) {
+                        return fail("节点「${node.title}」指向不存在的后继：${node.nextId}", steps, vars)
+                    }
+                    current = resolveNext(byId, node.nextId)
                 }
 
                 is WorkflowNode.Output -> {
@@ -150,8 +168,25 @@ class WorkflowEngine(
      * 当路径去删文件；把成功当失败，用户只会看到工作流提前停了（可恢复）。
      * 风险不对称，所以标记表义宁宽。
      */
+    /**
+     * 解析下一个节点。
+     *
+     * 返回 null 有两种含义，调用方**必须区分**：
+     *  - `nextId == null` → 流程在此正常结束（合法）；
+     *  - `nextId != null` 但查不到 → 定义有错（必须报 fail）。
+     *
+     * 曾经这里直接 `current = byId[nextId]`，于是「指向不存在节点」与
+     * 「正常结束」无法区分：循环因 current 为 null 而退出，最终返回
+     * success = true。用户看到「运行成功」，实际流程压根没跑完。
+     * 这是最糟的错误类型——静默的成功。
+     */
+    private fun resolveNext(
+        byId: Map<String, WorkflowNode>,
+        nextId: String?,
+    ): WorkflowNode? = if (nextId == null) null else byId[nextId]
+
     private fun String.looksLikeToolFailure(): Boolean =
-        ERROR_MARKERS.any { it in this }
+        ERROR_MARKERS.any { trimStart().startsWith(it) }
 
     private fun fail(
         message: String,
@@ -178,17 +213,23 @@ class WorkflowEngine(
         const val DEFAULT_MAX_DURATION_MS = 10 * 60 * 1000L
 
         /**
-         * 失败标记。
+         * 失败标记，按**前缀**匹配。
          *
-         * 与 `FileTools` 实际抛出的错误文本前缀对齐（见 core:tool）。
-         * 匹配「前缀」而非全文，避免正常输出里恰好包含某个词时误判。
+         * ## 为什么必须前缀而非子串
+         *
+         * 子串匹配会误杀正常输出：`read_file` 读到一个内容为
+         * "file not found handling" 的源文件时，整份文件内容里含 `not found`，
+         * 会被当成工具失败而中止工作流 —— 这是完全正常的读取。
+         *
+         * 而 [WorkflowToolPort] 的实现在错误时总是返回**以固定词开头**的文本
+         * （见 ToolWorkflowPort），所以前缀匹配足够且精确。
          */
         private val ERROR_MARKERS = listOf(
             "工具不存在",
             "参数错误",
+            "工具调用失败",
             "工具调用异常",
             "拒绝执行",
-            "not found",
             "ToolException",
         )
     }

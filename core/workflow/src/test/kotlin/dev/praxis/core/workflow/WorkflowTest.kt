@@ -287,4 +287,91 @@ class WorkflowEngineTest {
         assertFalse(timedOut.success)
         assertTrue(timedOut.error!!.contains("时长上限"))
     }
+
+    // ---- 以下四条针对「静默成功」缺陷（R18）----
+
+    @Test
+    fun `dangling nextId on entry fails instead of silently succeeding`() = runTest {
+        // 曾经：入口指向不存在的节点 → current 为 null → 循环不执行 →
+        // 返回 success = true。用户看到「运行成功」，实际一个节点都没跑。
+        val result = WorkflowEngine(FakeToolPort()).run(
+            wf(WorkflowNode.Trigger("t", nextId = "nowhere")),
+        )
+
+        assertFalse(result.success)
+        assertTrue(result.error!!.contains("不存在"))
+    }
+
+    @Test
+    fun `dangling nextId on tool fails`() = runTest {
+        val result = WorkflowEngine(FakeToolPort()).run(
+            wf(
+                WorkflowNode.Trigger("t", nextId = "a"),
+                WorkflowNode.Tool("a", "读", "echo", nextId = "missing"),
+            ),
+        )
+
+        assertFalse(result.success)
+        assertTrue(result.error!!.contains("不存在"))
+    }
+
+    @Test
+    fun `dangling branch on condition fails`() = runTest {
+        val result = WorkflowEngine(FakeToolPort()).run(
+            wf(
+                WorkflowNode.Trigger("t", nextId = "c"),
+                WorkflowNode.Condition("c", "判断", "{{v}} == yes", thenId = "ghost", elseId = null),
+            ),
+            mapOf("v" to "yes"),
+        )
+
+        assertFalse(result.success)
+        assertTrue(result.error!!.contains("不存在"))
+    }
+
+    @Test
+    fun `null branch on condition is still a legal end`() = runTest {
+        // 关键反例：elseId = null 表示「到此结束」，不能当成错误。
+        val result = WorkflowEngine(FakeToolPort()).run(
+            wf(
+                WorkflowNode.Trigger("t", nextId = "c"),
+                WorkflowNode.Condition("c", "判断", "{{v}} == yes", thenId = null, elseId = null),
+            ),
+            mapOf("v" to "no"),
+        )
+
+        assertTrue(result.success)
+    }
+
+    @Test
+    fun `tool output containing not-found phrase is not treated as failure`() = runTest {
+        // 曾经 ERROR_MARKERS 用子串匹配且含 "not found"：
+        // 读到一份含该词的源码就会被误判为工具失败而中止。
+        val port = FakeToolPort(mapOf("read_file" to "// handle file not found gracefully\nval x = 1"))
+        val result = WorkflowEngine(port).run(
+            wf(
+                WorkflowNode.Trigger("t", nextId = "a"),
+                WorkflowNode.Tool("a", "读", "read_file", outputKey = "src", nextId = "o"),
+                WorkflowNode.Output("o", template = "{{src}}"),
+            ),
+        )
+
+        assertTrue(result.success)
+    }
+
+    @Test
+    fun `tool failure text at the start still aborts`() = runTest {
+        // 前缀匹配必须仍然能识别真失败。
+        val port = FakeToolPort(mapOf("bad" to "工具调用失败：权限不足"))
+        val result = WorkflowEngine(port).run(
+            wf(
+                WorkflowNode.Trigger("t", nextId = "a"),
+                WorkflowNode.Tool("a", "坏", "bad", nextId = "o"),
+                WorkflowNode.Output("o", template = "不该到这里"),
+            ),
+        )
+
+        assertFalse(result.success)
+        assertTrue(result.outputs.isEmpty())
+    }
 }
