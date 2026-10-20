@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.map
  */
 class SettingsRepository(
     private val dataStore: DataStore<Preferences>,
+    /** 密钥加解密器。null 表示降级为明文存储（测试或 Keystore 不可用时）。 */
+    private val cipher: dev.praxis.core.data.security.KeystoreCipher? = null,
 ) {
 
     /** 读主题设置；任何字段缺失或损坏都回落到默认值，不抛异常。 */
@@ -58,16 +60,64 @@ class SettingsRepository(
     suspend fun setTemperature(value: Double) = put(KEY_TEMPERATURE, value)
 
     /**
-     * 密钥单独存取。
+     * 写入服务商密钥。
      *
-     * 存 DataStore 而不是 EncryptedSharedPreferences 是一个取舍：
-     * 后者依赖 androidx.security，且在各 ROM 上有 Tink 初始化失败的案例。
-     * DataStore 落在应用私有目录（其他应用读不到），先保证能用；
-     * 真正的加固（KeyStore 包裹）留给后续迭代，接口不变。
+     * ## 加密路径
+     *
+     * 有 cipher 时存 AES/GCM 密文（密钥在 Android Keystore 内，不进 data/data）。
+     * 加密失败则回落存明文 —— 宁可降低强度也要保住可用性，
+     * 因为「存不进密钥」会让用户完全无法使用模型。
+     *
+     * ## 为什么不在 apiKey() 里解密失败时抛
+     *
+     * 解密失败最常见的原因是「换机恢复 / Keystore 被清」。
+     * 这时抛异常会让设置页与聊天页一起崩；返回空串等价于「还没配密钥」，
+     * 设置页会提示重新填写，这是可恢复的。
      */
-    suspend fun setApiKey(key: String) = put(KEY_API_KEY, key.trim())
+    suspend fun setApiKey(key: String) {
+        val trimmed = key.trim()
+        if (trimmed.isEmpty()) {
+            put(KEY_API_KEY, "")
+            return
+        }
 
-    suspend fun apiKey(): String = dataStore.data.map { it[KEY_API_KEY] ?: "" }.first()
+        val encrypted = cipher?.encrypt(trimmed)
+        put(KEY_API_KEY, encrypted ?: trimmed)
+    }
+
+    /**
+     * 读取明文密钥。
+     *
+     * 兼容 v1 的明文存量：读到不含分隔符的值就原样返回，
+     * 并在下一次 [setApiKey] 时自动升级为密文（无需显式迁移脚本）。
+     */
+    suspend fun apiKey(): String {
+        val raw = dataStore.data.map { it[KEY_API_KEY] ?: "" }.first()
+        if (raw.isEmpty()) return ""
+
+        val c = cipher ?: return raw
+        if (!dev.praxis.core.data.security.KeystoreCipher.looksEncrypted(raw)) {
+            // 旧版明文：直接用，下次保存时自动加密。
+            return raw
+        }
+        return c.decrypt(raw) ?: ""
+    }
+
+    /**
+     * 把存量明文密钥升级为密文（启动时调一次，幂等）。
+     *
+     * 不升级也不会错，但那样旧用户永远是明文，加固只对新用户生效。
+     * 加密失败时保持原样（不丢数据）。
+     */
+    suspend fun migrateApiKeyIfNeeded() {
+        val c = cipher ?: return
+        val raw = dataStore.data.map { it[KEY_API_KEY] ?: "" }.first()
+        if (raw.isEmpty()) return
+        if (dev.praxis.core.data.security.KeystoreCipher.looksEncrypted(raw)) return
+
+        val encrypted = c.encrypt(raw) ?: return
+        put(KEY_API_KEY, encrypted)
+    }
 
     suspend fun setThemeMode(mode: ThemeMode) = put(KEY_THEME_MODE, mode.name)
 
@@ -115,4 +165,7 @@ private val Context.praxisSettingsStore: DataStore<Preferences> by preferencesDa
 
 /** 从 Context 建仓储（DI 入口在 :app 的 Koin module 里调用）。 */
 fun createSettingsRepository(context: Context): SettingsRepository =
-    SettingsRepository(context.applicationContext.praxisSettingsStore)
+    SettingsRepository(
+        dataStore = context.applicationContext.praxisSettingsStore,
+        cipher = dev.praxis.core.data.security.KeystoreCipher(),
+    )

@@ -30,6 +30,15 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val repository: SettingsRepository = koinInject()
+
+            // 把存量明文密钥升级为密文（幂等，加密失败则保持原样）。
+            // 放在 MainActivity 而不是 SettingsRepository 构造里：
+            // 构造里有 suspend 调用会让 DI 变成异步初始化，
+            // 而这里天然就在协程作用域内。
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                runCatching { repository.migrateApiKeyIfNeeded() }
+            }
+
             val settings by repository.themeSettings.collectAsState(initial = ThemeSettings())
 
             PraxisTheme(settings = settings) {
