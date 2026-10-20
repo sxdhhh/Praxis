@@ -11,7 +11,7 @@
 | 项 | 结果 | 证据 |
 |---|---|---|
 | 模块数 | **18** 个 Gradle 项目 | `settings.gradle.kts` |
-| 源码规模 | 125 个 .kt / 14,250 行 | `stat.py` 统计 |
+| 源码规模 | 129 个 .kt / 15,052 行 | 递归统计（排除 build/） |
 | 单元测试 | **187 例，0 失败** | 见下表 |
 | `assembleDebug` | 成功，APK 81.8 MB | 2m56s（增量）/ 8m09s（全量重编） |
 | `lintDebug` | **0 error / 18 warning，全部为版本升级提示** | 见「lint 结论」节 |
