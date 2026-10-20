@@ -130,6 +130,7 @@ dependencies {
     implementation(project(":ui:navigation"))
     implementation(project(":feature:chat"))
     implementation(project(":feature:settings"))
+    implementation(project(":feature:terminal"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

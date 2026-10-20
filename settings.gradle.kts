@@ -44,3 +44,4 @@ include(":ui:navigation")
 // ── 功能页 ─────────────────────────────────────────────
 include(":feature:chat")
 include(":feature:settings")
+include(":feature:terminal")

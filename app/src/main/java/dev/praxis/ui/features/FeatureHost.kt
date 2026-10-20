@@ -68,6 +68,9 @@ fun FeatureHost(
             // 多一层无意义的点击。与设置域一样按域分发。
             PraxisDomain.CHAT -> ChatRoute(chatViewModel, modifier)
 
+            // 终端域首页就是终端页本身（与对话域同理：先列功能块再进子页是多一层点击）。
+            PraxisDomain.TERMINAL -> TerminalRoute(modifier)
+
             else -> DomainHome(
                 domain = route.domain,
                 onOpen = onOpen,
@@ -260,6 +263,27 @@ private fun ChatListRoute(
                 reloadTick.value++
             }
         },
+        modifier = modifier,
+    )
+}
+
+/** 终端域入口：把 ViewModel 接到纯 UI 上。 */
+@Composable
+private fun TerminalRoute(modifier: Modifier) {
+    // 换域回来时必须拿到同一个 VM，否则已输出的内容全丢；
+    // 用固定 key 让它在设置页/聊天页之间来回切也不重建。
+    val viewModel: dev.praxis.feature.terminal.TerminalViewModel =
+        androidx.lifecycle.viewmodel.compose.viewModel(key = "terminal") {
+            dev.praxis.feature.terminal.TerminalViewModel(
+                runner = dev.praxis.data.terminal.ShellCommandRunner(),
+            )
+        }
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    dev.praxis.feature.terminal.TerminalScreen(
+        state = state,
+        onSubmit = viewModel::submit,
+        onInputChange = viewModel::onInputChange,
         modifier = modifier,
     )
 }

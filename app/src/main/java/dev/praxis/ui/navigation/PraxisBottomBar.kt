@@ -28,9 +28,12 @@ fun PraxisBottomBar(
     onSelect: (PraxisDomain) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 四个 Tab 是硬约束（WeKit/老挂 同款 76.dp 最小宽度，四 tab 才排得下）：
+    // 工具与终端都是「动手」类，各占一个会让底栏超宽；这里让终端上位，
+    // 工具页仍从设置入口进入（设置首页已登记 Tools 条目）。
     val items = listOf(
         PraxisDomain.CHAT to PraxisIcons.Chat,
-        PraxisDomain.TOOLS to PraxisIcons.Tools,
+        PraxisDomain.TERMINAL to PraxisIcons.Terminal,
         PraxisDomain.MEMORY to PraxisIcons.Memory,
         PraxisDomain.SETTINGS to PraxisIcons.Settings,
     )

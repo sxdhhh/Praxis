@@ -57,6 +57,13 @@ val PraxisDomain.blocks: List<FeatureBlock>
             FeatureBlock("updates", "更新", "版本检查与升级"),
         )
 
+        // id 必须全局唯一（跨域也不能重名）：终端的历史用 terminal-history，
+        // 与 CHAT 的 history 区分。
+        PraxisDomain.TERMINAL -> listOf(
+            FeatureBlock("shell", "终端", "在本机执行命令并查看输出"),
+            FeatureBlock("terminal-history", "命令历史", "历史命令、回放与复用"),
+        )
+
         PraxisDomain.SETTINGS -> listOf(
             FeatureBlock("model", "模型", "服务商、密钥与参数"),
             FeatureBlock("appearance", "外观", "主题、取色与动效"),

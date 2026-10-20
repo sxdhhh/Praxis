@@ -19,6 +19,7 @@ enum class PraxisDomain(
     TOOLS("tools", "工具", "工具调用、工具箱与权限授权"),
     TOOLBOX("toolbox", "工具箱", "内置工具包与自定义 JS 工具"),
     WORKFLOW("workflow", "工作流", "可视化编排与自动化触发"),
+    TERMINAL("terminal", "终端", "命令行执行、ANSI 渲染与会话历史"),
     MEMORY("memory", "记忆", "长期记忆、向量检索与记忆整理"),
     PACKAGES("packages", "软件包", "包管理、模块安装与依赖"),
     SETTINGS("settings", "设置", "模型、外观、权限与实验项"),
