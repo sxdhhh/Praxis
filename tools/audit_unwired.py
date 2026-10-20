@@ -43,9 +43,6 @@ EXPECTED_EXTERNAL = {
 # 已知未接线项：`名字 -> 原因`。接线后必须从本表删除，
 # 否则 --strict 会一直替它撒谎。
 KNOWN_UNWIRED = {
-    "AppListScaffold": "备用变体：列表页目前直接用 LazyColumn，未迁移到此骨架",
-    "AppScrollScaffold": "备用变体：同上",
-    "AppTabScaffold": "备用变体：同上",
     "AutoFollowScroll": "Lazy 版已接线，非 Lazy 版暂无调用点",
     # kyant 玻璃体系（com.kyant.backdrop）与 miuix 玻璃体系（miuix-blur）并存。
     # 底栏用的是 miuix 那套（LocalPageBackdrop 下发 LayerBackdrop），

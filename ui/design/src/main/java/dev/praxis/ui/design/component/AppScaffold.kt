@@ -9,10 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
@@ -101,9 +97,14 @@ val LocalBottomBarInset = staticCompositionLocalOf { androidx.compose.ui.unit.Dp
  *  - 内容区底部只吃 navigationBars（手势条），不给悬浮玻璃底栏留占位 ——
  *    底栏是浮层，内容可以滑到底部被它遮住，这正是玻璃透明感成立的前提。
  *
- * 两种形态：
- *  - [AppScaffold]：普通滚动内容（Column 由调用方给），适合表单/详情页；
- *  - [AppListScaffold]：LazyColumn 列表页，分组内容用 LazyListScope。
+ * 本组件只提供**栏层**（顶栏渐变模糊 + 内容采样源 + inset 下发），
+ * 不提供滚动容器：页面各自的滚动容器读 [LocalTopBarInset] 与
+ * [LocalScrollBottomLimit] 自行组装。
+ *
+ * 早期这里还有 `AppListScaffold` / `AppScrollScaffold` / `AppTabScaffold`
+ * 三个「带顶栏的滚动骨架」，已删除：它们内部都再套一层 [AppScaffold]，
+ * 而顶栏由 `:app` 的 `PraxisApp` 统一提供 —— 套用会出现双顶栏。
+ * 保留下只会诱使后来者踩坑，不如删掉。
  *
  * @param title 顶栏标题
  * @param onBack 返回键动作；null 表示不显示返回键（主 Tab 根页）
@@ -326,84 +327,3 @@ private fun BlurredTopBar(
         }
     }
 }
-
-/**
- * 列表形态骨架：LazyColumn + 统一 contentPadding。
- * 分组用 [LazyListScope] 直接给，或调用方自行包 SegmentedColumn。
- */
-@Composable
-fun AppListScaffold(
-    title: String,
-    onBack: (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
-    bottomInset: Dp = 24.dp,
-    content: LazyListScope.() -> Unit,
-) {
-    AppScaffold(title = title, onBack = onBack, modifier = modifier, bottomInset = bottomInset) { pad ->
-        // 顶栏高度作为 contentPadding.top（不是容器 padding）——
-        // 内容初始落在顶栏下方，滚动时穿过顶栏下面，模糊层才有内容可采。
-        val topInset = LocalTopBarInset.current
-        // 滚动终点抬高底栏高度：内容仍可滑到底栏**下方**（玻璃折射成立），
-        // 但最后一项能滚到「不被底栏遮挡」的位置。
-        val scrollLimit = LocalScrollBottomLimit.current
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                top = topInset,
-                bottom = pad.calculateBottomPadding() + scrollLimit,
-            ),
-            content = content,
-        )
-    }
-}
-
-/**
- * 滚动形态骨架：`Column` + `verticalScroll`，内容由调用方给。
- *
- * 与 [AppListScaffold] 的区别只是容器（Column 而非 LazyColumn），
- * **滚动限位 / 顶栏 inset 的处理完全一致** —— 这是本次修正的重点：
- *
- * 此前各滚动页面自己写 `Modifier.fillMaxSize().verticalScroll().padding(pad)`，
- * 而 `pad` 含顶栏高度，等于把内容永久裁在顶栏下方，顶栏的
- * `progressiveTextureBlur` 永远采不到内容 → 模糊看着跟实色没区别。
- * 统一用本骨架后，顶栏高度进 Column 的**首个 spacer**，内容滚动时会
- * 经过顶栏下方，所有滚动页面的渐变模糊才真正生效。
- *
- * @param bottomInset 内容底部额外留白
- */
-@Composable
-fun AppScrollScaffold(
-    title: String,
-    onBack: (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
-    bottomInset: Dp = 24.dp,
-    content: @Composable (PaddingValues) -> Unit,
-) {
-    AppScaffold(title = title, onBack = onBack, modifier = modifier, bottomInset = bottomInset) { pad ->
-        val topInset = LocalTopBarInset.current
-        val scrollLimit = LocalScrollBottomLimit.current
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-        ) {
-            // 顶栏占位：让内容初始位置在顶栏下方，但它是**滚动内容的一部分**，
-            // 不是容器裁剪 —— 内容滚动时会经过顶栏下方，模糊即可采到。
-            Spacer(Modifier.height(topInset))
-            content(pad)
-            Spacer(Modifier.height(pad.calculateBottomPadding() + scrollLimit + bottomInset))
-        }
-    }
-}
-
-/**
- * 主 Tab 根页骨架：有标题但没有返回键（返回由 MainActivity 的 BackHandler 处理）。
- */
-@Composable
-fun AppTabScaffold(
-    title: String,
-    modifier: Modifier = Modifier,
-    bottomInset: Dp = 24.dp,
-    content: @Composable (PaddingValues) -> Unit,
-) = AppScaffold(title = title, onBack = null, modifier = modifier, bottomInset = bottomInset, content = content)

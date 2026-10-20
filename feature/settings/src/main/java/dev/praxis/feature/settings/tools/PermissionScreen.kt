@@ -1,12 +1,10 @@
 package dev.praxis.feature.settings.tools
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -14,6 +12,7 @@ import dev.praxis.core.tool.PermissionTier
 import dev.praxis.core.tool.ToolRisk
 import dev.praxis.core.tool.ToolSpec
 import dev.praxis.core.tool.allows
+import dev.praxis.feature.settings.SettingsList
 import dev.praxis.ui.widgets.MiuixNavigationItemWidget
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -34,9 +33,8 @@ fun PermissionScreen(
     onSelect: (PermissionTier) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(
+    SettingsList(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
     ) {
         item { Spacer(Modifier.height(12.dp)) }
         item { SmallTitle("权限档位") }

@@ -1,0 +1,54 @@
+package dev.praxis.feature.settings
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import dev.praxis.ui.design.component.LocalScrollBottomLimit
+
+/**
+ * 设置类页面的统一滚动容器。
+ *
+ * ## 为什么不让每个页面自己写 `LazyColumn(contentPadding = ...)`
+ *
+ * 因为漏写过的代价很具体：底栏是**浮层**（浮在内容之上，内容从它下方穿过，
+ * 玻璃才有东西可折射），所以内容区不能靠 padding 给它让位 ——
+ * 但**滚动终点**必须抬高，否则最后一项永远滚不到底栏上方，被压住看不见。
+ *
+ * 这个坑真实发生过：8 个设置页全都硬编码 `bottom = 24.dp`，
+ * 而底栏占位是 96dp（`BottomBarSlot`），于是每个设置页的最后一项都被遮住约 72dp。
+ * 聊天页与终端页当时写对了（读了 `LocalScrollBottomLimit`），设置页全漏了。
+ *
+ * 收敛成一个容器后，「以后新增设置页」只要用 [SettingsList] 就不会再漏。
+ *
+ * ## 为什么不是 `AppListScaffold`
+ *
+ * `AppListScaffold` 内部会再套一层 `AppScaffold`（含顶栏与 Scaffold）。
+ * 设置页的顶栏已经由 `:app` 的 `PraxisApp` 提供了，再套一层会出现双顶栏。
+ * 所以这里只做「滚动容器 + 底部让位」，不含任何栏。
+ *
+ * @param bottomExtra 底栏之上再留的呼吸间距。默认 24dp，与改造前各页一致。
+ */
+@Composable
+fun SettingsList(
+    modifier: Modifier = Modifier,
+    bottomExtra: Dp = 24.dp,
+    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    content: LazyListScope.() -> Unit,
+) {
+    // 底栏高度由 :app 通过 LocalBottomBarInset → LocalScrollBottomLimit 下发。
+    // 没装底栏的场景（如将来把某页做成独立 Activity）该值是 0.dp，行为不变。
+    val scrollLimit = LocalScrollBottomLimit.current
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = bottomExtra + scrollLimit),
+        verticalArrangement = verticalArrangement,
+        content = content,
+    )
+}

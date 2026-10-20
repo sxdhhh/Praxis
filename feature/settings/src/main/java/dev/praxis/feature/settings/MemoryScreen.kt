@@ -2,7 +2,6 @@ package dev.praxis.feature.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,9 +40,8 @@ fun MemoryScreen(
     onDelete: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(
+    SettingsList(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         item {
@@ -83,7 +81,7 @@ fun MemoryScreen(
                     }
                 }
             }
-            return@LazyColumn
+            return@SettingsList
         }
 
         items(items, key = { it.id }) { item ->

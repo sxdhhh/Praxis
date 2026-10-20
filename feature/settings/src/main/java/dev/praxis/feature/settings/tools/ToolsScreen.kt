@@ -1,14 +1,12 @@
 package dev.praxis.feature.settings.tools
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -18,6 +16,7 @@ import dev.praxis.core.tool.PermissionTier
 import dev.praxis.core.tool.ToolRisk
 import dev.praxis.core.tool.ToolSpec
 import dev.praxis.core.tool.allows
+import dev.praxis.feature.settings.SettingsList
 import dev.praxis.ui.widgets.MiuixBadge
 import dev.praxis.ui.widgets.MiuixSwitchWidget
 import top.yukonga.miuix.kmp.basic.Card
@@ -44,9 +43,8 @@ fun ToolsScreen(
     onToggle: (name: String, enabled: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(
+    SettingsList(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
     ) {
         item { Spacer(Modifier.height(12.dp)) }
         item { SmallTitle("当前权限：${currentTier.displayName}") }

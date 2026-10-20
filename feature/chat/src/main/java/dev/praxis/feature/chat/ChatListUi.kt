@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.praxis.ui.design.component.LocalScrollBottomLimit
 import dev.praxis.ui.widgets.MiuixNavigationItemWidget
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -38,9 +39,14 @@ fun ChatListScreen(
     onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 底栏是浮层：内容要能从它下方穿过（玻璃才有东西折射），
+    // 但滚动终点必须抬高，否则最后一条会话永远滚不到底栏上方。
+    // 高度由 :app 通过 LocalBottomBarInset → LocalScrollBottomLimit 下发。
+    val scrollLimit = LocalScrollBottomLimit.current
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
+        contentPadding = PaddingValues(bottom = 24.dp + scrollLimit),
     ) {
         item { Spacer(Modifier.height(12.dp)) }
 
