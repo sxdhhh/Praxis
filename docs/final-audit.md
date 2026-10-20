@@ -1,4 +1,4 @@
-# Praxis 最终审计（R15）
+# Praxis 最终审计（R20 更新）
 
 > 对照 `/home/praxis-design/` 五份文档（1069 行）逐条核对。
 > 结论分三类：**已达成** / **主动放弃（附原因）** / **未达成（附缺口）**。
@@ -12,27 +12,26 @@
 |---|---|---|
 | 模块数 | **18** 个 Gradle 项目 | `settings.gradle.kts` |
 | 源码规模 | 125 个 .kt / 14,250 行 | `stat.py` 统计 |
-| 单元测试 | **172 例，0 失败** | 见下表 |
-| `assembleDebug` | 成功，APK 81.4 MB | 8m09s（全量重编） |
-| `lintDebug` | **0 error**（22 informational + 1 warning） | 见「lint 警告」节 |
+| 单元测试 | **187 例，0 失败** | 见下表 |
+| `assembleDebug` | 成功，APK 81.8 MB | 2m56s（增量）/ 8m09s（全量重编） |
+| `lintDebug` | **0 error / 18 warning，全部为版本升级提示** | 见「lint 结论」节 |
 | 版本 | `1.0.0` / versionCode `10` | 合并后 Manifest 实测 |
 | 构建环境 | 本机 proot，`-Xmx1100m`，`--offline` | 单次 2.5–8 分钟 |
 
-### 测试分布（172 例）
+### 测试分布（187 例）
 
 | 模块 | 用例 | 覆盖内容 |
 |---|---:|---|
 | core:model | 5 | 功能块 id 全局唯一、域枚举 |
-| core:ai | 25 | SSE 解析（9）、工具分片累积（8）、错误模型（3）、上下文压缩（5） |
+| core:ai | 28 | SSE 解析（12，含超长丢弃/保留已完整事件/丢弃后可继续）、工具分片累积（8）、错误模型（3）、上下文压缩（5） |
 | core:tool | 25 | 工具层（12）、文件工具（6）、权限状态（7） |
-| core:terminal | 23 | ANSI 扫描（8）、行缓冲（6）、会话（9） |
+| core:terminal | 26 | ANSI 扫描（8）、行缓冲（9，含 pendingWrap 折行不丢字/窄屏宽字符丢弃）、会话（9） |
 | core:memory | 17 | RRF 检索（11）、写入管线（6） |
-| core:workflow | 22 | 条件表达式（7）、模板插值（4）、引擎（11） |
+| core:workflow | 28 | 条件表达式（7）、模板插值（4）、引擎（17，含悬空 nextId 不静默成功/错误标记前缀匹配/合法结束反例） |
 | core:plugin | 13 | Skill 解析（8）、注册表（5） |
 | ui:theme | 5 | 调色板映射 |
-| ui:navigation | 10 | 栈操作、幂等、降级 |
+| ui:navigation | 13 | 栈操作、幂等、降级、ensureSeeded 幂等重入/自定义 seed/不覆盖非空栈 |
 | feature:chat | 9 | 节流写入 |
-| :app | 13 | ToolWorkflowPort（7）、MemoryPortImpl（6） |
 | :app | 13 | ToolWorkflowPort（7）、MemoryPortImpl（6） |
 
 ---
@@ -135,14 +134,36 @@
 | 备份 | 两个 backup 规则文件已全量排除，不存在跨设备解密问题 |
 | 测试 | 5 例（只测判别函数；encrypt/decrypt 需真机 Keystore） |
 
-## 六、lint 唯一警告
+## 六、lint 结论
 
-```
-NotShrinkingResources: If enabling minification, also set isShrinkResources = true
-```
+**0 error / 18 warning。18 条全部是版本升级提示，无代码问题：**
 
-**本轮已修**：release 构建加入 `isShrinkResources = true`。
-下轮跑 lint 该警告应消失。
+| 规则 | 条数 | 含义 |
+|---|---:|---|
+| `NewerVersionAvailable` | 12 | 依赖有更新版本 |
+| `GradleDependency` | 5 | 同上（toml 里声明） |
+| `AndroidGradlePluginVersion` | 1 | Gradle 9.8.2 已发布 |
+
+### 已修掉的代码类告警
+
+| 规则 | 修法 |
+|---|---|
+| `AutoboxingStateCreation` | `remember { mutableStateOf(0) }` → `mutableIntStateOf(0)`，读写同步改 `.intValue` |
+| `MonochromeLauncherIcon` | adaptive-icon 补 `<monochrome>` |
+| `ObsoleteSdkInt`（themes.xml） | 删掉 minSdk 28 下多余的 `tools:targetApi="23"` |
+| `ObsoleteSdkInt`（mipmap 目录） | **无法修**，`app/lint.xml` 按路径压制，原因见下 |
+
+### 为何 mipmap-anydpi-v26 的告警不能按建议修
+
+lint 建议把 `mipmap-anydpi-v26` 并入 `mipmap-anydpi`。**实测照做会让构建直接失败**：
+`AAPT: error: resource mipmap/ic_launcher not found`（AGP 不把无 SDK 限定符的 anydpi
+目录当作 mipmap 资源）。目录级 `tools:ignore` 对 folder 类告警无效，只能在 `app/lint.xml` 里
+按路径压制。
+
+### 一个曾长期存在的统计错误
+
+早前用 SARIF 的 `results[].level` 统计严重度，而该字段在本项目里恒为 `none`，
+于是每轮都误报「lint 零警告」。**正确口径是 XML 报告的 `severity` 属性**。
 
 ---
 
