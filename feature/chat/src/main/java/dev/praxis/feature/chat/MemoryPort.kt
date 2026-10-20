@@ -20,6 +20,18 @@ interface MemoryPort {
      */
     suspend fun recall(query: String, limit: Int = DEFAULT_LIMIT): List<String>
 
+    /**
+     * 把 [content] 写为一条长期记忆。
+     *
+     * 为什么不给聊天层完整的 MemoryStore：聊天层只需要「记住这句话」与
+     * 「想起相关的话」两个动作，不需要删除 / 遍历 / 改标签。
+     * 暴露得越窄，它犯错的面就越小。
+     *
+     * 去重与长度校验都在 MemoryWritePipeline 里（实现方），
+     * 聊天层不需要预先判断「这条值不值得记」。
+     */
+    suspend fun remember(content: String)
+
     companion object {
         /**
          * 注入上下文的最大条数。

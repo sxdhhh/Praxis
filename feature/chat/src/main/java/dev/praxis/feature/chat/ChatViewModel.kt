@@ -231,6 +231,39 @@ class ChatViewModel(
     }
 
     /**
+     * 把本轮回答沉淀为长期记忆——**带筛选**。
+     *
+     * ## 为什么不能每轮都记
+     *
+     * 模型每轮都会输出几百字。如果全部写入：
+     *  - 记忆库一周内漲到几千条，RRF 全是噪声；
+     *  - 「用户喜欢喝咖啡」和「这段代码的第 3 行有个拼写错误」被同等对待，
+     *    而后者明天就过时了。
+     *
+     * 筛选只能做最粗略的启发式（长度 + 是否含具体事实词），因为一次语义判断
+     * 要一次模型调用，写入就变成慢操作。宁可少记，也不要记一堆垃圾。
+     *
+     * ## 不记哪些
+     *
+     * - 太短（< 12 字）：通常是「好的」「已处理」这类过程话；
+     * - 太长（> 300 字）：不是一条事实，而是整段教程，应让用户自己决定要不要存；
+     * - 含省略号/「我无法」等拒绝句：这些是模型的边界说明，不是被事实。
+     */
+    private fun rememberIfWorth(assistantText: String) {
+        val port = memoryPort ?: return
+        val text = assistantText.trim()
+        if (text.length < 12 || text.length > 300) return
+
+        // 拒绝/免责类回答不做记忆：明天再问它还是会拒，存下来只是噪声。
+        val noise = listOf("无法", "不能", "抱歉", "I can't", "I cannot", "sorry")
+        if (noise.any { it in text }) return
+
+        persistScope.launch {
+            runCatching { port.remember(text) }
+        }
+    }
+
+    /**
      * 把相关记忆作为一条 system 消息插到对话最前面。
      *
      * ## 四个设计决定
@@ -300,6 +333,7 @@ class ChatViewModel(
                                     role = ChatRole.Assistant,
                                     text = buffer.toString(),
                                 )
+                                rememberIfWorth(buffer.toString())
                             }
                         }
                     }

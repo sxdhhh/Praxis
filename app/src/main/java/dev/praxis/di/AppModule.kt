@@ -51,6 +51,7 @@ val appModule = module {
         dev.praxis.data.MemoryPortImpl(
             store = get(),
             retriever = get(),
+            pipeline = get(),
         )
     }
 

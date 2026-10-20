@@ -23,6 +23,7 @@ import dev.praxis.feature.chat.MemoryPort
 class MemoryPortImpl(
     private val store: MemoryStore,
     private val retriever: MemoryRetriever,
+    private val pipeline: dev.praxis.core.memory.MemoryWritePipeline,
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) : MemoryPort {
 
@@ -36,4 +37,14 @@ class MemoryPortImpl(
                 )
                 .map { it.item.content }
         }.getOrDefault(emptyList())
+
+    /**
+     * 写入记忆。
+     *
+     * 同样兜住异常：写记忆失败不该影响对话（用户要的是回复，不是
+     * 「因为记忆库满了所以这轮发送失败」）。
+     */
+    override suspend fun remember(content: String) {
+        runCatching { pipeline.write(content) }
+    }
 }
