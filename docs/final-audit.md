@@ -110,10 +110,35 @@ PraxisBottomBar  底色转全透明，玻璃负责全部背景
 ```sh
 python3 tools/audit_unwired.py            # 报告
 python3 tools/audit_unwired.py --strict   # CI 用，有新增未接线项则退出 1
-
 ```
 
 白名单 `KNOWN_UNWIRED` 必须写原因；已接线的项若不从白名单删除，脚本会主动报「白名单过期」。
+
+### 第二个审计脚本：滚动终点（`tools/audit_scroll_inset.py`）
+
+底栏是**浮层**，由此推出两条必须同时满足的约束：
+
+1. 内容区**容器**不能给底栏留 padding（否则内容整体被抬高，什么都不从底栏下经过，玻璃无物可折射）；
+2. 滚动**终点**必须抬高 `LocalScrollBottomLimit`（否则最后一项永远滚不到底栏上方）。
+
+第 2 条曾漏掉一整批：**8 个设置页 + 会话列表页**全都硬编码 `bottom = 24.dp`，
+而底栏占位是 96dp —— 每页最后一项被压住约 72dp。聊天页与终端页当时写对了，设置页全漏。
+
+这种缺陷单测看不见（布局问题），lint 也不报（语法完全合法）。所以另有脚本兜住：
+
+```sh
+python3 tools/audit_scroll_inset.py --strict
+```
+
+修法：8 个设置页统一改用 `SettingsList`（内部读 `LocalScrollBottomLimit`），
+会话列表页直接读该 Local。**新增设置页只要用 `SettingsList` 就不会再漏。**
+
+### 顺带删掉一个会诱发 bug 的 API
+
+`AppListScaffold` / `AppScrollScaffold` / `AppTabScaffold` 三个变体已删除。
+它们内部都再套一层 `AppScaffold`，而顶栏由 `:app` 的 `PraxisApp` 统一提供 ——
+任何页面套用都会出现**双顶栏**。零调用的原因不是「还没迁移」，而是**它们与架构冲突**。
+留着只会诱使后来者踩坑。`ui:design` 现在只暴露 `AppScaffold` 一个栏层。
 
 ---
 
