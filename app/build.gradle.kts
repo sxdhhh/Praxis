@@ -124,6 +124,7 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:ai"))
     implementation(project(":core:tool"))
+    implementation(project(":core:memory"))
     implementation(project(":ui:theme"))
     implementation(project(":ui:design"))
     implementation(project(":ui:widgets"))

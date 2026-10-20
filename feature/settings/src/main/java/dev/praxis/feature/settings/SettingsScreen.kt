@@ -18,6 +18,7 @@ enum class SettingsEntry(val key: String, val title: String, val summary: String
     Appearance("appearance", "外观", "主题、取色与调色板"),
     Tools("tools", "工具", "已注册工具与启用开关"),
     Model("model", "模型", "服务商、密钥与参数"),
+    Memory("memory", "记忆", "长期记忆条目与引用次数"),
     Speech("speech", "语音", "TTS 与语音输入"),
     Permission("permission", "权限", "工具调用的授权策略"),
     Packages("packages", "扩展包", "工具包与插件"),

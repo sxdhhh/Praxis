@@ -19,23 +19,40 @@ import org.koin.dsl.module
 val appModule = module {
 
     single {
-        // S5：破坏性迁移只在 debug 打开 —— 开发期改 schema 不用写迁移脚本；
-        // release 保持严格，一旦 schema 变了却没迁移，装机时直接抛异常暴露问题，
-        // 而不是静默把用户的会话表清空。
-        val builder = Room.databaseBuilder(
+        // ## 从 v3 起**不再用破坏性迁移**（包括 debug）
+        //
+        // 之前 debug 用 fallbackToDestructiveMigration 是为了省迁移脚本，
+        // 但 v3 增加了长期记忆表：记忆一旦被清空就永久丢失，用户无从得知
+        // 「为什么它忘了我上个月说的事」。这类数据不能靠「开发期偷懒」来换便利。
+        //
+        // 所以两个构建类型都走显式迁移：schema 改了却没写迁移，就让它启动即崩，
+        // 在开发阶段暴露，而不是在用户设备上静默清数据。
+        Room.databaseBuilder(
             androidContext(),
             PraxisDatabase::class.java,
             "praxis.db",
         )
-        if (BuildConfig.DEBUG) {
-            builder.fallbackToDestructiveMigration(dropAllTables = true).build()
-        } else {
-            builder.build()
-        }
+            .addMigrations(PraxisDatabase.MIGRATION_2_3)
+            .build()
     }
 
     single<SessionDao> { get<PraxisDatabase>().sessionDao() }
     single<dev.praxis.data.db.MessageDao> { get<PraxisDatabase>().messageDao() }
+    single<dev.praxis.data.db.MemoryDao> { get<PraxisDatabase>().memoryDao() }
+
+    // 记忆存储端口（实现在 :app，契约在 core:memory）。
+    single<dev.praxis.core.memory.MemoryStore> {
+        dev.praxis.data.RoomMemoryStore(get())
+    }
+    single { dev.praxis.core.memory.MemoryRetriever() }
+    single { dev.praxis.core.memory.MemoryWritePipeline(get()) }
+    // 聊天层只拿单向端口（只管读），不让它写记忆。
+    single<dev.praxis.feature.chat.MemoryPort> {
+        dev.praxis.data.MemoryPortImpl(
+            store = get(),
+            retriever = get(),
+        )
+    }
 
     // 会话/消息持久化。Repository 负责 orderIndex 与 updatedAt 的成对维护，
     // ChatPersistence 只是给 feature:chat 的端口适配。

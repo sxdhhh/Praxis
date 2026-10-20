@@ -51,6 +51,13 @@ class ChatViewModel(
      */
     private val chatRepository: ChatPersistence? = null,
     private val sessionId: String = "default",
+    /**
+     * 长期记忆检索端口。null 表示不注入记忆（单测与纯 UI 预览用）。
+     *
+     * 用可空而不是强制注入的理由与 [chatRepository] 一致：
+     * ViewModel 的单测不应该被迫起一个 Room 实例。
+     */
+    private val memoryPort: MemoryPort? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatState())
@@ -223,6 +230,34 @@ class ChatViewModel(
         startStream(assistantId)
     }
 
+    /**
+     * 把相关记忆作为一条 system 消息插到对话最前面。
+     *
+     * ## 四个设计决定
+     *
+     * 1. **拼成一条 system 而不是 N 条**：某些兼容层只认第一条 system
+     *    （甚至只认开头那条），多条 system 会被后面的覆盖。
+     * 2. **插在最前而不是最后**：插在最后等于告诉模型「这是最新指令」，
+     *    记忆会被当成命令执行（比如记忆里存了「以后都用英文回我」）。
+     * 3. **失败就当没有记忆**：检索抛异常不能阻断发送。用户要的是回答，
+     *    不是「因为记忆库坏了所以发不出去」。
+     * 4. **命中为空就不插**：空 system 会让模型困惑，也会白占 token。
+     */
+    private suspend fun withMemory(messages: List<ChatMessage>): List<ChatMessage> {
+        val port = memoryPort ?: return messages
+
+        // 用最后一条用户消息做查询：它代表「用户现在想知道什么」。
+        val query = messages.lastOrNull { it.role == ChatRole.User }?.text ?: return messages
+        if (query.isBlank()) return messages
+
+        val recalled = runCatching { port.recall(query) }.getOrDefault(emptyList())
+        if (recalled.isEmpty()) return messages
+
+        val block = recalled.joinToString(separator = "\n", prefix = "以下是关于用户的已知事实，仅在相关时参考：\n") { "- $it" }
+
+        return listOf(ChatMessage(role = ChatRole.System, text = block)) + messages
+    }
+
     private fun startStream(assistantId: Long) {
         streamingJob?.cancel()
         streamingJob = viewModelScope.launch {
@@ -232,7 +267,7 @@ class ChatViewModel(
                     .stream(
                         ChatRequest(
                             model = model,
-                            messages = history.toList(),
+                            messages = withMemory(history.toList()),
                             tools = buildToolDescriptors(),
                         ),
                     )

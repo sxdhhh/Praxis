@@ -49,6 +49,8 @@ fun FeatureHost(
     settingsRepository: SettingsRepository,
     chatViewModel: ChatViewModel,
     chatPersistence: ChatPersistence,
+    /** 记忆存储。设置域的记忆页要用；由 :app 注入。 */
+    memoryStore: dev.praxis.core.memory.MemoryStore,
     onOpenSession: (String) -> Unit,
     toolSpecs: List<dev.praxis.core.tool.ToolSpec>,
     currentTier: dev.praxis.core.tool.PermissionTier,
@@ -92,6 +94,7 @@ fun FeatureHost(
                 onTierChange = onTierChange,
                 onToolToggle = onToolToggle,
                 onOpen = onSettingsEntry,
+                memoryStore = memoryStore,
                 modifier = modifier,
             )
 

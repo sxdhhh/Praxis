@@ -32,6 +32,8 @@ fun SettingsHost(
     onTierChange: (dev.praxis.core.tool.PermissionTier) -> Unit,
     onToolToggle: (String, Boolean) -> Unit,
     onOpen: (SettingsEntry) -> Unit,
+    /** 记忆存储。由 :app 注入，与 repository 同口径。 */
+    memoryStore: dev.praxis.core.memory.MemoryStore,
     modifier: Modifier = Modifier,
 ) {
     val entry = SettingsEntry.byKey(entryKey)
@@ -44,6 +46,8 @@ fun SettingsHost(
         SettingsEntry.Appearance -> AppearanceRoute(repository, modifier)
 
         SettingsEntry.Model -> ModelRoute(repository, modifier)
+
+        SettingsEntry.Memory -> MemoryRoute(memoryStore, modifier)
 
         SettingsEntry.Tools -> dev.praxis.feature.settings.tools.ToolsScreen(
             tools = toolSpecs,
