@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  lint 配置。原则：只压「有实测证据说明无法修」的告警，且必须按路径精确限定。
+  不加任何全局 ignore —— 那会让以后的真问题一起消失。
+-->
+<lint>
+
+    <!--
+      mipmap-anydpi-v26 的 ObsoleteSdkInt。
+
+      lint 认为 minSdk 28 时 -v26 限定符多余，建议并入 mipmap-anydpi。
+      但实测照做会让 AAPT 报 `resource mipmap/ic_launcher not found`
+      （AGP 不接受无 SDK 限定符的 anydpi 目录作为 mipmap 资源），构建直接失败。
+      两者互斥，取「能打包」，在此按路径压制。
+    -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+
+</lint>

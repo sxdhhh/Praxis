@@ -21,6 +21,19 @@ class SseParser {
     private val pending = StringBuilder()
 
     /**
+     * 是否因超长而丢弃过残留缓冲。
+     *
+     * 缓冲装的是「还没遇到空行的所有字节」。上游若发来永不结束的超长数据
+     * （异常网关、代理注入 HTML 错误页、被劫持的响应），它会随连接时长无限增长。
+     * 到上限就清空并置位，让上层看到「这段流没有产出」，
+     * 而不是把进程撑到 OOM。
+     */
+    private var droppedOversize: Boolean = false
+
+    /** 是否因超长丢弃过数据（诊断用）。 */
+    fun didDropOversize(): Boolean = droppedOversize
+
+    /**
      * 喂入一段文本，返回本次可以确定完整的 data 负载列表。
      *
      * 只关心 `data:` 字段（OpenAI 兼容协议）；`event:` / `id:` / `retry:` 一律忽略，
@@ -28,6 +41,23 @@ class SseParser {
      */
     fun feed(chunk: String): List<String> {
         pending.append(chunk)
+
+        // 超长保护：若已积到上限仍无事件边界，说明上游异常（网关注入错误页等）。
+        if (pending.length > MAX_PENDING_CHARS) {
+            val salvaged = mutableListOf<String>()
+            while (true) {
+                val end = indexOfEventBoundary(pending)
+                if (end < 0) break
+                val raw = pending.substring(0, end)
+                pending.delete(0, end + boundaryLength(pending, end))
+                extractData(raw)?.let(salvaged::add)
+            }
+            if (pending.length > MAX_PENDING_CHARS) {
+                pending.setLength(0)
+                droppedOversize = true
+            }
+            return salvaged
+        }
         val out = mutableListOf<String>()
 
         while (true) {
@@ -81,4 +111,15 @@ class SseParser {
 
     private fun boundaryLength(sb: StringBuilder, at: Int): Int =
         if (sb[at] == '\r') 4 else 2
+
+    companion object {
+        /**
+         * 残留缓冲上限（字符）。
+         *
+         * 1 MB：正常 OpenAI 兼容流的单个事件是几百字节到几 KB，
+         * 一条 3000 字的回复会拆成上百个小事件，没有一个会接近 1 MB。
+         * 真到 1 MB 还没见到空行，那就是上游异常。
+         */
+        const val MAX_PENDING_CHARS = 1_000_000
+    }
 }

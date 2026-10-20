@@ -77,4 +77,31 @@ class SseParserTest {
         assertTrue(p.feed("").isEmpty())
         assertTrue(p.finish().isEmpty())
     }
+
+    @Test
+    fun `oversize pending without boundary is dropped and flagged`() {
+        val p = SseParser()
+        // 模拟异常网关：只吐字节，永不发空行，缓冲会一直涨。
+        val junk = "x".repeat(SseParser.MAX_PENDING_CHARS + 1)
+        assertTrue(p.feed(junk).isEmpty())
+        assertTrue(p.didDropOversize())
+    }
+
+    @Test
+    fun `complete events before oversize junk are still salvaged`() {
+        val p = SseParser()
+        val junk = "y".repeat(SseParser.MAX_PENDING_CHARS + 1)
+        // 关键语义：超长保护不能把「已经完整的事件」一起吞掉。
+        assertEquals(listOf("ok"), p.feed("data: ok\n\n" + junk))
+        assertTrue(p.didDropOversize())
+    }
+
+    @Test
+    fun `parser keeps working after dropping oversize junk`() {
+        val p = SseParser()
+        p.feed("z".repeat(SseParser.MAX_PENDING_CHARS + 1))
+        assertTrue(p.didDropOversize())
+        // 丢弃后缓冲已清空，后续正常流必须继续可用。
+        assertEquals(listOf("{\"a\":1}"), p.feed("data: {\"a\":1}\n\n"))
+    }
 }

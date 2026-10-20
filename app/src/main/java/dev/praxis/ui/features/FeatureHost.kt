@@ -252,10 +252,10 @@ private fun ChatListRoute(
         androidx.compose.runtime.mutableStateOf<List<SessionItem>>(emptyList())
     }
     val reloadTick = androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(0)
+        androidx.compose.runtime.mutableIntStateOf(0)
     }
 
-    androidx.compose.runtime.LaunchedEffect(reloadTick.value) {
+    androidx.compose.runtime.LaunchedEffect(reloadTick.intValue) {
         sessions.value = runCatching { persistence.listSessions() }.getOrDefault(emptyList())
     }
 
@@ -266,7 +266,7 @@ private fun ChatListRoute(
         onDelete = { id ->
             scope.launch {
                 runCatching { persistence.deleteSession(id) }
-                reloadTick.value++
+                reloadTick.intValue++
             }
         },
         modifier = modifier,

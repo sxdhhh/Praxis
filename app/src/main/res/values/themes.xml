@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:tools="http://schemas.android.com/tools">
+<resources>
 
     <!-- 基础主题：Compose 接管全部绘制，这里只负责窗口层。 -->
     <style name="Theme.Praxis" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar" tools:targetApi="23">true</item>
+        <!-- 不写 tools:targetApi：minSdk 已 28，该属性必然存在，
+             多余的 SDK 标注本身会被 lint 判成 ObsoleteSdkInt。 -->
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 
     <style name="Theme.Praxis.Starting" parent="Theme.SplashScreen">

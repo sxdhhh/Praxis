@@ -28,6 +28,7 @@ import dev.praxis.ui.navigation.PraxisNavHost
 import dev.praxis.ui.navigation.PraxisRoute
 import dev.praxis.ui.navigation.PraxisRoutes
 import dev.praxis.ui.navigation.currentRoute
+import dev.praxis.ui.navigation.ensureSeeded
 import dev.praxis.ui.navigation.pushRoute
 import dev.praxis.ui.navigation.switchDomain
 import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
@@ -112,6 +113,13 @@ fun PraxisApp(
     // rememberNavBackStack(PraxisRoutes.home(...)) 会把 T 推导成 Home 的具体类型，
     // 整个 sealed 层次进化不出来，存栈时直接抛 SerializationException。
     val backStack = rememberNavBackStack<PraxisRoute>(PraxisRoutes.home(PraxisDomain.CHAT))
+
+    // 恢复兜底：seed 只在「首次创建」时生效，进程被回收后由 Saver 解出的栈
+    // 若为空（序列化格式变更、栈内容不可反序列化而被跳过），`NavDisplay` 内部的
+    // `require(backStack.isNotEmpty())` 会直接抛异常 —— 表现为启动白屏崩溃。
+    // 这里在渲染前补一层，与 NavDisplay 之间不留空隙。
+    // 幂等（isEmpty 才写），重组期反复执行不产生额外状态变更。
+    backStack.ensureSeeded()
 
     val route: PraxisRoute = backStack.currentRoute() ?: PraxisRoutes.home(PraxisDomain.CHAT)
     val activeDomain = route.domain

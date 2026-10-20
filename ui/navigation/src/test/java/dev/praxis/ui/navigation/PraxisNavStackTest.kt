@@ -105,6 +105,37 @@ class PraxisNavStackTest {
     }
 
     @Test
+    fun `ensureSeeded is idempotent across repeated calls`() {
+        // 生产接线点会在每次重组时执行，必须能安全重入。
+        val s = navBackStackOf()
+        repeat(5) { s.ensureSeeded() }
+
+        assertEquals(1, s.size)
+        assertEquals(PraxisRoutes.home(PraxisDomain.CHAT), s.currentRoute())
+    }
+
+    @Test
+    fun `ensureSeeded honors a custom seed`() {
+        val s = navBackStackOf()
+        s.ensureSeeded(PraxisRoutes.home(PraxisDomain.SETTINGS))
+
+        assertEquals(PraxisRoutes.home(PraxisDomain.SETTINGS), s.currentRoute())
+    }
+
+    @Test
+    fun `ensureSeeded never overwrites a non-empty stack`() {
+        // 关键：恢复出来的栈若只有一个子页，不能被 seed 顶掉。
+        val s = navBackStackOf()
+        val only = PraxisRoutes.detail(PraxisDomain.CHAT, "list", "会话列表")
+        s.add(only)
+
+        s.ensureSeeded()
+
+        assertEquals(1, s.size)
+        assertEquals(only, s.currentRoute())
+    }
+
+    @Test
     fun `currentRoute is null for a non-Praxis key`() {
         val s = navBackStackOf()
         assertNull(s.currentRoute())

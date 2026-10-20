@@ -122,6 +122,13 @@ android {
         // 不检查依赖包内部：miuix / Compose AAR 里的问题不归本项目修，
         // 打开只会让 CI 长期红着，掩盖自己代码里的真问题。
         checkDependencies = false
+
+        // 唯一豁免：ObsoleteSdkInt 对 `mipmap-anydpi-v26` 的报告。
+        // 实测把目录改名成 `mipmap-anydpi`（去掉 -v26）会让 AAPT 直接报
+        // `resource mipmap/ic_launcher not found` —— AGP 不把无 SDK 限定符的
+        // anydpi 目录当作 mipmap 资源。二者只能取一，取「能打包」。
+        // 目录级 tools:ignore 对 folder 配置类告警无效，只能在这里按路径压制。
+        lintConfig = file("lint.xml")
     }
 
     testOptions {
