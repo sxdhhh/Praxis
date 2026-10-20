@@ -27,8 +27,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import dev.praxis.ui.widgets.theme.miuixSheetCardColors
+import dev.praxis.ui.theme.PraxisMotion
 import dev.praxis.ui.widgets.R
+import dev.praxis.ui.widgets.theme.miuixSheetCardColors
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardColors
@@ -143,8 +144,11 @@ fun <T> MiuixDraggableList(
                     0f
                 }
 
+                // 拖动让位是「位置跟随」，用 Follow 弹簧而不是默认规格：
+                // 默认 spring 偏软，快速上下拖时会让位明显滞后、看着像粘手。
                 val animatedTranslationY by animateFloatAsState(
                     targetValue = translationY,
+                    animationSpec = PraxisMotion.Springs.Follow(),
                     label = "miuix_drag_anim",
                 )
                 val finalTranslationY = if (isDragged) {

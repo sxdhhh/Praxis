@@ -11,19 +11,19 @@
 | 项 | 结果 | 证据 |
 |---|---|---|
 | 模块数 | **18** 个 Gradle 项目 | `settings.gradle.kts` |
-| 源码规模 | 129 个 .kt / 15,052 行 | 递归统计（排除 build/） |
-| 单元测试 | **187 例，0 失败** | 见下表 |
+| 源码规模 | 132 个 .kt / 15,440 行 | 递归统计（排除 build/） |
+| 单元测试 | **203 例，0 失败** | 见下表 |
 | `assembleDebug` | 成功，APK 81.8 MB | 2m56s（增量）/ 8m09s（全量重编） |
 | `lintDebug` | **0 error / 18 warning，全部为版本升级提示** | 见「lint 结论」节 |
 | 版本 | `1.0.0` / versionCode `10` | 合并后 Manifest 实测 |
 | 构建环境 | 本机 proot，`-Xmx1100m`，`--offline` | 单次 2.5–8 分钟 |
 
-### 测试分布（187 例）
+### 测试分布（203 例）
 
 | 模块 | 用例 | 覆盖内容 |
 |---|---:|---|
 | core:model | 5 | 功能块 id 全局唯一、域枚举 |
-| core:ai | 28 | SSE 解析（12，含超长丢弃/保留已完整事件/丢弃后可继续）、工具分片累积（8）、错误模型（3）、上下文压缩（5） |
+| core:ai | 44 | SSE 解析（12）、工具分片累积（8）、错误模型（3）、压缩策略（5）、**上下文预算与装配（16）** |
 | core:tool | 25 | 工具层（12）、文件工具（6）、权限状态（7） |
 | core:terminal | 26 | ANSI 扫描（8）、行缓冲（9，含 pendingWrap 折行不丢字/窄屏宽字符丢弃）、会话（9） |
 | core:memory | 17 | RRF 检索（11）、写入管线（6） |
@@ -43,9 +43,9 @@
 | 期 | 验收点 | 状态 | 落点 |
 |---|---|:-:|---|
 | P1 | 顶部渐变模糊 | 已达成 | `AppScaffold` 的 `progressiveTextureBlur` |
-| P1 | 底栏玻璃折射 | 已达成 | `LocalKyantBackdrop` + kyant backdrop 2.0.1 |
+| P1 | 底栏玻璃折射 | **未达成** | 底栏用 miuix `FloatingNavigationBar` 的实色 `surface`；kyant 玻璃层 701 行零接线 |
 | P1 | 低版本降级 | 已达成 | `LowAppScaffold` + `LowFrostedTopBar` |
-| P2 | 丝滑滚动（到顶/到底） | 已达成 | `AutoFollowScroll` / `AutoFollowScrollLazy` |
+| P2 | 丝滑滚动（到顶/到底） | 已达成（仅 Lazy 版） | `AutoFollowScrollLazy`（Chat/Terminal 已用）；非 Lazy 版零调用 |
 | P2 | 拖拽列表防回流 | 已达成 | `isWaitingForUpdate` 守卫 |
 | P2 | 对话框关闭动画不跳过 | 已达成 | `LocalDismissState` |
 | P3 | 流式打字机效果 | 已达成 | `AiStreamEvent.Delta` + 同一气泡改文本 |
@@ -61,6 +61,31 @@
 
 **注意**：这里说的是「代码存在且通过单测」，**不等于真机视觉验收通过**。
 视觉类（模糊、玻璃、动画）只能装机后确认，本轮未装机。
+
+### 本轮（R21）修正：上表中两项此前标错了
+
+此前把「底栏玻璃折射」写成「已达成」，依据是 `LocalKyantBackdrop` + kyant backdrop 依赖
+都存在。**这是错的**：依赖与工具函数存在 ≠ 已接线。实测结论：
+
+| 事实 | 证据 |
+|---|---|
+| 底栏没有任何 backdrop 代码 | `PraxisBottomBar.kt` 只有 miuix 的 `FloatingNavigationBar(color=surface)` |
+| `LocalKyantBackdrop` 从未被 provide | 全仓 `CompositionLocalProvider` 无一提供它 |
+| 玻璃控件全走纯色回退 | `rememberPageBackdropOrFallback` 自身零调用 |
+| `LiquidToggle` / `LiquidSlider` 压根不存在 | 只在 KDoc 里被提到 |
+| 701 行 kyant 液态玻璃代码全零接线 | `tools/audit_unwired.py` |
+
+### 为什么会漏掉：单测验证不了「有没有人调」
+
+同类事故已发生三次（`MemoryWritePipeline`、`ensureSeeded`、本轮这批），每次都单测全绿。
+已把静态引用扫描固化进 `tools/audit_unwired.py`：
+
+```sh
+python3 tools/audit_unwired.py            # 报告
+python3 tools/audit_unwired.py --strict   # CI 用，有新增未接线项则退出 1
+```
+
+白名单 `KNOWN_UNWIRED` 必须写原因；已接线的项若不从白名单删除，脚本会主动报「白名单过期」。
 
 ---
 

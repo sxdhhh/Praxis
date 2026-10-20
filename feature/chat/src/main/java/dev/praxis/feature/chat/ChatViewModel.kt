@@ -10,6 +10,7 @@ import dev.praxis.core.ai.AiStreamEvent
 import dev.praxis.core.ai.ChatMessage
 import dev.praxis.core.ai.ChatRequest
 import dev.praxis.core.ai.ChatRole
+import dev.praxis.core.ai.ContextAssembler
 import dev.praxis.core.tool.descriptorsFor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -335,7 +336,7 @@ class ChatViewModel(
                     .stream(
                         ChatRequest(
                             model = model,
-                            messages = withMemory(withSkills(history.toList())),
+                            messages = ContextAssembler.assemble(withMemory(withSkills(history.toList()))),
                             tools = buildToolDescriptors(),
                         ),
                     )
