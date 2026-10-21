@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.praxis.ui.design.component.LocalScrollBottomLimit
+import dev.praxis.ui.design.component.LocalTopBarInset
 import dev.praxis.ui.widgets.MiuixNavigationItemWidget
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -43,10 +44,18 @@ fun ChatListScreen(
     // 但滚动终点必须抬高，否则最后一条会话永远滚不到底栏上方。
     // 高度由 :app 通过 LocalBottomBarInset → LocalScrollBottomLimit 下发。
     val scrollLimit = LocalScrollBottomLimit.current
+    // 顶部内边距：内容初始位置要落在顶栏下方，否则「历史会话」会被顶栏压住。
+    // 顶栏高度由 AppScaffold 通过 LocalTopBarInset 下发（含状态栏）。
+    // 用 contentPadding 而不是容器 padding：滚动时内容能穿过顶栏下方，
+    // 顶栏的渐变模糊才有内容可采。
+    val topInset = LocalTopBarInset.current
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp + scrollLimit),
+        contentPadding = PaddingValues(
+            top = topInset,
+            bottom = 24.dp + scrollLimit,
+        ),
     ) {
         item { Spacer(Modifier.height(12.dp)) }
 

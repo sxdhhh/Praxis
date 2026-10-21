@@ -62,7 +62,10 @@ fun ChatScreen(
                 start = 16.dp,
                 end = 16.dp,
                 top = topInset + 12.dp,
-                bottom = 12.dp,
+                // 底部限位：滚动区只是「给输入栏让位」不够 —— 输入栏本身也向上抬了
+                // scrollLimit（浮层底栏高度），所以列表最后一条会被底栏压住。
+                // 这里再加一次 scrollLimit，最后一条才能滚到输入栏上方。
+                bottom = 12.dp + scrollLimit,
             ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {

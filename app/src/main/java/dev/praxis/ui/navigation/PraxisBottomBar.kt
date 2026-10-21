@@ -1,47 +1,46 @@
 package dev.praxis.ui.navigation
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.praxis.domain.model.PraxisDomain
+import dev.praxis.ui.design.glass.FloatingBottomBar
+import dev.praxis.ui.design.glass.FloatingBottomBarDefaults
+import dev.praxis.ui.design.glass.FloatingBottomBarMode
+import dev.praxis.ui.design.glass.GlassBackend
+import dev.praxis.ui.design.glass.LocalPageBackdrop
 import dev.praxis.ui.icons.PraxisIcons
-import top.yukonga.miuix.kmp.basic.FloatingNavigationBar
-import top.yukonga.miuix.kmp.basic.FloatingNavigationBarItem
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 浮层底栏。
+ * 浮层底栏：直接使用从 InstallerX-Revived 移植的 [FloatingBottomBar]。
  *
- * ## 三条硬约束（既有项目踩过的坑）
+ * ## 为什么不再自己写
  *
- *  1. **底栏是浮层，内容从下方穿过**：不能靠给内容区加 padding 抬高来「让位」。
- *     内容必须真的从底栏底下经过，玻璃才有东西可折射。
- *  2. **玻璃只在 API 33+ 启用**：miuix-blur 的 AAR 声明 `minSdk=33`，低版本
- *     碰它就会 `NoClassDefFoundError`。分流判断在 [rememberBottomBarBackdrop] 里。
- *  3. **采样源来自页面内容层**，不能让底栏自己建。底栏在内容之上、内部没有内容，
- *     自建 backdrop 采到的是它自己 —— 折射出来只是一块半透明实色。
- *     采样源由 `AppScaffold` 通过 `LocalPageBackdrop` 下发。
+ * 自己写的那版有两个真问题（装机后立刻暴露）：
+ *  1. 把 miuix `FloatingNavigationBar` 的 `color` 设成透明、指望玻璃撑背景，
+ *     结果**整条底栏消失**；
+ *  2. 没有独立的选中指示器层，看着「死板」，也没有拖拽切换 / 按压放大 / 镜面高光。
  *
- * ## 本文件不 import 任何 miuix-blur 类型
+ * 上游 `FloatingBottomBar` 是 583 行的成熟实现（含拖拽切换 tab、按压形变、
+ * 重力感应高光、三层背景结构），这些细节自己重写必然再踩一遍坑。
  *
- * 玻璃相关代码全部封在 `BottomBarGlass.kt` 里。这里只调
- * [rememberBottomBarBackdrop] 与 [bottomBarGlass] 两个函数，
- * 且 `backdrop` 为 null 时后者立即返回空 Modifier —— 这样 API 28–32 的设备上，
- * 引用 `android.graphics.RuntimeShader` 的类**永远不会被解析**。
+ * ## 低版本怎么办
  *
- * ## miuix 0.9.4 真实签名（核对过，勿凭印象写）
+ * `FloatingBottomBar` 的液体玻璃依赖 RuntimeShader（API 33+）。
+ * [GlassBackend.useLowPipeline] 为真时传 [FloatingBottomBarMode.None]，
+ * 走实色分支 —— 那个分支不碰任何 blur 类，低版本安全。
  *
- *  - `FloatingNavigationBar(modifier, color, cornerRadius, horizontalAlignment, ...)`
- *  - `FloatingNavigationBarItem(selected, onClick, icon: ImageVector, label: String, ...)`
- *    注意 `label` 是 String，不是 composable 槽。
+ * ## 采样源
  *
- * ## 玻璃为什么画在 `modifier` 里而不是替换 `color`
- *
- * `FloatingNavigationBar` 只收 `color: Color`，没有背景槽。它内部的顺序是
- * `squircleBackground(color) → then(modifier)`，所以传进 `modifier` 的
- * `drawBackdrop` 会画在底色**之上**。于是玻璃生效时把 `color` 设为全透明，
- * 由 `drawBackdrop` 负责全部背景。
+ * `backdrop` 必须来自页面内容层（`LocalPageBackdrop`，由 AppScaffold 下发）。
+ * 底栏在内容之上，自建采样源只会采到自己。
+ * 未下发时（低版本）同样走实色分支。
  */
 @Composable
 fun PraxisBottomBar(
@@ -49,36 +48,85 @@ fun PraxisBottomBar(
     onSelect: (PraxisDomain) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // 四个 Tab 是硬约束（WeKit/老挂 同款 76.dp 最小宽度，四 tab 才排得下）：
-    // 工具与终端都是「动手」类，各占一个会让底栏超宽；这里让终端上位，
-    // 工具页仍从设置入口进入（设置首页已登记 Tools 条目）。
     val items = listOf(
-        PraxisDomain.CHAT to PraxisIcons.Chat,
-        PraxisDomain.TERMINAL to PraxisIcons.Terminal,
-        PraxisDomain.MEMORY to PraxisIcons.Memory,
-        PraxisDomain.SETTINGS to PraxisIcons.Settings,
+        PraxisDomain.CHAT,
+        PraxisDomain.TERMINAL,
+        PraxisDomain.MEMORY,
+        PraxisDomain.SETTINGS,
     )
 
-    val cornerRadius = 28.dp
-    val glass = rememberBottomBarBackdrop()
-    val useGlass = glass.backdrop != null
+    val backdrop = LocalPageBackdrop.current
+    val mode = when {
+        backdrop == null -> FloatingBottomBarMode.None
+        GlassBackend.noGlassAtAll -> FloatingBottomBarMode.None
+        GlassBackend.useLowPipeline -> FloatingBottomBarMode.Blur
+        else -> FloatingBottomBarMode.LiquidGlass
+    }
 
-    FloatingNavigationBar(
-        // 玻璃作为扩展接在 modifier 链上：backdrop 为 null 时它原样返回 this。
-        modifier = modifier
-            .padding(bottom = 12.dp)
-            .bottomBarGlass(glass.backdrop, cornerRadius),
-        // 玻璃生效时底色必须全透明，否则实色会盖住折射层；
-        // 退回实色时用主题 surface，与改造前观感一致。
-        color = if (useGlass) BottomBarGlassTint else MiuixTheme.colorScheme.surface,
-        cornerRadius = cornerRadius,
+    // 无采样源时给一个保底：FloatingBottomBar 要求非空 backdrop。
+    // 用一张纯色 canvas 采样源，效果等同 None 模式的实底。
+    val surface = MiuixTheme.colorScheme.surface
+    val effectiveBackdrop = backdrop
+
+    if (effectiveBackdrop == null) {
+        // 极低版本/未下发：直接用实色底栏，不进 FloatingBottomBar（避免空 backdrop 崩溃）。
+        PraxisFallbackBottomBar(selected = selected, items = items, onSelect = onSelect, modifier = modifier)
+        return
+    }
+
+    FloatingBottomBar(
+        items = items,
+        selectedIndex = { items.indexOf(selected).coerceAtLeast(0) },
+        onSelected = { index -> items.getOrNull(index)?.let(onSelect) },
+        backdrop = effectiveBackdrop,
+        modifier = modifier.padding(bottom = 12.dp),
+        mode = mode,
+        colors = FloatingBottomBarDefaults.colors(containerColor = surface),
+        iconContent = { item, _ ->
+            Icon(
+                imageVector = when (item) {
+                    PraxisDomain.CHAT -> PraxisIcons.Chat
+                    PraxisDomain.TERMINAL -> PraxisIcons.Terminal
+                    PraxisDomain.MEMORY -> PraxisIcons.Memory
+                    else -> PraxisIcons.Settings
+                },
+                contentDescription = item.title,
+                modifier = Modifier.size(24.dp),
+            )
+        },
+        labelContent = { item, _ ->
+            Text(
+                text = item.title,
+                style = MiuixTheme.textStyles.footnote1,
+            )
+        },
+    )
+}
+
+/** 无采样源时的实色底栏（低版本保底，不涉及任何 blur 类）。 */
+@Composable
+private fun PraxisFallbackBottomBar(
+    selected: PraxisDomain,
+    items: List<PraxisDomain>,
+    onSelect: (PraxisDomain) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    top.yukonga.miuix.kmp.basic.FloatingNavigationBar(
+        modifier = modifier.padding(bottom = 12.dp),
+        color = MiuixTheme.colorScheme.surface,
+        cornerRadius = 28.dp,
     ) {
-        items.forEach { (domain, icon) ->
-            FloatingNavigationBarItem(
-                selected = domain == selected,
-                onClick = { onSelect(domain) },
-                icon = icon,
-                label = domain.title,
+        items.forEach { item ->
+            top.yukonga.miuix.kmp.basic.FloatingNavigationBarItem(
+                selected = item == selected,
+                onClick = { onSelect(item) },
+                icon = when (item) {
+                    PraxisDomain.CHAT -> PraxisIcons.Chat
+                    PraxisDomain.TERMINAL -> PraxisIcons.Terminal
+                    PraxisDomain.MEMORY -> PraxisIcons.Memory
+                    else -> PraxisIcons.Settings
+                },
+                label = item.title,
             )
         }
     }

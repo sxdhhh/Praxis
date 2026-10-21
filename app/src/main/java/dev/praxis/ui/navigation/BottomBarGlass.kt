@@ -15,52 +15,42 @@ import top.yukonga.miuix.kmp.blur.blur
 import top.yukonga.miuix.kmp.blur.drawBackdrop
 
 /**
- * 底栏玻璃背景：**唯一引用 miuix-blur 类的地方**。
+ * 底栏玻璃：**唯一引用 miuix-blur 类的地方**。
  *
- * ## 为什么要单独一个文件
+ * ## 2026-10-21 修正：底色绝不能设成全透明
  *
- * `miuix-blur` 的 AAR 声明 `minSdkVersion=33`，而本项目 minSdk 是 28。
- * 其中 `internal/RenderEffectCompat_androidKt` 直接引用了 `android.graphics.RuntimeShader`
- * （API 33 才有）。API 28–32 的设备上，**一旦该类被触碰就会 `NoClassDefFoundError`**。
+ * 上一版把 `FloatingNavigationBar` 的 `color` 设成 `Color.Transparent`，
+ * 指望 `drawBackdrop` 来撑起整个背景。**装机后底栏整个消失了** ——
+ * 只剩几个在暗色底上几乎看不见的图标。
  *
- * JVM 的类解析是惰性的：只要不执行到引用它的方法体，就不会解析。
- * 把这段代码与调用方放在同一个文件里是可以的，但**同一个 Composable 里
- * `if (useGlass) drawBackdrop(...)` 这种写法是安全的** —— 前提是 `useGlass`
- * 为 false 时那块代码真的不会被执行。
+ * 原因是 `FloatingNavigationBar` 内部只有一处背景：
+ * `Row(... .squircleBackground(color).then(modifier))`。
+ * 一旦 `color` 透明、而 `drawBackdrop` 因为任何原因没画出东西
+ * （shader 不支持 / 采样源为空 / 折射参数把内容推到形状外），
+ * 就**没有任何兜底**了。
  *
- * 拆成独立文件是更硬的保证：调用点在 [PraxisBottomBar] 里，用
- * `if (GlassBackend.useLowPipeline || backdrop == null)` 先短路，
- * 真正的 blur 调用被封在本文件的两个函数后面。
+ * 现在的做法是两层叠加，任何一层失效都不会让底栏消失：
+ *   1. **底色半透明**（`surface.copy(alpha = 0.72f)`）—— 永远存在，保证可读；
+ *   2. **玻璃折射叠在它上面** —— 有采样源时才画，画出来是「磨砂 + 边缘高光」。
  *
- * ## 低版本为什么不给底栏做磨砂降级
- *
- * 顶栏在低版本有 `LowFrostedTopBar`（静态半透明磨砂）。底栏没有做，原因是
- * 底栏高度只有约 64dp，磨砂与实色的观感差异在这个尺度上几乎看不出来，
- * 而多一层半透明会让「浮层」边界变糊、图标对比度下降。
- * 所以低版本直接用主题实色 `surface`，与改造前完全一致。
+ * 这也是 iOS / miuix 官方示例的做法：玻璃是**覆盖在半透明底上的一层效果**，
+ * 而不是「背景本身」。
  */
 
-/** 玻璃生效时的底色：必须全透明，否则实色会盖住折射层。 */
-internal val BottomBarGlassTint: Color = Color.Transparent
+/** 玻璃生效时的底色：半透明，不是全透明。 */
+internal fun bottomBarSurface(glass: Boolean, surface: Color): Color =
+    if (glass) surface.copy(alpha = 0.72f) else surface
 
 /**
- * 一次读出「该不该挂玻璃」以及要用的采样源，避免在调用方重复读 CompositionLocal。
+ * 读出采样源。返回 null 表示不挂玻璃（低版本 / 对照模式 / 页面未下发）。
  *
- * 返回值里的 `backdrop` 为 null 表示「不挂玻璃」。
- *
- * 这里只有**一个** return、没有中途 return：Compose 的 Composable 在同一页面上
- * 若因条件变化走到不同数量的分支，会让 slot table 结构跳动。
- * `GlassBackend.mode` 是运行时可切的调试开关，必须假设它会变。
+ * 这里只有一个 return 分支，`GlassBackend.mode` 在运行时可变，
+ * Composable 内部不要中途 return 多次 —— 会让 slot table 结构跳动。
  */
-internal data class BottomBarGlassBackdrop(val backdrop: Backdrop?)
-
 @Composable
-internal fun rememberBottomBarBackdrop(): BottomBarGlassBackdrop {
-    // 低版本 / 对照模式：连 CompositionLocal 都不用读，直接给 null。
-    if (GlassBackend.noGlassAtAll || GlassBackend.useLowPipeline) {
-        return BottomBarGlassBackdrop(null)
-    }
-    return BottomBarGlassBackdrop(LocalPageBackdrop.current)
+internal fun rememberBottomBarBackdrop(): Backdrop? {
+    if (GlassBackend.noGlassAtAll || GlassBackend.useLowPipeline) return null
+    return LocalPageBackdrop.current
 }
 
 /**
@@ -69,7 +59,10 @@ internal fun rememberBottomBarBackdrop(): BottomBarGlassBackdrop {
  * 效果顺序：`vibrancy ⇒ blur ⇒ lens`（与上游 Kyant 文档一致）。
  *  - 先提饱和：不先提，模糊后的画面会糊成一片灰；
  *  - 再模糊：折射取样需要的是已模糊的画面，顺序反了会折射出清晰的锐利内容；
- *  - 最后镜片：`chromaticAberration` 给边缘一层轻微彩虹，0.1 已是肉眼刚好能察觉的量。
+ *  - 最后镜片：`chromaticAberration` 给边缘一层轻微彩虹。
+ *
+ * 参数取**保守值**：底栏只有 60dp 高，折射深度过大就会把内容推出形状外、
+ * 看起来像一块空白。`refractionHeight=10 / amount=12` 在这个尺度上是肉眼刚好的量。
  */
 @Composable
 internal fun Modifier.bottomBarGlass(backdrop: Backdrop?, cornerRadius: Dp): Modifier {
@@ -80,11 +73,11 @@ internal fun Modifier.bottomBarGlass(backdrop: Backdrop?, cornerRadius: Dp): Mod
             shape = { RoundedCornerShape(cornerRadius) },
             effects = {
                 vibrancy()
-                blur(radiusX = 18f.dp.toPx(), radiusY = 18f.dp.toPx())
+                blur(radiusX = 16f.dp.toPx(), radiusY = 16f.dp.toPx())
                 lens(
-                    refractionHeight = 16f.dp.toPx(),
-                    refractionAmount = 22f.dp.toPx(),
-                    chromaticAberration = 0.1f,
+                    refractionHeight = 10f.dp.toPx(),
+                    refractionAmount = 12f.dp.toPx(),
+                    chromaticAberration = 0.08f,
                 )
             },
         ),

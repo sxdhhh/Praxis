@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -117,6 +118,7 @@ fun AppScaffold(
     modifier: Modifier = Modifier,
     bottomInset: Dp = 24.dp,
     bottomBar: (@Composable BoxScope.() -> Unit)? = null,
+    topBarActions: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     // 渐变模糊的采样层：先铺一层**与 Scaffold 容器同色**的打底，再记录页面内容。
@@ -150,6 +152,7 @@ fun AppScaffold(
             bottomInset = bottomInset,
             surfaceColor = surfaceColor,
             bottomBar = bottomBar,
+            topBarActions = topBarActions,
             content = content,
         )
         return
@@ -166,6 +169,7 @@ fun AppScaffold(
                 backdrop = backdrop,
                 title = title,
                 onBack = onBack,
+                actions = topBarActions,
             )
         },
     ) { innerPadding ->
@@ -278,6 +282,7 @@ private fun BlurredTopBar(
     backdrop: LayerBackdrop,
     title: String,
     onBack: (() -> Unit)?,
+    actions: (@Composable RowScope.() -> Unit)?,
 ) {
     // 运行时 shader 不可用时（理论上 minSdk 33 已支持，此处仅作兜底），
     // 渐变模糊会整体跳过，若顶栏仍设透明会出现标题与内容叠字，
@@ -319,6 +324,11 @@ private fun BlurredTopBar(
                             )
                         }
                     }
+                },
+                // 右侧动作槽：会话列表这类「明确的操作」放这里，
+                // 不再借用返回位（借用会让返回 = 进下一页，语义颠倒）。
+                actions = {
+                    if (actions != null) actions()
                 },
             )
             if (blurSupported) {

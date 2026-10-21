@@ -2,6 +2,7 @@ package dev.praxis.ui.design.component
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Scaffold
@@ -36,6 +37,7 @@ internal fun LowAppScaffold(
     bottomInset: Dp,
     surfaceColor: Color,
     bottomBar: (@Composable BoxScope.() -> Unit)? = null,
+    topBarActions: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     // ★★ 2026-10-05（降级）：顶栏改毛玻璃（不采样、不模糊）后，
@@ -50,6 +52,7 @@ internal fun LowAppScaffold(
                 title = title,
                 onBack = onBack,
                 surfaceColor = surfaceColor,
+                actions = topBarActions,
             )
         },
     ) { innerPadding ->

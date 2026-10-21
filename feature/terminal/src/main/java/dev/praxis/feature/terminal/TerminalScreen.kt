@@ -74,7 +74,7 @@ fun TerminalScreen(
                 end = 12.dp,
                 top = topInset + 12.dp,
                 // 底栏是浮层：留出滚动终点，但不抬内容区（否则玻璃采不到内容）。
-                bottom = 12.dp,
+                bottom = 12.dp + scrollLimit,
             ),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {

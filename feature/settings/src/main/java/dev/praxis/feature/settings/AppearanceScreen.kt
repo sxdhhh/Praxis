@@ -1,41 +1,50 @@
 package dev.praxis.feature.settings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.praxis.core.model.settings.ColorSource
 import dev.praxis.core.model.settings.PaletteStyle
 import dev.praxis.core.model.settings.ThemeMode
 import dev.praxis.core.model.settings.ThemeSettings
-import dev.praxis.ui.widgets.MiuixNavigationItemWidget
-import dev.praxis.ui.widgets.MiuixSelectionDialog
+import dev.praxis.ui.widgets.MiuixDropdown
 import dev.praxis.ui.widgets.MiuixSwitchWidget
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 外观设置页。
  *
- * 分组模式照抄 InstallerX 的 `MiuixThemeSettingsPage`：
- *  `SmallTitle` 当分组标题，`Card(Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp))`
- *  包裹一组行，行与行之间不额外加分隔线（miuix 的 BasicComponent 自带行距与按压反馈）。
+ * 结构照抄 InstallerX 的 `MiuixThemeSettingsPage`（632 行那份）：
  *
- * 三个维度分开暴露：
- *  - 亮暗模式（跟随/亮/暗）—— 最高频；
- *  - 取色源（跟随壁纸/自定义）—— 直接决定 keyColor 是否为 null；
- *  - 调色板（9 种）—— 只有前两者确定后才有意义，放最后。
+ * ```
+ * SmallTitle(分组) → Card(h=12, b=12) { 控件直排 }
+ * ```
+ * 关键细节都按上游来：
+ *  - **行与行之间不加分隔线**：miuix 的 BasicComponent 自带行距与按压反馈，
+ *    再画 `HorizontalDivider` 会出现双线；
+ *  - **条件项用 `AnimatedVisibility` 展开/收起**，不是直接出现/消失：
+ *    上游「开启自定义取色」后才显示动态取色那一行，用的就是
+ *    `fadeIn() + expandVertically()` / `fadeOut() + shrinkVertically()`；
+ *  - **选择器用内联下拉**（上游 `WindowSpinnerPreference`），不弹全屏对话框：
+ *    设置页里弹窗会丢失上下文，改完不知道自己在哪一项。
  *
- * 调色板是 9 种不是 10 种：miuix 0.9.4 的 ThemePaletteStyle 无 Cmf 系。
+ * ## 三个维度为什么这样排
+ *
+ *  - 亮暗模式：最高频，放第一组；
+ *  - 取色源：决定 keyColor 是否为 null（「跟随壁纸」必须 null），影响面最大；
+ *  - 调色板：只有取色源确定后才有意义，且默认折叠在前者之下。
+ *
+ * 调色板是 9 种不是 10 种：miuix 0.9.4 的 `ThemePaletteStyle` 无 Cmf 系。
  */
 @Composable
 fun AppearanceScreen(
@@ -45,14 +54,14 @@ fun AppearanceScreen(
     onPaletteChange: (PaletteStyle) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showModeDialog by remember { mutableStateOf(false) }
-    var showPaletteDialog by remember { mutableStateOf(false) }
+    val modes = listOf(ThemeMode.System, ThemeMode.Light, ThemeMode.Dark)
+    val palettes = PaletteStyle.entries.toList()
+    val followWallpaper = settings.colorSource == ColorSource.Wallpaper
 
-    SettingsList(
-        modifier = modifier.fillMaxSize(),
-    ) {
+    SettingsList(modifier = modifier.fillMaxSize()) {
         item { Spacer(Modifier.height(12.dp)) }
 
+        // ── 显示模式 ────────────────────────────────────────────────
         item { SmallTitle("显示模式") }
         item {
             Card(
@@ -60,14 +69,15 @@ fun AppearanceScreen(
                     .padding(horizontal = 12.dp)
                     .padding(bottom = 12.dp),
             ) {
-                MiuixNavigationItemWidget(
-                    title = "亮暗模式",
-                    description = settings.mode.displayName,
-                    onClick = { showModeDialog = true },
+                MiuixDropdown(
+                    items = modes.map { it.displayName },
+                    selectedIndex = modes.indexOf(settings.mode).coerceAtLeast(0),
+                    onSelectedIndexChange = { index -> onModeChange(modes[index]) },
                 )
             }
         }
 
+        // ── 取色 ────────────────────────────────────────────────────
         item { SmallTitle("取色") }
         item {
             Card(
@@ -78,65 +88,28 @@ fun AppearanceScreen(
                 MiuixSwitchWidget(
                     title = "跟随壁纸取色",
                     description = "关闭后使用自定义品牌色",
-                    checked = settings.colorSource == ColorSource.Wallpaper,
+                    checked = followWallpaper,
                     onCheckedChange = { follow ->
                         onColorSourceChange(
                             if (follow) ColorSource.Wallpaper else ColorSource.Custom,
                         )
                     },
                 )
-                MiuixNavigationItemWidget(
-                    title = "调色板风格",
-                    description = settings.paletteStyle.displayName,
-                    onClick = { showPaletteDialog = true },
-                )
+                // 只有「自定义」时调色板才有意义：跟随壁纸时系统按壁纸算调色板，
+                // 手动选会被覆盖 —— 直接隐藏比「选了但没效果」诚实。
+                AnimatedVisibility(
+                    visible = !followWallpaper,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
+                ) {
+                    MiuixDropdown(
+                        items = palettes.map { it.displayName },
+                        selectedIndex = palettes.indexOf(settings.paletteStyle).coerceAtLeast(0),
+                        onSelectedIndexChange = { index -> onPaletteChange(palettes[index]) },
+                    )
+                }
             }
         }
-
-        item { SmallTitle("当前配置") }
-        item {
-            Card(
-                modifier = Modifier
-                    .padding(horizontal = 12.dp)
-                    .padding(bottom = 12.dp),
-            ) {
-                Text(
-                    text = "模式：${settings.mode.displayName}\n" +
-                        "取色源：${settings.colorSource.displayName}\n" +
-                        "调色板：${settings.paletteStyle.displayName}\n" +
-                        "规范：${settings.colorSpec.name}",
-                    style = MiuixTheme.textStyles.body2,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(16.dp),
-                )
-            }
-        }
-    }
-
-    if (showModeDialog) {
-        val dialogState = remember { mutableStateOf(true) }
-        MiuixSelectionDialog(
-            showState = dialogState,
-            title = "亮暗模式",
-            options = ThemeMode.entries,
-            selected = settings.mode,
-            optionLabel = { it.displayName },
-            onSelect = onModeChange,
-        )
-        if (!dialogState.value) showModeDialog = false
-    }
-
-    if (showPaletteDialog) {
-        val dialogState = remember { mutableStateOf(true) }
-        MiuixSelectionDialog(
-            showState = dialogState,
-            title = "调色板风格",
-            options = PaletteStyle.entries,
-            selected = settings.paletteStyle,
-            optionLabel = { it.displayName },
-            onSelect = onPaletteChange,
-        )
-        if (!dialogState.value) showPaletteDialog = false
     }
 }
 

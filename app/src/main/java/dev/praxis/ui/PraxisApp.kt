@@ -23,6 +23,7 @@ import dev.praxis.feature.settings.SettingsEntry
 import dev.praxis.ui.design.component.AppScaffold
 import dev.praxis.ui.design.component.LocalBottomBarInset
 import dev.praxis.ui.features.FeatureHost
+import dev.praxis.ui.icons.PraxisIcons
 import dev.praxis.ui.navigation.PraxisBottomBar
 import dev.praxis.ui.navigation.PraxisNavHost
 import dev.praxis.ui.navigation.PraxisRoute
@@ -31,6 +32,8 @@ import dev.praxis.ui.navigation.currentRoute
 import dev.praxis.ui.navigation.ensureSeeded
 import dev.praxis.ui.navigation.pushRoute
 import dev.praxis.ui.navigation.switchDomain
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
 import top.yukonga.miuix.kmp.nav.core.rememberNavBackStack
 
@@ -133,14 +136,25 @@ fun PraxisApp(
         route.domain.blockOf(d.arg)?.title ?: d.title.ifBlank { d.arg }
     } ?: route.domain.title
 
-    // 返回位：栈深 > 1 时退一层；否则对话页把它当「会话列表」入口
-    // （AppScaffold 只有这一个槽位，且语义上确实是「回上一层」）。
-    val onBack: (() -> Unit)? = when {
-        backStack.size > 1 -> ({ backStack.removeAt(backStack.lastIndex) })
-        route.domain == PraxisDomain.CHAT -> ({
-            pushRoute(backStack, PraxisRoutes.detail(PraxisDomain.CHAT, "list", "会话列表"))
-        })
-        else -> null
+    // 返回位：**只表示「回上一层」**，不做别的事。
+    //
+    // 2026-10-21 修正：上一版在对话首页把返回位复用成「进入会话列表」的入口，
+    // 于是从主界面点返回会**进入下一个页面**，与任何 App 的返回语义相反。
+    // 用户装机第一句反馈就是「点返回竟然能进入下一页」。
+    //
+    // 会话列表改走顶栏右侧的独立动作（见 AppScaffold 的 actions 槽），
+    // 语义分开：返回 = 退一层，会话列表 = 一个明确的操作按钮。
+    val onBack: (() -> Unit)? = if (backStack.size > 1) {
+        { backStack.removeAt(backStack.lastIndex) }
+    } else {
+        null
+    }
+
+    // 会话列表入口：只在对话域首页出现。
+    val onOpenSessions: (() -> Unit)? = if (route == PraxisRoutes.home(PraxisDomain.CHAT)) {
+        { pushRoute(backStack, PraxisRoutes.detail(PraxisDomain.CHAT, "list", "会话列表")) }
+    } else {
+        null
     }
 
     // 圆角片段跟随设备屏幕角，避免滑入的页面在屏幕边角处露出直角。
@@ -157,6 +171,18 @@ fun PraxisApp(
             //
             // content 在 AppScaffold 的 layerBackdrop 录制范围内，把底栏放进去
             // 会让它被录进采样源 —— 玻璃采到自己，边缘出现「玻璃折射玻璃」的重影。
+            topBarActions = if (onOpenSessions != null) {
+                {
+                    IconButton(onClick = { onOpenSessions() }) {
+                        Icon(
+                            imageVector = PraxisIcons.Chat,
+                            contentDescription = "会话列表",
+                        )
+                    }
+                }
+            } else {
+                null
+            },
             bottomBar = {
                 PraxisBottomBar(
                     selected = activeDomain,

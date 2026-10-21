@@ -3,6 +3,7 @@ package dev.praxis.ui.design.glass.low
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -49,6 +50,7 @@ internal fun LowFrostedTopBar(
     onBack: (() -> Unit)?,
     surfaceColor: Color,
     modifier: Modifier = Modifier,
+    actions: (@Composable RowScope.() -> Unit)? = null,
 ) {
     Box(modifier.fillMaxWidth()) {
         // 半透明磨砂底：与 Scaffold 页面底色同色的表面色、略透。
@@ -72,6 +74,9 @@ internal fun LowFrostedTopBar(
                             )
                         }
                     }
+                },
+                actions = {
+                    if (actions != null) actions()
                 },
             )
         }
