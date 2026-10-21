@@ -74,6 +74,18 @@ fun FeatureHost(
             // 终端域首页就是终端页本身（与对话域同理：先列功能块再进子页是多一层点击）。
             PraxisDomain.TERMINAL -> TerminalRoute(modifier)
 
+            // 记忆 / 工作流域首页直接给真实页面。
+            //
+            // 2026-10-21 修正：此前这两个域落进 else 分支显示 DomainHome 占位，
+            // 但 MemoryRoute / WorkflowRoute 早已写好且接线完成（有真实数据、能删除、能运行），
+            // 只是**只在设置域被调用**。这是第四次「组件齐全却未接线」。
+            //
+            // 域首页给真实页面而不是功能块列表：与 CHAT/TERMINAL 一致 ——
+            // 「先列功能块再点进去」对只有一两个内容的域是多一层无意义点击。
+            PraxisDomain.MEMORY -> dev.praxis.feature.settings.MemoryRoute(memoryStore, modifier)
+
+            PraxisDomain.WORKFLOW -> dev.praxis.feature.settings.WorkflowRoute(workflowEngine, modifier)
+
             else -> DomainHome(
                 domain = route.domain,
                 onOpen = onOpen,
@@ -116,6 +128,17 @@ fun FeatureHost(
                     modifier = modifier,
                 )
             }
+
+            // 记忆 / 工作流域：首页已是真实页面，子页也回同一个页面而不是占位页。
+            //
+            // 这两个域没有「域首页 → 功能块子页」的两层结构：
+            // 记忆就是一条列表、工作流就是一串可运行项。给占位页等于让用户
+            // 点进一个写着「Phase 2 移植」的死胡同。
+            PraxisDomain.MEMORY ->
+                dev.praxis.feature.settings.MemoryRoute(memoryStore, modifier)
+
+            PraxisDomain.WORKFLOW ->
+                dev.praxis.feature.settings.WorkflowRoute(workflowEngine, modifier)
 
             else -> FeatureDetail(
                 domain = route.domain,

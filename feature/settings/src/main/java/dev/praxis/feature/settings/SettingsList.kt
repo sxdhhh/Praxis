@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.praxis.ui.design.component.LocalScrollBottomLimit
+import dev.praxis.ui.design.component.LocalTopBarInset
 
 /**
  * 设置类页面的统一滚动容器。
@@ -33,21 +34,36 @@ import dev.praxis.ui.design.component.LocalScrollBottomLimit
  * 所以这里只做「滚动容器 + 底部让位」，不含任何栏。
  *
  * @param bottomExtra 底栏之上再留的呼吸间距。默认 24dp，与改造前各页一致。
+ * @param includeTopInset 是否自动加顶部内边距（顶栏高度）。
+ *   默认 true —— 这些页面现在既可能作为设置子页、也可能作为**域首页**（记忆/工作流），
+ *   域首页时顶栏由 `:app` 的 `AppScaffold` 提供，不加 top 会让分组标题被顶栏压住。
  */
 @Composable
 fun SettingsList(
     modifier: Modifier = Modifier,
     bottomExtra: Dp = 24.dp,
     verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    includeTopInset: Boolean = true,
     content: LazyListScope.() -> Unit,
 ) {
     // 底栏高度由 :app 通过 LocalBottomBarInset → LocalScrollBottomLimit 下发。
     // 没装底栏的场景（如将来把某页做成独立 Activity）该值是 0.dp，行为不变。
     val scrollLimit = LocalScrollBottomLimit.current
+    // 顶栏高度由 AppScaffold 通过 LocalTopBarInset 下发（含 statusBars）。
+    //
+    // ## 为什么必须是 contentPadding.top 而不是容器 padding
+    //
+    // 放进容器 padding 会把内容**永久裁在**顶栏下方，滚动时内容永远到不了顶栏底下；
+    // 顶栏的 progressiveTextureBlur 采不到内容，渐变模糊就退化成一块实色。
+    // 作为 contentPadding 时，内容初始落在顶栏下方，滚动时能穿过顶栏底面。
+    val topInset = LocalTopBarInset.current
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = bottomExtra + scrollLimit),
+        contentPadding = PaddingValues(
+            top = if (includeTopInset) topInset else 0.dp,
+            bottom = bottomExtra + scrollLimit,
+        ),
         verticalArrangement = verticalArrangement,
         content = content,
     )
