@@ -18,6 +18,15 @@ data class ToolExecution(
     val invocation: ToolInvocation,
     val result: ToolResult,
     val decision: PermissionDecision,
+    /**
+     * 执行耗时（毫秒）。
+     *
+     * 只统计 [Tool.execute] 本身，不含权限判断与征询 —— 那部分是用户等待，
+     * 不是工具慢；混在一起会让用户误以为工具本身很卡。
+     *
+     * 提前返回（未知工具 / 权限不足）时为 0：没有真正执行。
+     */
+    val elapsedMs: Long = 0L,
 )
 
 /**
@@ -98,6 +107,7 @@ class ToolExecutor(
             )
         }
 
+        val startedAt = System.nanoTime()
         val result = try {
             tool.execute(invocation.argumentsJson, context)
         } catch (arg: ToolArgumentException) {
@@ -114,6 +124,12 @@ class ToolExecutor(
             )
         }
 
-        return ToolExecution(invocation = invocation, result = result, decision = decision)
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+        return ToolExecution(
+            invocation = invocation,
+            result = result,
+            decision = decision,
+            elapsedMs = elapsedMs,
+        )
     }
 }

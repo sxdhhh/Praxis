@@ -25,6 +25,9 @@ import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.widgets.BubbleKind
+import dev.praxis.ui.widgets.MessageBubble
+import dev.praxis.ui.widgets.ToolCallCard
 
 /**
  * 聊天页。
@@ -70,7 +73,30 @@ fun ChatScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(state.bubbles, key = { it.id }) { bubble ->
-                MessageBubble(bubble)
+                // 工具气泡走卡片（可折叠、带耗时），其余走聊天气泡。
+                val tool = bubble.tool
+                if (tool != null) {
+                    ToolCallCard(
+                        name = tool.name,
+                        argumentsJson = tool.argumentsJson,
+                        result = tool.result,
+                        isError = tool.isError,
+                        elapsedMs = tool.elapsedMs,
+                        summary = tool.result?.lineSequence()?.firstOrNull(),
+                    )
+                } else {
+                    MessageBubble(
+                        kind = when (bubble.role) {
+                            BubbleRole.User -> BubbleKind.User
+                            BubbleRole.Assistant -> BubbleKind.Assistant
+                            BubbleRole.Error -> BubbleKind.Error
+                            BubbleRole.Tool -> BubbleKind.Tool
+                        },
+                        text = bubble.text,
+                        streaming = bubble.streaming,
+                        onRetry = if (bubble.role == BubbleRole.Error) onRetry else null,
+                    )
+                }
             }
         }
 
@@ -87,44 +113,6 @@ fun ChatScreen(
             onRetry = onRetry,
             bottomPadding = scrollLimit,
         )
-    }
-}
-
-@Composable
-private fun MessageBubble(bubble: ChatBubble) {
-    val isUser = bubble.role == BubbleRole.User
-    val isError = bubble.role == BubbleRole.Error
-
-    val container = when {
-        isError -> MiuixTheme.colorScheme.errorContainer
-        isUser -> MiuixTheme.colorScheme.primary
-        else -> MiuixTheme.colorScheme.surfaceContainerHigh
-    }
-    val content = when {
-        isError -> MiuixTheme.colorScheme.onErrorContainer
-        isUser -> MiuixTheme.colorScheme.onPrimary
-        else -> MiuixTheme.colorScheme.onSurface
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-    ) {
-        Surface(
-            // 气泡最宽占 82%：太宽时阅读需要来回扫视，太窄会把长句拆成很多行。
-            modifier = Modifier.widthIn(max = 300.dp),
-            color = container,
-            contentColor = content,
-            shape = RoundedCornerShape(18.dp),
-        ) {
-            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                Text(
-                    text = if (bubble.streaming && bubble.text.isEmpty()) "…" else bubble.text,
-                    style = MiuixTheme.textStyles.body2,
-                    color = content,
-                )
-            }
-        }
     }
 }
 

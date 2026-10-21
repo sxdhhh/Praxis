@@ -22,6 +22,26 @@ data class ChatBubble(
     val text: String,
     /** 是否还在流式写入（决定是否显示光标）。 */
     val streaming: Boolean = false,
+    /**
+     * 工具调用信息（仅 [BubbleRole.Tool] 有值）。
+     *
+     * 单独一个字段而不是塞进 [text]：工具卡片要能折叠、能单独渲染耗时与风险，
+     * 塞进正文就只能当纯文本，用户没法区分“模型说的话”与“工具返回的内容”。
+     */
+    val tool: ToolCallInfo? = null,
+)
+
+/** 一次工具调用的 UI 投影。 */
+data class ToolCallInfo(
+    val name: String,
+    /** 原始 JSON 参数。**不截断**：截断后无法复制出去复现。 */
+    val argumentsJson: String,
+    /** 工具返回体。执行中为 null。 */
+    val result: String? = null,
+    /** 是否失败。 */
+    val isError: Boolean = false,
+    /** 耗时（毫秒）。未完成时为 null。 */
+    val elapsedMs: Long? = null,
 )
 
 /** 聊天页状态。 */

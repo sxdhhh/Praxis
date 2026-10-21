@@ -460,6 +460,16 @@ class ChatViewModel(
                         id = nextId++,
                         role = BubbleRole.Tool,
                         text = buildToolSummary(exec),
+                        // 带上结构化信息：ToolCallCard 需要参数/结果/耗时才画得出
+                        // 可折叠卡片。只给 text 的话 UI 只能当纯文本渲染，
+                        // 用户看不到「模型调了什么参数」。
+                        tool = ToolCallInfo(
+                            name = exec.invocation.name,
+                            argumentsJson = exec.invocation.argumentsJson,
+                            result = exec.result.content,
+                            isError = exec.result.isError,
+                            elapsedMs = exec.elapsedMs,
+                        ),
                     ),
                 )
             }
