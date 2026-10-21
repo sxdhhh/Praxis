@@ -8,9 +8,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import kotlinx.coroutines.launch
@@ -154,11 +153,11 @@ private fun DomainHome(
     ) {
         item {
             Column(Modifier.padding(bottom = 8.dp)) {
-                Text(text = domain.title, style = MaterialTheme.typography.headlineMedium)
+                Text(text = domain.title, style = MiuixTheme.textStyles.title2, color = MiuixTheme.colorScheme.onSurface)
                 Text(
                     text = domain.subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
@@ -170,11 +169,11 @@ private fun DomainHome(
                 onClick = { onOpen(block) },
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    Text(text = block.title, style = MaterialTheme.typography.titleMedium)
+                    Text(text = block.title, style = MiuixTheme.textStyles.title4, color = MiuixTheme.colorScheme.onSurface)
                     Text(
                         text = block.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
@@ -202,23 +201,28 @@ private fun FeatureDetail(
             .padding(horizontal = 20.dp)
             .padding(top = topInset + 20.dp, bottom = 40.dp),
     ) {
-        TextButton(onClick = onBack) {
-            Text(text = "← 返回${domain.title}", style = MaterialTheme.typography.labelLarge)
-        }
+        // miuix TextButton 收 text: String，没有内容槽（与 M3 不同）。
+        top.yukonga.miuix.kmp.basic.TextButton(
+            text = "← 返回${domain.title}",
+            onClick = onBack,
+            textStyle = MiuixTheme.textStyles.body2,
+        )
         Text(
             text = block?.title ?: title.ifBlank { blockId },
-            style = MaterialTheme.typography.headlineSmall,
+            style = MiuixTheme.textStyles.title3,
+            color = MiuixTheme.colorScheme.onSurface,
             modifier = Modifier.padding(top = 8.dp),
         )
         Text(
             text = "${domain.title} / ${blockId}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.padding(top = 6.dp),
         )
         Text(
             text = block?.description ?: "Phase 2 按 Operit 对应 features 移植此块实现。",
-            style = MaterialTheme.typography.bodyMedium,
+            style = MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.padding(top = 24.dp),
         )
     }

@@ -105,7 +105,7 @@ private fun TerminalRow(line: TerminalLine) {
     Row(Modifier.fillMaxWidth()) {
         if (visible.isEmpty()) {
             // 空行也要占一行高度（终端里空行是有意义的输出）。
-            androidx.compose.material3.Text(
+            top.yukonga.miuix.kmp.basic.Text(
                 text = " ",
                 style = TerminalTypography.lineStyle,
                 color = TerminalPalette.foreground,
@@ -114,7 +114,7 @@ private fun TerminalRow(line: TerminalLine) {
             visible.forEach { cell ->
                 // 宽字符的右半格不单独画（由左半格的字画过去）。
                 if (cell.isContinuation) return@forEach
-                androidx.compose.material3.Text(
+                top.yukonga.miuix.kmp.basic.Text(
                     text = cell.char.toString(),
                     style = TerminalTypography.lineStyle,
                     color = TerminalPalette.foregroundOf(cell.style),
@@ -143,7 +143,7 @@ private fun TerminalInputBar(
             .padding(bottom = paddingBottom),
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
     ) {
-        androidx.compose.material3.Text(
+        top.yukonga.miuix.kmp.basic.Text(
             text = "$",
             style = TerminalTypography.lineStyle,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
