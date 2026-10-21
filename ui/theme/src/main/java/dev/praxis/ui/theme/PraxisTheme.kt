@@ -9,6 +9,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
@@ -55,6 +56,26 @@ fun PraxisTheme(
     settings: ThemeSettings = ThemeSettings(),
     content: @Composable () -> Unit,
 ) {
+    // ★ 切主题不重建 UI 树（照抄 InstallerX `InstallerTheme.kt:92-96`）。
+    //
+    // ## 为什么需要它
+    //
+    // 主题切换会让 `MaterialTheme` / `MiuixTheme` 的 CompositionLocal 变化，
+    // 正常情况下子树的 `remember` 全部失效 —— 表现为：切主题时滚动位置回到顶部、
+    // 输入框失焦、正在播放的动画重头开始。
+    //
+    // `movableContentOf` 把内容包成一个**可搬移的组合单元**：只要它还是
+    // 被同一处调用，即使上层 provider 变了，Compose 也会复用原有的 slot 与状态，
+    // 而不是销毁重建。这是「切主题不闪」的全部原理。
+    //
+    // 注意它必须 `remember` 一次，不能每次重组新建 —— 新建就等于换了个单元，
+    // 状态照样丢。
+    val preservedContent = remember {
+        movableContentOf<@Composable () -> Unit> { targetContent ->
+            targetContent()
+        }
+    }
+
     val systemDark = isSystemInDarkTheme()
     val isDark = when (settings.mode) {
         ThemeMode.System -> systemDark
@@ -85,7 +106,11 @@ fun PraxisTheme(
         LocalPraxisIsDark provides isDark,
     ) {
         MaterialTheme(colorScheme = m3Scheme) {
-            MiuixTheme(controller = controller, content = content)
+            // 走 preservedContent 而不是直接传 content：
+            // 这样切主题（settings 变化 → 新 controller）不会销毁子树状态。
+            MiuixTheme(controller = controller) {
+                preservedContent(content)
+            }
         }
     }
 }
