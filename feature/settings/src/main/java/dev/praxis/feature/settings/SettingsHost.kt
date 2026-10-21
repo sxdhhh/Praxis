@@ -1,6 +1,9 @@
 package dev.praxis.feature.settings
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -67,6 +70,7 @@ fun SettingsHost(
             onSelect = onTierChange,
             modifier = modifier,
         )
+        SettingsEntry.Log -> LogScreen(modifier)
         SettingsEntry.About -> AboutScreen(
             versionName = versionName,
             versionCode = versionCode,
@@ -95,21 +99,52 @@ private fun AppearanceRoute(
     )
 }
 
+/**
+ * 尚未实现的设置项。
+ *
+ * ## 为什么要说清「为什么没做」而不是一句「尚未实现」
+ *
+ * 用户点进来是为了用它。只说「尚未实现」等于把问题丢回给用户，
+ * 他既不知道该不该等，也不知道是不是坏了。所以每个入口带一句具体原因。
+ *
+ * ## 顶部避让
+ *
+ * 这里原先用 `Column(padding(24.dp))`，不读 `LocalTopBarInset` ——
+ * 而 `AppScaffold` 故意把顶栏高度**不**放进容器 padding（否则内容永远到不了
+ * 顶栏下面，渐变模糊会退化成实色）。结果是标题被顶栏压住。
+ * 现在改成 `SettingsList`（已经是全项目统一的滚动容器，内含顶栏避让）。
+ */
 @Composable
 private fun SettingsPlaceholder(entry: SettingsEntry, modifier: Modifier) {
-    Column(modifier = modifier.padding(24.dp)) {
-        Text(
-            text = entry.title,
-            style = MiuixTheme.textStyles.title2,
-            color = MiuixTheme.colorScheme.onSurface,
-        )
-        Text(
-            text = "此设置项尚未实现。功能落地后会自动出现在这里。",
-            style = MiuixTheme.textStyles.body2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            modifier = Modifier.padding(top = 8.dp),
-        )
+    SettingsList(modifier = modifier.fillMaxSize()) {
+        item { Spacer(Modifier.height(24.dp)) }
+        item {
+            Column(Modifier.padding(horizontal = 24.dp)) {
+                Text(
+                    text = entry.title,
+                    style = MiuixTheme.textStyles.title2,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = placeholderReason(entry),
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
     }
+}
+
+/** 每个未实现入口的具体原因（不写笼统的「尚未实现」）。 */
+private fun placeholderReason(entry: SettingsEntry): String = when (entry) {
+    SettingsEntry.Speech ->
+        "语音（TTS / 语音输入）已列入主动放弃：要适配多个厂商引擎，" +
+            "半成品只会出现「以为能说话、实际报错」。等有确定引擎再回来做。"
+    SettingsEntry.Packages ->
+        "扩展包需要沙箱内嵌 JS 运行时（ToolPkg），风险量级与普通工具完全不同。" +
+            "当前工具注册表已覆盖内置能力，暂不开放第三方包。"
+    else -> "此设置项尚未实现。"
 }
 
 /** 模型配置路由：读设置 + 保存。 */

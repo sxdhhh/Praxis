@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
@@ -44,6 +46,13 @@ fun SettingsList(
     bottomExtra: Dp = 24.dp,
     verticalArrangement: Arrangement.Vertical = Arrangement.Top,
     includeTopInset: Boolean = true,
+    /**
+     * 外部持有的滚动状态。
+     *
+     * 日志页需要它：滚顶/滚底按钮必须能读 `canScrollBackward` 并驱动 `scrollToItem`。
+     * 默认值用 [rememberLazyListState]，其余页面不用关心。
+     */
+    state: LazyListState = rememberLazyListState(),
     content: LazyListScope.() -> Unit,
 ) {
     // 底栏高度由 :app 通过 LocalBottomBarInset → LocalScrollBottomLimit 下发。
@@ -60,6 +69,7 @@ fun SettingsList(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
+        state = state,
         contentPadding = PaddingValues(
             top = if (includeTopInset) topInset else 0.dp,
             bottom = bottomExtra + scrollLimit,

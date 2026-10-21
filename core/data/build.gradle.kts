@@ -12,6 +12,7 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.core)
+    api(libs.timber)
     implementation(libs.androidx.datastore.preferences)
 
     api(libs.room.runtime)
