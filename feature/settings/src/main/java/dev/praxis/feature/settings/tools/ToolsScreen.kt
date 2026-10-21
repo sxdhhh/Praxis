@@ -12,13 +12,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.praxis.core.tool.DefaultPermissionPolicy
+import dev.praxis.core.tool.PermissionDecision
 import dev.praxis.core.tool.PermissionTier
 import dev.praxis.core.tool.ToolRisk
 import dev.praxis.core.tool.ToolSpec
-import dev.praxis.core.tool.allows
 import dev.praxis.feature.settings.SettingsList
 import dev.praxis.ui.widgets.MiuixBadge
-import dev.praxis.ui.widgets.MiuixSwitchWidget
+import dev.praxis.ui.widgets.PermissionSwitchRow
+import dev.praxis.ui.widgets.ToolAccessLevel
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -47,7 +49,7 @@ fun ToolsScreen(
         modifier = modifier.fillMaxSize(),
     ) {
         item { Spacer(Modifier.height(12.dp)) }
-        item { SmallTitle("当前权限：${currentTier.displayName}") }
+        item { SmallTitle("当前权限：${currentTier.tierLabel}") }
         item {
             Card(
                 modifier = Modifier
@@ -82,7 +84,10 @@ fun ToolsScreen(
                     tools.forEach { spec ->
                         ToolRow(
                             spec = spec,
-                            usable = currentTier.allows(spec.tier),
+                            // 与 ToolExecutor 同一个策略函数：UI 说的就是运行时做的。
+                            access = DefaultPermissionPolicy
+                                .decide(currentTier, spec.tier)
+                                .toAccessLevel(),
                             enabled = isEnabled(spec.name),
                             onToggle = { onToggle(spec.name, it) },
                         )
@@ -93,39 +98,43 @@ fun ToolsScreen(
     }
 }
 
+/**
+ * 单行工具。
+ *
+ * ## `access` 必须来自真实策略，不能在这里猜
+ *
+ * 用 [DefaultPermissionPolicy.decide] 算出运行时会得到的判定，
+ * 与 `ToolExecutor` 走**同一个函数**。自己写一遍 `if (tier.allows)` 看似等价，
+ * 但策略一旦调整（比如把「差一档 ASK」改成「差一档也 FORBID」），
+ * 这里就会开始显示错的徽章，而运行时行为已经变了 —— 用户按 UI 判断会判断错。
+ */
 @Composable
 private fun ToolRow(
     spec: ToolSpec,
-    usable: Boolean,
+    access: ToolAccessLevel,
     enabled: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
-        MiuixSwitchWidget(
-            title = spec.name,
-            // 没权限时把原因写进副标题，而不是简单置灰 —— 置灰让人不知道为什么。
-            description = if (usable) spec.description else "${spec.description}（需 ${spec.tier.displayName}）",
-            enabled = usable,
-            checked = enabled && usable,
-            onCheckedChange = onToggle,
+        PermissionSwitchRow(
+            name = spec.name,
+            description = spec.description,
+            requiredTierLabel = spec.tier.tierLabel,
+            access = access,
+            userEnabled = enabled,
+            onUserEnabledChange = onToggle,
         )
+
+        // 风险徽章单独一行：风险是「工具本身多危险」，与「这次能不能跑」正交，
+        // 混判定徽章里会让人把 Dangerous 误读成「被拒绝」。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             MiuixBadge(
-                text = spec.tier.displayName,
-                textColor = if (usable) {
-                    MiuixTheme.colorScheme.primary
-                } else {
-                    MiuixTheme.colorScheme.onSurfaceVariantSummary
-                },
-            )
-            Spacer(Modifier.padding(horizontal = 4.dp))
-            MiuixBadge(
-                text = spec.risk.displayName,
+                text = spec.risk.riskLabel,
                 textColor = when (spec.risk) {
                     ToolRisk.Safe -> MiuixTheme.colorScheme.primary
                     ToolRisk.Moderate -> MiuixTheme.colorScheme.onSurface
@@ -141,8 +150,16 @@ private fun ToolRow(
     }
 }
 
-/** 档位文案。 */
-internal val PermissionTier.displayName: String
+/**
+ * 档位文案。
+ *
+ * ## 为什么不叫 `displayName`
+ *
+ * [ToolRisk] 也需要一个文案扩展。两个都叫 `displayName` 时，
+ * 同一文件里 import 两个会直接冲突（Kotlin 扩展属性按名字解析，不看接收者），
+ * 测试里也没法同时引用。分开命名后调用点一眼能看出取的是哪个维度。
+ */
+internal val PermissionTier.tierLabel: String
     get() = when (this) {
         PermissionTier.STANDARD -> "标准"
         PermissionTier.DEBUGGER -> "调试"
@@ -150,9 +167,16 @@ internal val PermissionTier.displayName: String
     }
 
 /** 风险文案。 */
-internal val ToolRisk.displayName: String
+internal val ToolRisk.riskLabel: String
     get() = when (this) {
         ToolRisk.Safe -> "只读"
         ToolRisk.Moderate -> "写入"
         ToolRisk.Dangerous -> "高危"
     }
+
+/** 策略判定 → 控件展示枚举。写在全仓唯一处，避免各页各自 map 出不一致的文案。 */
+internal fun PermissionDecision.toAccessLevel(): ToolAccessLevel = when (this) {
+    PermissionDecision.ALLOW -> ToolAccessLevel.Allow
+    PermissionDecision.ASK -> ToolAccessLevel.Ask
+    PermissionDecision.FORBID -> ToolAccessLevel.Forbid
+}

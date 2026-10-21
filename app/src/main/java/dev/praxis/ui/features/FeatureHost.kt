@@ -11,7 +11,9 @@ import androidx.compose.foundation.lazy.items
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -69,7 +71,12 @@ fun FeatureHost(
         is PraxisRoute.Home -> when (route.domain) {
             // 对话域首页就是聊天页：先选「会话/输入/历史」三个功能块再进子页，
             // 多一层无意义的点击。与设置域一样按域分发。
-            PraxisDomain.CHAT -> ChatRoute(chatViewModel, modifier)
+            PraxisDomain.CHAT -> ChatRoute(
+                viewModel = chatViewModel,
+                settingsRepository = settingsRepository,
+                onOpenModelSettings = { onSettingsEntry(SettingsEntry.Model) },
+                modifier = modifier,
+            )
 
             // 终端域首页就是终端页本身（与对话域同理：先列功能块再进子页是多一层点击）。
             PraxisDomain.TERMINAL -> TerminalRoute(modifier)
@@ -253,17 +260,48 @@ private fun FeatureDetail(
 
 /** 聊天域入口：把 ViewModel 的状态与回调接到纯 UI 上。 */
 @Composable
-private fun ChatRoute(viewModel: ChatViewModel, modifier: Modifier) {
+private fun ChatRoute(
+    viewModel: ChatViewModel,
+    settingsRepository: SettingsRepository,
+    onOpenModelSettings: () -> Unit,
+    modifier: Modifier,
+) {
     // 首次进入聊天页时从数据库恢复历史（幂等，重复调用不会重复加载）。
     androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.restoreIfNeeded() }
 
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    // 模型配置摘要：数据在这里读，UI 只管排版。
+    //
+    // ## 为什么密钥要在这里读一次而不是跟着 modelSettings 流
+    //
+    // `apiKey()` 是 suspend 且会解密（Android Keystore），不能塞进 data class
+    // 到处流。这里只在页面进入与配置变化时读一次，只用于「有没有配」这一个判断，
+    // 不保留原文。
+    val modelSettings by settingsRepository.modelSettings.collectAsState(
+        initial = dev.praxis.core.model.settings.ModelSettings(),
+    )
+    var apiKeyMasked by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf("")
+    }
+    androidx.compose.runtime.LaunchedEffect(modelSettings) {
+        apiKeyMasked = dev.praxis.feature.settings.maskApiKey(settingsRepository.apiKey())
+    }
+
     ChatScreen(
         state = state,
         onInputChange = viewModel::onInputChange,
         onSend = viewModel::send,
         onRetry = viewModel::retry,
         modifier = modifier,
+        header = {
+            dev.praxis.ui.widgets.ModelConfigCard(
+                baseUrl = modelSettings.baseUrl,
+                model = modelSettings.model,
+                apiKeyMasked = apiKeyMasked,
+                onClick = onOpenModelSettings,
+            )
+        },
     )
 }
 

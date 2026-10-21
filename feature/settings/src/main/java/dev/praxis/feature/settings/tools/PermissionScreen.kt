@@ -47,7 +47,7 @@ fun PermissionScreen(
                         .padding(bottom = 12.dp),
                 ) {
                     MiuixNavigationItemWidget(
-                        title = tier.displayName + if (tier == currentTier) "（当前）" else "",
+                        title = tier.tierLabel + if (tier == currentTier) "（当前）" else "",
                         description = tier.summary(),
                         onClick = { onSelect(tier) },
                     )

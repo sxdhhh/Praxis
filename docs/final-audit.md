@@ -1,4 +1,4 @@
-# Praxis 最终审计（R30 更新）
+# Praxis 最终审计（R31 更新）
 
 > 对照 `/home/praxis-design/` 五份文档（1069 行）逐条核对。
 > 结论分三类：**已达成** / **主动放弃（附原因）** / **未达成（附缺口）**。
@@ -11,14 +11,14 @@
 | 项 | 结果 | 证据 |
 |---|---|---|
 | 模块数 | **18** 个 Gradle 项目 | `settings.gradle.kts` |
-| 源码规模 | 146 个 .kt / 18,243 行 | 递归统计（排除 build/） |
-| 单元测试 | **213 例，0 失败** | 见下表 |
+| 源码规模 | 150 个 .kt / 19,113 行 | 递归统计（排除 build/） |
+| 单元测试 | **225 例，0 失败** | 见下表 |
 | `assembleDebug` | 成功，APK 81.8 MB | 2m56s（增量）/ 8m09s（全量重编） |
 | `lintDebug` | **0 error / 18 warning，全部为版本升级提示** | 见「lint 结论」节 |
 | 版本 | `1.0.0` / versionCode `10` | 合并后 Manifest 实测 |
 | 构建环境 | 本机 proot，`-Xmx1100m`，`--offline` | 单次 2.5–8 分钟 |
 
-### 测试分布（213 例）
+### 测试分布（225 例）
 
 | 模块 | 用例 | 覆盖内容 |
 |---|---:|---|
@@ -33,6 +33,7 @@
 | ui:theme | 5 | 调色板映射 |
 | ui:navigation | 13 | 栈操作、幂等、降级、ensureSeeded 幂等重入/自定义 seed/不覆盖非空栈 |
 | feature:chat | 9 | 节流写入 |
+| feature:settings | 12 | 映射一致性（权限判定三态 4、工作流节点参数/后继 5、档位与风险文案 3） |
 | :app | 13 | ToolWorkflowPort（7）、MemoryPortImpl（6） |
 
 ---
@@ -54,10 +55,10 @@
 | P3 | 切会话不串线 | 已达成 | `viewModel(key = sessionId)` |
 | P4 | 工具三档权限 | 已达成 | `PermissionTier` + `ToolPermissionState` |
 | P4 | 终端页 | 已达成 | `feature:terminal`（391 行） |
-| P4 | 工具列表 + 权限页 | 已达成 | `ToolsScreen` / 权限页 |
+| P4 | 工具列表 + 权限页 | 已达成 | `ToolsScreen`（`PermissionSwitchRow` 显示真实策略判定 + 用户级开关）/ 权限页 |
 | P5 | 记忆检索（RRF） | 已达成 | `MemoryRetriever` |
 | P5 | 记忆写回三阶段 | 已达成 | `MemoryWritePipeline` |
-| P5 | 工作流引擎 | 已达成 | `WorkflowEngine` + 编辑器页 |
+| P5 | 工作流引擎 | 已达成 | `WorkflowEngine` + 节点列表页（R31 起 `WorkflowNodeCard` 逐节点展示参数与后继；仍无可拖拽编辑器） |
 | P5 | Skill 加载 | 已达成 | `SkillParser` + `SkillRegistry` |
 
 **注意**：这里说的是「代码存在且通过单测」，**不等于真机视觉验收通过**。

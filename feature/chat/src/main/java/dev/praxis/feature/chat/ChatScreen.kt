@@ -48,6 +48,21 @@ fun ChatScreen(
     onSend: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 列表顶部的可选内容（当前用于模型配置摘要）。
+     *
+     * ## 为什么用插槽而不是直接依赖 ModelSettings
+     *
+     * `feature:chat` 不该知道「模型配置」长什么样 —— 那是 `ui:widgets` +
+     * `:app` 的职责。插槽让聊天页保持纯粹的「消息流 + 输入」结构，
+     * 而把「我现在在跟谁说话」这件事交给上层决定要不要显示、显示什么。
+     *
+     * ## 为什么是 LazyColumn 的 item 而不是固定头部
+     *
+     * 固定头部会永久占掉一块屏幕。作为 item 时它随消息滚走 ——
+     * 用户看完一眼就不再需要它，但往上滚回顶部时它还在。
+     */
+    header: (@Composable () -> Unit)? = null,
 ) {
     val listState = rememberLazyListState()
 
@@ -72,6 +87,10 @@ fun ChatScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            if (header != null) {
+                item(key = "chat-header") { header() }
+            }
+
             items(state.bubbles, key = { it.id }) { bubble ->
                 // 工具气泡走卡片（可折叠、带耗时），其余走聊天气泡。
                 val tool = bubble.tool

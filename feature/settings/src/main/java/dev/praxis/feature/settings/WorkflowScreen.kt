@@ -11,11 +11,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import dev.praxis.core.workflow.StepRecord
 import dev.praxis.core.workflow.WorkflowDefinition
 import dev.praxis.core.workflow.WorkflowNode
 import dev.praxis.core.workflow.WorkflowRunResult
+import dev.praxis.ui.widgets.WorkflowBranchRow
+import dev.praxis.ui.widgets.WorkflowNodeCard
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
@@ -71,25 +74,53 @@ fun WorkflowScreen(
         }
 
         items(workflows, key = { it.id }) { wf ->
-            Card(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = wf.name, style = MiuixTheme.textStyles.body1)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "${wf.nodes.size} 个节点",
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        TextButton(
-                            text = if (runningId == wf.id) "运行中…" else "运行",
-                            onClick = { onRun(wf) },
-                            enabled = runningId == null,
+            // LazyColumn 的**单个 item 内多个 composable 会全部堆在 (0,0)**，
+            // 不清空纵向位置。所以这一项的所有内容必须放进同一个 Column，
+            // 否则节点卡片会叠在头卡上（看起来像只渲染了一张）。
+            Column {
+                // ── 工作流头卡：名称 + 节点数 + 运行按钮 ────────────────
+                Card(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(text = wf.name, style = MiuixTheme.textStyles.body1)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "${wf.nodes.size} 个节点",
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            TextButton(
+                                text = if (runningId == wf.id) "运行中…" else "运行",
+                                onClick = { onRun(wf) },
+                                enabled = runningId == null,
+                            )
+                        }
+                    }
+                }
+
+                // ── 节点列表 ──────────────────────────────────────────
+                //
+                // 此前这里只显示「6 个节点」就结束了 —— 用户看不到流程长什么样，
+                // 只能靠盲点「运行」再从执行轨迹反推结构。轨迹是**事后**证据，
+                // 而节点列表是**事前**结构；排障时前者有用，理解时只有后者有用。
+                //
+                // 按 nodes 的声明顺序展示，不按执行顺序：声明顺序就是作者的心智模型，
+                // 重排会让人对不上源码。
+                wf.nodes.forEach { node ->
+                    WorkflowNodeCard(
+                        kindLabel = node.kindLabel(),
+                        title = node.title,
+                        details = node.detailRows(),
+                        kindColor = node.kindColor(),
+                        nextId = node.primaryNextId(),
+                    )
+                    // 条件节点有两个去向，单个 nextId 表达不全，补一行分支说明。
+                    if (node is WorkflowNode.Condition) {
+                        WorkflowBranchRow(thenId = node.thenId, elseId = node.elseId)
                     }
                 }
             }
@@ -161,6 +192,83 @@ private fun StepRow(step: StepRecord) {
                 )
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  WorkflowNode → 控件参数映射
+// ---------------------------------------------------------------------------
+
+/**
+ * 映射为什么放在这一层而不是控件里。
+ *
+ * `ui:widgets` 不依赖 `core:workflow`（与 `ToolCallCard`/`ModelConfigCard` 同一取舍）。
+ * 映射放这里的好处：`core:workflow` 加一类节点时，只需要在这里补一个分支，
+ * 控件不动；且这些函数可以用纯 JVM 单测直接验证（不需要 Compose 运行时）。
+ */
+internal fun WorkflowNode.kindLabel(): String = when (this) {
+    is WorkflowNode.Trigger -> "开始"
+    is WorkflowNode.Tool -> "工具"
+    is WorkflowNode.Condition -> "条件"
+    is WorkflowNode.Transform -> "变换"
+    is WorkflowNode.Output -> "结束"
+}
+
+/**
+ * 节点类型色。
+ *
+ * 语义分组而不是五个不同色：
+ *  - 流程控制（开始/结束）用中性色 —— 它们不是「做了什么」，只是边界；
+ *  - 有副作用的（工具）用 error 提示「这会动真实数据」；
+ *  - 纯计算的（条件/变换）用 primary。
+ *
+ * 五个颜色各自不同会让图变成彩虹，反而看不出类别。
+ */
+@Composable
+private fun WorkflowNode.kindColor(): Color = when (this) {
+    is WorkflowNode.Trigger, is WorkflowNode.Output -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+    is WorkflowNode.Tool -> MiuixTheme.colorScheme.error
+    is WorkflowNode.Condition, is WorkflowNode.Transform -> MiuixTheme.colorScheme.primary
+}
+
+/** 单链后继。条件节点有两个分支，这里给 then 侧，else 侧由 [WorkflowBranchRow] 补。 */
+internal fun WorkflowNode.primaryNextId(): String? = when (this) {
+    is WorkflowNode.Trigger -> nextId
+    is WorkflowNode.Tool -> nextId
+    is WorkflowNode.Condition -> thenId
+    is WorkflowNode.Transform -> nextId
+    is WorkflowNode.Output -> null
+}
+
+/**
+ * 要展示的参数行。
+ *
+ * 原则：**只展示会改变运行时行为的字段**。
+ * 节点 id 是内部寻址用的，对用户没有意义（真正的连接关系已经在「→ x」里显示了），
+ * 所以不列 —— 列了只会让每张卡片多一行噪声。
+ */
+internal fun WorkflowNode.detailRows(): List<Pair<String, String>> = when (this) {
+    is WorkflowNode.Trigger -> emptyList()
+
+    is WorkflowNode.Tool -> buildList {
+        add("工具" to toolName)
+        add("参数" to argsTemplate)
+        // outputKey 为 null 表示这次调用结果不进上下文，后续节点引用不到 ——
+        // 这是常见的手误，所以显式写出来（而不是省略这一行）。
+        add("输出键" to (outputKey ?: "（不保存）"))
+    }
+
+    is WorkflowNode.Condition -> listOf("条件" to expression)
+
+    is WorkflowNode.Transform -> listOf(
+        "模板" to template,
+        "输出键" to outputKey,
+    )
+
+    is WorkflowNode.Output -> if (template.isEmpty()) {
+        emptyList()
+    } else {
+        listOf("模板" to template)
     }
 }
 
