@@ -4,8 +4,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -13,8 +11,6 @@ import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import dev.praxis.core.model.settings.ColorSource
 import dev.praxis.core.model.settings.ColorSpecVersion
 import dev.praxis.core.model.settings.PaletteStyle
 import dev.praxis.core.model.settings.ThemeMode
@@ -99,16 +95,26 @@ fun PraxisTheme(
         )
     }
 
-    val m3Scheme = rememberM3Scheme(settings, isDark)
-
     CompositionLocalProvider(
         LocalThemeSettings provides settings,
         LocalPraxisIsDark provides isDark,
     ) {
-        MaterialTheme(colorScheme = m3Scheme) {
-            // 走 preservedContent 而不是直接传 content：
-            // 这样切主题（settings 变化 → 新 controller）不会销毁子树状态。
-            MiuixTheme(controller = controller) {
+        // ── 嵌套顺序：MiuixTheme 在外，MaterialTheme 在内 ──────────────
+        //
+        // 顺序是有语义的，不能随便调：
+        //  - `MiuixTheme` 在外 → 它内部才能读 `MiuixTheme.colorScheme`，
+        //    把同一份颜色映射成 M3 色板（见 [rememberM3FromMiuix]）；
+        //  - 全站控件优先读 miuix，因此 miuix 必须是色彩的唯一来源；
+        //  - `MaterialTheme` 只在「确实用了 M3 组件」的子树里被读到，
+        //    放在内层不影响任何 miuix 控件。
+        //
+        // 旧顺序是 `MaterialTheme { MiuixTheme { ... } }`，M3 在外层，
+        // 于是它拿不到 miuix 的颜色，只能自己算（当年是硬编码蓝）。
+        MiuixTheme(controller = controller) {
+            val m3Scheme = rememberM3FromMiuix(isDark)
+            MaterialTheme(colorScheme = m3Scheme) {
+                // 走 preservedContent 而不是直接传 content：
+                // 这样切主题（settings 变化 → 新 controller）不会销毁子树状态。
                 preservedContent(content)
             }
         }
@@ -116,25 +122,108 @@ fun PraxisTheme(
 }
 
 /**
- * 计算 M3 语义色。
+ * 计算 M3 语义色 —— **直接取 miuix 的颜色**（2026-10-23 重构）。
  *
- * 优先用系统动态色（Android 12+，且用户选择「跟随壁纸」时），
- * 否则用 materialKolor 从 seed 生成，最后回落到静态蓝。
+ * ## 为什么不能各算各的
+ *
+ * 旧实现里两条路各用一套生成器：
+ *
+ * ```
+ * seedColor → miuix ThemeController   → MiuixTheme.colorScheme   （跟种子）
+ * seedColor → materialKolor / 硬编码蓝 → MaterialTheme.colorScheme（不跟种子）
+ * ```
+ *
+ * 即便让 materialKolor 也用同一个 seed，两家算法不同，**色阶仍然不同族**：
+ * 同一个 seed 下 miuix 的 `surface` 与 materialKolor 的 `surface` 不是同一个色，
+ * 于是「页面底色」和「控件底色」永远差一层。
+ *
+ * 用户的要求是「把 m3 取色 miuix」—— 即 M3 不再自己算，**照抄 miuix 的值**。
+ * 这样全站只有一个色彩来源：`MiuixTheme.colorScheme`。
+ *
+ * ## 实现方式：把嵌套顺序反过来
+ *
+ * 之前是 `MaterialTheme { MiuixTheme { content } }`，M3 在外层，读不到 miuix 的色。
+ * 现在改成 `MiuixTheme { MaterialTheme(m3 = 由 miuix 映射) { content } }`：
+ * `MiuixTheme` 在外，函数体内就能读 `MiuixTheme.colorScheme`，再拿它构造 M3 色板。
+ *
+ * 这不影响任何现有控件：miuix 组件读自己的 theme，M3 组件读 MaterialTheme，
+ * 两者都在 content 之上。
+ *
+ * ## 映射原则（不是机械 1:1，缺字段要挑语义最近的）
+ *
+ * | M3 角色 | 取 miuix 的 | 理由 |
+ * |---|---|---|
+ * | `primary` / `onPrimary` | 同名 | 直接对应 |
+ * | `primaryContainer` 系 | 同名 | 直接对应 |
+ * | `inversePrimary` | `primaryVariant` | M3 无对应，取同族亮/暗变体 |
+ * | `secondary` 系 | 同名 | 直接对应 |
+ * | **`tertiary`** | **`tertiaryContainer`** | miuix 没有 `tertiary`（只有 container 系），取容器色当基色 |
+ * | `onTertiary` | `onTertiaryContainer` | 同上 |
+ * | `surfaceVariant` | 同名 | 直接对应 |
+ * | **`onSurfaceVariant`** | **`onSurfaceVariantSummary`** | miuix 把 variant 文字拆成 Summary/Actions 两档，它承担「次要正文」 |
+ * | `outlineVariant` | `dividerLine` | M3 的 outlineVariant 就是分割线色 |
+ * | `scrim` | `windowDimming` | 遮罩层，语义一致 |
+ * | `inverseSurface` | `onSurface` | M3 的 inverse 是「互换明暗」，miuix 无此概念，用互换表达 |
+ * | `inverseOnSurface` | `surface` | 同上 |
+ * | `surfaceContainer(Low/…/Highest)` | miuix 的四级容器 | miuix 只有 4 级，M3 有 5 级 → 最低两级都取 surface |
  */
 @Composable
-private fun rememberM3Scheme(settings: ThemeSettings, isDark: Boolean): ColorScheme {
-    val context = LocalContext.current
-    val followWallpaper = settings.colorSource == ColorSource.Wallpaper
+private fun rememberM3FromMiuix(isDark: Boolean): ColorScheme {
+    val c = MiuixTheme.colorScheme
+    // key 只用 isDark：颜色值本身来自 MiuixTheme.colorScheme，它变了自己会重组。
+    return remember(isDark, c.primary, c.surface, c.background, c.tertiaryContainer) {
+        val base = if (isDark) darkColorScheme() else lightColorScheme()
+        base.copy(
+            primary = c.primary,
+            onPrimary = c.onPrimary,
+            primaryContainer = c.primaryContainer,
+            onPrimaryContainer = c.onPrimaryContainer,
+            // M3 的 inversePrimary 用于「反色底上的主色」，取同族的 variant。
+            inversePrimary = c.primaryVariant,
 
-    return remember(settings, isDark, context) {
-        when {
-            followWallpaper && PraxisCapabilities.dynamicColorSupported ->
-                if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            secondary = c.secondary,
+            onSecondary = c.onSecondary,
+            secondaryContainer = c.secondaryContainer,
+            onSecondaryContainer = c.onSecondaryContainer,
 
-            isDark -> darkColorScheme(primary = Color(0xFF7FA9FF))
+            // ★ miuix 没有 tertiary 基色，只有 container 系。
+            tertiary = c.tertiaryContainer,
+            onTertiary = c.onTertiaryContainer,
+            tertiaryContainer = c.tertiaryContainer,
+            onTertiaryContainer = c.onTertiaryContainer,
 
-            else -> lightColorScheme(primary = Color(0xFF1B6EF3))
-        }
+            background = c.background,
+            onBackground = c.onBackground,
+
+            surface = c.surface,
+            onSurface = c.onSurface,
+            surfaceVariant = c.surfaceVariant,
+            onSurfaceVariant = c.onSurfaceVariantSummary,
+            // surfaceTint 用于 elevation 叠加，M3 惯例取 primary。
+            surfaceTint = c.primary,
+
+            inverseSurface = c.onSurface,
+            inverseOnSurface = c.surface,
+
+            error = c.error,
+            onError = c.onError,
+            errorContainer = c.errorContainer,
+            onErrorContainer = c.onErrorContainer,
+
+            outline = c.outline,
+            outlineVariant = c.dividerLine,
+            scrim = c.windowDimming,
+
+            // 容器色阶：miuix 4 级 → M3 5 级，最低两级都取 surface。
+            surfaceContainerLowest = c.surface,
+            surfaceContainerLow = c.surface,
+            surfaceContainer = c.surfaceContainer,
+            surfaceContainerHigh = c.surfaceContainerHigh,
+            surfaceContainerHighest = c.surfaceContainerHighest,
+            // 亮/暗极值：M3 用来做层次对比，miuix 无对应档，取最近的两级。
+            surfaceBright = c.surfaceContainerHighest,
+            surfaceDim = c.surface,
+        )
     }
 }
 

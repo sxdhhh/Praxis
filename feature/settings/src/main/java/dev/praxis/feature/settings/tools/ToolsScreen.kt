@@ -1,5 +1,6 @@
 package dev.praxis.feature.settings.tools
 
+import dev.praxis.feature.settings.common.SettingsList
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,10 +18,7 @@ import dev.praxis.core.tool.PermissionDecision
 import dev.praxis.core.tool.PermissionTier
 import dev.praxis.core.tool.ToolRisk
 import dev.praxis.core.tool.ToolSpec
-import dev.praxis.feature.settings.SettingsList
 import dev.praxis.ui.widgets.MiuixBadge
-import dev.praxis.ui.widgets.PermissionSwitchRow
-import dev.praxis.ui.widgets.ToolAccessLevel
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.theme.MiuixTheme

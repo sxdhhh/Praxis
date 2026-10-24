@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Scaffold
+import top.yukonga.miuix.kmp.basic.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
@@ -38,6 +38,10 @@ internal fun LowAppScaffold(
     surfaceColor: Color,
     bottomBar: (@Composable BoxScope.() -> Unit)? = null,
     topBarActions: (@Composable RowScope.() -> Unit)? = null,
+    /** 左上角主操作（打开侧边栏）；与 `onBack` 不同槽，见 `AppScaffold`。 */
+    leadingAction: (@Composable () -> Unit)? = null,
+    /** 覆盖层（抽屉）。低版本没有玻璃采样，但仍要盖在内容之上。见 `AppScaffold`。 */
+    overlay: (@Composable BoxScope.() -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     // ★★ 2026-10-05（降级）：顶栏改毛玻璃（不采样、不模糊）后，
@@ -53,6 +57,7 @@ internal fun LowAppScaffold(
                 onBack = onBack,
                 surfaceColor = surfaceColor,
                 actions = topBarActions,
+                leadingAction = leadingAction,
             )
         },
     ) { innerPadding ->
@@ -74,6 +79,8 @@ internal fun LowAppScaffold(
                     )
                 )
                 bottomBar?.invoke(this)
+                // 与高版本管线保持同一层级：抽屉盖在内容与底栏之上。
+                overlay?.invoke(this)
             }
         }
     }

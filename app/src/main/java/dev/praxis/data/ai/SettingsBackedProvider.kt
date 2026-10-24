@@ -50,6 +50,28 @@ class SettingsBackedProvider(
             baseUrl = settings.baseUrl,
             apiKey = apiKey,
         )
-        emitAll(delegate.stream(request.copy(model = settings.model)))
+        // temperature 必须在这里覆盖：`ChatRequest` 的默认值是写死的 0.7，
+        // 而 `ChatViewModel` 构造 `ChatRequest` 时不带 temperature。
+        // 之前只 copy 了 model，导致设置页存下的温度**从来没有进过请求体** ——
+        // 表现为「改了温度没任何变化」。model 与 temperature 都取设置里的值。
+        emitAll(
+            delegate.stream(
+                request.copy(
+                    // ## 必须用 `activeModel` 而不是 `settings.model`（2026-10-24 修）
+                    //
+                    // `settings.model` 现在是**模型池**（逗号分隔多个），
+                    // 直接塞进请求体会把 `"a,b,c"` 整串发给服务端 ——
+                    // 那不是一个存在的模型名，必然 400（model not found）。
+                    //
+                    // `activeModel` 按 `modelIndex` 从池里取**单个**，
+                    // 越界时回落第 0 个。这是 1:1 对齐 Operit
+                    // `MultiServiceManager.createServiceFromConfig` 的做法：
+                    // 那里也是 `getValidModelIndex` + `getModelByIndex`
+                    // 先算出 `selectedModelName`，再 `copy(modelName = ...)`。
+                    model = settings.activeModel,
+                    temperature = settings.temperature,
+                ),
+            ),
+        )
     }
 }

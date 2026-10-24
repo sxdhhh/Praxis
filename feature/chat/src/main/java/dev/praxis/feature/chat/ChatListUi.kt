@@ -1,5 +1,8 @@
 package dev.praxis.feature.chat
 
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -8,7 +11,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import dev.praxis.ui.design.component.AutoFollowScrollLazy
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -16,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.praxis.ui.design.component.LocalScrollBottomLimit
 import dev.praxis.ui.design.component.LocalTopBarInset
+import dev.praxis.ui.theme.PraxisMotion
 import dev.praxis.ui.widgets.MiuixNavigationItemWidget
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -50,8 +57,20 @@ fun ChatListScreen(
     // 顶栏的渐变模糊才有内容可采。
     val topInset = LocalTopBarInset.current
 
+    val listState = rememberLazyListState()
+    // 丝滑滚动：与聊天/日志/终端同一个弹簧引擎（apixiaoyuan `AutoFollowScroll`）。
+    // `initialAutoFollow = false` —— 会话列表是索引型页面，打开应停在顶部。
+    AutoFollowScrollLazy(
+        lazyState = listState,
+        itemCount = sessions.size + 1,
+        initialAutoFollow = false,
+    )
+    // 页面自铺底色（同 ChatScreen）。
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        state = listState,
+        modifier = modifier
+            .fillMaxSize()
+            .background(MiuixTheme.colorScheme.surface),
         contentPadding = PaddingValues(
             top = topInset,
             bottom = 24.dp + scrollLimit,
@@ -73,10 +92,17 @@ fun ChatListScreen(
             }
         }
 
-        item { SmallTitle("历史会话（${sessions.size}）") }
+        item(key = "__title_history__") { SmallTitle("历史会话（${sessions.size}）") }
 
         if (sessions.isEmpty()) {
-            item {
+            // ## 空态 item 必须给 key（2026-10-24 修，理由见 ChatSessionsPage 同名注释）
+            //
+            // 这里尤其明显：上面还有 `item { SmallTitle(...) }` 也没有 key，
+            // 它占下标 0；空态项若也没 key 就占下标 1；而 `items(sessions)` 的
+            // 第一条在空态消失后也落到下标 1 —— 三者共用同一批下标身份，
+            // 「空态 → 首条会话」的切换会被当成「同一 item 换内容」，
+            // `animateItem` 的 fadeIn 因此不会触发（看起来就是硬切）。
+            item(key = "__empty_history__") {
                 Card(
                     modifier = Modifier
                         .padding(horizontal = 12.dp)
@@ -92,6 +118,38 @@ fun ChatListScreen(
             }
         } else {
             items(sessions, key = { it.id }) { session ->
+                // ## `animateItem` 包一层 Box，而不是直接加在 `Card` 上（2026-10-24）
+                //
+                // `animateItem` 是 `LazyItemScope` 的扩展，它作用于**被包裹的
+                // 那个节点**的 placement 与 alpha。`Card` 是 miuix 的自定义
+                // composable，它内部会把自己的 modifier 交给 Surface ——
+                // 虽然能传进去，但 Surface 自己会插一层 clip / 背景，
+                // 位移动画作用在那一层时会与阴影/圆角重绘叠加，
+                // 快速滚动时可能出现「卡片先跳位、阴影后跟上」的错位。
+                //
+                // 外面包一个无背景的 Box，把 animateItem 挂在这一层：
+                // 它只管位置与透明度，卡片自身的外观一点不变。
+                Box(
+                    modifier = Modifier.animateItem(
+                        // 出现：删除一条后其余项上移，新项淡入。
+                        // 淡入而不是滑入：会话列表按时间排序，新会话通常插在
+                        // 顶部，滑入方向与「从哪里来」没有直觉对应关系。
+                        fadeInSpec = tween(
+                            durationMillis = PraxisMotion.Durations.Base,
+                            easing = PraxisMotion.Curves.Decelerate,
+                        ),
+                        // 位移（重排）：这条是列表项动画里最重要的一项 ——
+                        // 删掉一条后，下面每一条都要「滑上来」，而不是瞬移。
+                        placementSpec = spring(
+                            stiffness = 400f,
+                            dampingRatio = 0.85f,
+                        ),
+                        fadeOutSpec = tween(
+                            durationMillis = PraxisMotion.Durations.Fast,
+                            easing = PraxisMotion.Curves.Accelerate,
+                        ),
+                    ),
+                ) {
                 Card(
                     modifier = Modifier
                         .padding(horizontal = 12.dp)
@@ -115,6 +173,7 @@ fun ChatListScreen(
                             )
                         }
                     }
+                }
                 }
             }
         }

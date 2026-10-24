@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  逐字拷贝自 HyperCeiler library/provision values/styles.xml。
+  去掉 BottomSheetModalStyle（用 miuix 私有 attr），其余原样。
+  补 ProvisionPreferenceListTextAppearance（原 style 在 app 模块）。
+-->
+<resources>
+<style name="ProvisionPageTitleTextStyle">
+        <item name="android:textSize">@dimen/provision_title_text_size</item>
+        <item name="android:textColor">@color/provision_title_text_color</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:gravity">bottom|center_horizontal</item>
+        <item name="android:maxLines">3</item>
+        <item name="android:fontFamily">sans-serif</item>
+    </style>
+
+    <style name="ProvisionPageSubTitleTextStyle">
+        <item name="android:textSize">@dimen/provision_subtitle_text_size</item>
+        <item name="android:textColor">@color/provision_subtitle_text_color</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:maxLines">3</item>
+        <item name="android:fontFamily">sans-serif</item>
+    </style>
+
+    <style name="ProvisionServiceTitleTextStyle">
+        <item name="android:textSize">@dimen/provision_service_name_text_size</item>
+        <item name="android:textColor">@color/provision_service_name_color</item>
+        <item name="android:layout_marginBottom">@dimen/provision_service_name_margin_bottom</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+
+    <style name="ProvisionServiceDescTextStyle">
+        <item name="android:textSize">@dimen/provision_service_desc_text_size</item>
+        <item name="android:textColor">@color/provision_service_desc_color</item>
+        <item name="android:textColorLink">@color/provision_item_policy_text_color</item>
+    </style>
+
+    <style name="ProvisionListSecondaryTextStyle">
+        <item name="android:textSize">@dimen/provision_page_checkbox_agree_text_size</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textColor">#80000000</item>
+    </style>
+
+
+    
+
+    <!--
+      原版 provision_permission_list_item_view.xml 用
+      android:textAppearance="@style/TextAppearance.PreferenceList"。
+
+      那条 style 定义在 HyperCeiler 的 app 模块（不在 provision 模块内），
+      拷不过来。按原版清单行实际呈现补等价：16sp、未选中文字色、不加粗。
+    -->
+    <style name="ProvisionPreferenceListTextAppearance">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/provision_list_item_text_unselected</item>
+        <item name="android:textStyle">normal</item>
+    </style>
+</resources>

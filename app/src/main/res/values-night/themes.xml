@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      深色主题下的窗口层主题。
+
+      ## 为什么必须单独有这一份（2026-10-23 补，「修白屏」的连带缺陷）
+
+      上一轮把 splash 与 `windowBackground` 从白色改成
+      `@color/praxis_window_background`（深色下落到 `#1C1B1F`），
+      但 `values/themes.xml` 里 `windowLightStatusBar` 是**硬编码 `true`**：
+
+      ```xml
+      <item name="android:windowLightStatusBar">true</item>
+      ```
+
+      它的语义是「状态栏图标用深色」。于是深色主题下：
+      splash 底色是深色、状态栏图标也是深色 → **图标完全看不见**。
+      白屏问题修好了，换来一条「顶部状态栏消失」。
+
+      真机上的表现很隐蔽：启动瞬间那 100~300ms 里状态栏像被削掉一条，
+      Compose 首帧之后 `enableEdgeToEdge()` 按当前主题重算外观又恢复正常，
+      于是用户只看到「顶部抖了一下」。
+
+      ## 为什么 parent 换成 Material 而不是 Material.Light
+
+      浅色那份是 `android:Theme.Material.Light.NoActionBar`。深色必须换成
+      对应的深色父主题，否则 `windowLightStatusBar=false` 会和父主题里
+      其他亮色默认值打架（例如 `colorBackground`、默认文字色）。
+      上游 `/root/ref-InstallerX` 的 `values-night/themes.xml` 同样把
+      parent 从 `Material.Light` 换成 `Material` —— 这是同一套做法。
+
+      ## 为什么这里不重复定义 `Theme.Praxis.Starting`
+
+      它的唯一差异是 `windowSplashScreenBackground`，而那个值指向的
+      `@color/praxis_window_background` 自己就会被 `values-night/colors.xml`
+      覆盖成深色。`postSplashScreenTheme` 指向 `@style/Theme.Praxis`，
+      在这个限定符下会解析到本文件这份。所以刷屏主题不需要重写。
+    -->
+    <style name="Theme.Praxis" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/praxis_window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- 深色底上状态栏图标必须是浅色。 -->
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

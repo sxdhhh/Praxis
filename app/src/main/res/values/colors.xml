@@ -1,4 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#1B6EF3</color>
+
+    <!--
+      启动阶段（splash + Compose 首帧之前）的窗口底色。
+
+      ## 为什么必须有这个颜色，而不是继续用 transparent / white
+
+      用户报「打开 App 先白屏，然后闪一下莫奈取色才跟上」。那个「白屏」
+      是两层叠加造成的：
+
+       1. `Theme.Praxis.Starting` 的 `windowSplashScreenBackground`
+          原来硬编码 `@android:color/white`。深色模式下是一块纯白。
+       2. `Theme.Praxis` 的 `windowBackground` 是 `@android:color/transparent`。
+          splash 退出后、Compose 首帧绘制前有一小段窗口空档 ——
+          transparent 会直接露出桌面/黑底，又是一次闪。
+
+      两个值必须指向**同一个跟随深浅的实色**，让
+      「splash → 窗口 → Compose 首帧」这条链上没有任何换色断裂。
+
+      取 M3 baseline 的 surface（`#FFFBFE` / `#1C1B1F`）而不是品牌蓝：
+      莫奈取色后 Compose 首帧的真实底色接近 surface，用它做过渡差异最小。
+      用品牌蓝过渡会在浅色主题下明显「闪一下蓝」。
+
+      夜间版本在 `values-night/colors.xml` 覆盖。
+    -->
+    <color name="praxis_window_background">#FFFBFE</color>
 </resources>

@@ -16,6 +16,10 @@ dependencies {
 
     api(platform(libs.compose.bom))
     api(libs.compose.ui)
+    // foundation 直接使用：Canvas / BoxWithConstraints / clickable / Row.weight。
+    // ui:theme 已 api 声明，但本模块自己直接用，就自己声明 ——
+    // 上游 ui:theme 一旦把 foundation 降成 implementation，报错会落在本模块。
+    api(libs.compose.foundation)
     api(libs.compose.material3)
 
     api(libs.miuix.core)

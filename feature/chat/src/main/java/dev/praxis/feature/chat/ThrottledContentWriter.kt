@@ -63,6 +63,29 @@ class ThrottledContentWriter(
         lastWriteAt.remove(rowId)
     }
 
+    /**
+     * 取出**全部**尚未写入的内容，并清空内部暂存。
+     *
+     * ## 为什么需要它（2026-10-22，第 9 项修）
+     *
+     * `flush(rowId)` 一次只处理一个 row，而 `onCleared` 时可能有多个气泡
+     * 都在节流窗口里（例如工具调用并发产生了多个助手气泡）。
+     * 逐个 `flush` 需要外部维护 rowId 列表 —— 而那个列表正是 ViewModel
+     * 里的 `assistantRowIds`，它在 `onCleared` 时同样可能已被清空。
+     *
+     * 所以把「待写集合」整体交出去，由调用方在最后一次统一写库。
+     *
+     * 调用后内部状态被清空：重复调用返回空 map，不会重复写。
+     */
+    fun drainPending(): Map<Long, String> {
+        if (pending.isEmpty()) return emptyMap()
+        val out = pending.toMap()
+        pending.clear()
+        val now = nowMs()
+        for (key in out.keys) lastWriteAt[key] = now
+        return out
+    }
+
     companion object {
         /**
          * 100ms：人眼感知不到写入延迟，但把写入次数降到约 1/10。

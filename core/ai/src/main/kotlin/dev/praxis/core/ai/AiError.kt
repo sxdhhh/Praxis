@@ -25,9 +25,23 @@ enum class AiErrorKind {
 
     /** 401 / 403，密钥错误或权限不足。 */
     AUTH,
-
     /** 400，通常是消息体不合法（例如被截断的 argumentsJson）。 */
     INVALID_REQUEST,
+
+    /**
+     * 响应体本身不符合协议（不是合法 JSON、缺少 `choices`、流里既无
+     * `delta` 也无 `message`）。
+     *
+     * ## 为什么与 [INVALID_REQUEST] 分开
+     *
+     * [INVALID_REQUEST] 是「**我发出去的东西**被服务端判为不合法」（HTTP 400），
+     * 用户改配置就能解决；`PROTOCOL` 是「**服务端回来的东西**不合协议」——
+     * 请求本身没错（HTTP 200），是网关/代理改写了响应体，或者对面根本不是
+     * 一个 OpenAI 兼容端点。两者的处置方式完全不同：前者让用户去改模型配置，
+     * 后者要用户去查 baseUrl / 代理。混成一个 kind 会把排查方向指错。
+     */
+    PROTOCOL,
+
 
     /** 用户主动取消（协程被 cancel）。 */
     CANCELLED,
@@ -54,7 +68,9 @@ data class AiError(
             AiErrorKind.RATE_LIMIT, AiErrorKind.STREAM_INTERRUPTED -> true
 
             AiErrorKind.AUTH, AiErrorKind.INVALID_REQUEST,
-            AiErrorKind.CANCELLED, AiErrorKind.UNKNOWN -> false
+            AiErrorKind.CANCELLED, AiErrorKind.UNKNOWN,
+            // 服务端回来的响应体形态不对，原样重试只会拿到同样的形态。
+            AiErrorKind.PROTOCOL -> false
         }
 
     companion object {

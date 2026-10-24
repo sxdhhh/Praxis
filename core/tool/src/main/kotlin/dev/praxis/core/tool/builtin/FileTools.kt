@@ -33,6 +33,16 @@ class FileTools(
         ReadFileTool(rootDir),
         WriteFileTool(rootDir),
         DeleteFileTool(rootDir),
+        // 2026-10-24 补：对齐 Operit 的文件工具面里最常用的四个。
+        // 判据是「模型不用它就得绕一大圈」——
+        //   file_exists → 否则要用 read_file 试探（浪费 token 或误判为失败）
+        //   file_info   → 否则不知道文件多大，read_file 直接撞截断
+        //   move_file   → 否则「改名」只能 write+delete（丢元数据、大文件翻倍写）
+        //   copy_file   → 否则备份一个文件都做不到
+        FileExistsTool(rootDir),
+        FileInfoTool(rootDir),
+        MoveFileTool(rootDir),
+        CopyFileTool(rootDir),
     )
 }
 
@@ -233,4 +243,247 @@ private class DeleteFileTool(private val rootDir: File) : Tool {
         val ok = withContext(Dispatchers.IO) { file.delete() }
         return if (ok) ToolResult("已删除 $rel") else ToolResult("删除失败：$rel", isError = true)
     }
+}
+
+/**
+ * 文件是否存在（以及是文件还是目录）。
+ *
+ * ## 为什么值得单独一个工具
+ *
+ * 模型要写文件前常常先「探一下有没有」，用 `read_file` 探会拿到
+ * 一整段内容（浪费 token）或一条「不存在」错误（与真正的失败混在一起）。
+ * 这个工具只回答一个是非问题，且**不存在不是错误** ——
+ * `isError = false` 让模型能正常读到「false」并继续决策。
+ */
+private class FileExistsTool(private val rootDir: File) : Tool {
+
+    override val spec = ToolSpec(
+        name = "file_exists",
+        description = "检查路径是否存在。返回 exists=true/false 以及类型（file/dir）。" +
+            "路径不存在不算错误。",
+        parametersJson = """
+            {"type":"object","properties":{"path":{"type":"string","description":"相对路径"}},"required":["path"]}
+        """.trimIndent(),
+        tier = PermissionTier.STANDARD,
+        risk = ToolRisk.Safe,
+    )
+
+    override suspend fun execute(argumentsJson: String, context: ToolContext): ToolResult {
+        val args = try {
+            ToolArguments.parse(argumentsJson)
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误：${e.message}", isError = true)
+        }
+        val rel = try {
+            args.string("path")
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误：${e.message}", isError = true)
+        }
+        val f = try {
+            resolveInRoot(rootDir, rel)
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误：${e.message}", isError = true)
+        }
+        val type = when {
+            !f.exists() -> "none"
+            f.isDirectory -> "dir"
+            else -> "file"
+        }
+        return ToolResult("exists=${f.exists()} type=$type path=$rel")
+    }
+}
+
+/**
+ * 文件/目录的元信息（大小、修改时间、是否目录）。
+ *
+ * 与 [FileExistsTool] 的分工：那个回答「有没有」，这个回答「多大、什么时候改的」。
+ * 模型在「决定要不要读一个可能很大的文件」时需要的正是后者 ——
+ * 先看大小再决定读不读，而不是先 `read_file` 撞上截断。
+ */
+private class FileInfoTool(private val rootDir: File) : Tool {
+
+    override val spec = ToolSpec(
+        name = "file_info",
+        description = "查看文件或目录的大小、修改时间、是否目录。",
+        parametersJson = """
+            {"type":"object","properties":{"path":{"type":"string","description":"相对路径"}},"required":["path"]}
+        """.trimIndent(),
+        tier = PermissionTier.STANDARD,
+        risk = ToolRisk.Safe,
+    )
+
+    override suspend fun execute(argumentsJson: String, context: ToolContext): ToolResult {
+        val args = try {
+            ToolArguments.parse(argumentsJson)
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误：${e.message}", isError = true)
+        }
+        val rel = try {
+            args.string("path")
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误：${e.message}", isError = true)
+        }
+        val f = try {
+            resolveInRoot(rootDir, rel)
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误：${e.message}", isError = true)
+        }
+        if (!f.exists()) return ToolResult("路径不存在：$rel", isError = true)
+
+        val kind = if (f.isDirectory) "dir" else "file"
+        // 目录的 `length()` 是 0 或文件系统相关的值，报出来会误导，
+        // 所以目录只报条目数。
+        val sizeLine = if (f.isDirectory) {
+            val count = withContext(Dispatchers.IO) { f.listFiles()?.size } ?: 0
+            "entries=$count"
+        } else {
+            "size=${f.length()}"
+        }
+        return ToolResult(
+            "path=$rel\nkind=$kind\n$sizeLine\nlastModified=${f.lastModified()}",
+        )
+    }
+}
+
+/**
+ * 移动 / 重命名。
+ *
+ * ## 为什么必须校验**两个**路径
+ *
+ * 只校验源路径就能把文件「移出沙箱」—— `to = ../etc/passwd` 会让
+ * `renameTo` 写到根目录之外。所以两端都过 [resolveInRoot]。
+ *
+ * 这也是 Operit 的 `move_file` 必须做到的事（它那边同样有沙箱概念）。
+ */
+private class MoveFileTool(private val rootDir: File) : Tool {
+
+    override val spec = ToolSpec(
+        name = "move_file",
+        description = "移动或重命名文件/目录。两端路径都必须在工作区内。",
+        parametersJson = """
+            {"type":"object","properties":{
+              "from":{"type":"string","description":"源相对路径"},
+              "to":{"type":"string","description":"目标相对路径"}
+            },"required":["from","to"]}
+        """.trimIndent(),
+        tier = PermissionTier.STANDARD,
+        risk = ToolRisk.Moderate,
+    )
+
+    override suspend fun execute(argumentsJson: String, context: ToolContext): ToolResult {
+        val args = try {
+            ToolArguments.parse(argumentsJson)
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误：${e.message}", isError = true)
+        }
+        val fromRel = try {
+            args.string("from")
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误：${e.message}", isError = true)
+        }
+        val toRel = try {
+            args.string("to")
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误：${e.message}", isError = true)
+        }
+        val from = try {
+            resolveInRoot(rootDir, fromRel)
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误（from）：${e.message}", isError = true)
+        }
+        val to = try {
+            resolveInRoot(rootDir, toRel)
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误（to）：${e.message}", isError = true)
+        }
+        if (!from.exists()) return ToolResult("源路径不存在：$fromRel", isError = true)
+
+        val ok = withContext(Dispatchers.IO) {
+            // 父目录不存在时 `renameTo` 会静默失败（返回 false 而不是异常），
+            // 所以先建父目录，再把失败原因说清。
+            to.parentFile?.mkdirs()
+            from.renameTo(to)
+        }
+        return if (ok) {
+            ToolResult("已移动：$fromRel → $toRel")
+        } else {
+            // 跨文件系统时 `renameTo` 会失败。提示用复制+删除，而不是只说「失败」。
+            ToolResult(
+                "移动失败：$fromRel → $toRel（可能是跨文件系统；可改用 copy_file + delete_file）",
+                isError = true,
+            )
+        }
+    }
+}
+
+/**
+ * 复制文件。
+ *
+ * 与 [MoveFileTool] 同样必须校验两端路径。
+ *
+ * 只支持**文件**，不支持目录：递归复制目录要处理符号链接环、
+ * 权限保留、部分失败回滚，那是 `cp -r` 的复杂度。
+ * 模型需要时可以用带会话的终端工具跑 `cp -r`（那边已经有）。
+ */
+private class CopyFileTool(private val rootDir: File) : Tool {
+
+    override suspend fun execute(argumentsJson: String, context: ToolContext): ToolResult {
+        val args = try {
+            ToolArguments.parse(argumentsJson)
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误：${e.message}", isError = true)
+        }
+        val fromRel = try {
+            args.string("from")
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误：${e.message}", isError = true)
+        }
+        val toRel = try {
+            args.string("to")
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误（to）：${e.message}", isError = true)
+        }
+        val from = try {
+            resolveInRoot(rootDir, fromRel)
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误（from）：${e.message}", isError = true)
+        }
+        val to = try {
+            resolveInRoot(rootDir, toRel)
+        } catch (e: dev.praxis.core.tool.ToolArgumentException) {
+            return ToolResult("参数错误（to）：${e.message}", isError = true)
+        }
+        if (!from.exists()) return ToolResult("源文件不存在：$fromRel", isError = true)
+        if (from.isDirectory) {
+            return ToolResult(
+                "不支持复制目录：$fromRel（需要时用终端会话工具跑 cp -r）",
+                isError = true,
+            )
+        }
+
+        val error = withContext(Dispatchers.IO) {
+            runCatching {
+                to.parentFile?.mkdirs()
+                from.copyTo(to, overwrite = true)
+            }.exceptionOrNull()
+        }
+        return if (error == null) {
+            ToolResult("已复制：$fromRel → $toRel（${from.length()} 字节）")
+        } else {
+            ToolResult("复制失败：${error.message}", isError = true)
+        }
+    }
+
+    override val spec = ToolSpec(
+        name = "copy_file",
+        description = "复制文件（不支持目录）。目标已存在时覆盖。",
+        parametersJson = """
+            {"type":"object","properties":{
+              "from":{"type":"string","description":"源相对路径"},
+              "to":{"type":"string","description":"目标相对路径"}
+            },"required":["from","to"]}
+        """.trimIndent(),
+        tier = PermissionTier.STANDARD,
+        risk = ToolRisk.Moderate,
+    )
 }

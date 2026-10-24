@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
+import top.yukonga.miuix.kmp.basic.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
@@ -119,6 +119,32 @@ fun AppScaffold(
     bottomInset: Dp = 24.dp,
     bottomBar: (@Composable BoxScope.() -> Unit)? = null,
     topBarActions: (@Composable RowScope.() -> Unit)? = null,
+    /**
+     * 左上角主操作（打开侧边栏）。
+     *
+     * 与 `onBack` 是**两个不同的槽**，不复用同一个位置：
+     * 返回 = 回上一层，抽屉 = 打开面板，语义不同。
+     * 两者都给时 `leadingAction` 优先（见 `BlurredTopBar` 的说明）。
+     */
+    leadingAction: (@Composable () -> Unit)? = null,
+    /**
+     * 覆盖层（左侧抽屉这类「盖住整页」的面板）。
+     *
+     * ## 为什么必须单独一个槽，而不能写在 content 里（2026-10-21）
+     *
+     * 写在 content 里有**两个**问题，且不能靠调顺序同时解决：
+     *
+     * 1. **被后画的兄弟盖住**。content 里普遍写法是
+     *    `Box { ChatSidebar(...); PraxisNavHost(...) }`，同级子项后画者在上，
+     *    抽屉写在前面就会被导航内容整片盖掉 —— 表现是「点汉堡没反应」。
+     * 2. **被录进玻璃采样源**。content 在 `layerBackdrop(backdrop)` 里面，
+     *    抽屉展开后会被 `drawContent()` 录进去，顶栏模糊与底栏玻璃采到的
+     *    就是「带抽屉的画面」，抽屉透过玻璃被折射一遍，边缘发灰重影。
+     *
+     * 放在这里：[overlay] 在采样 Box 之外、底栏之上，
+     * 既不会被内容盖住，也不污染采样。
+     */
+    overlay: (@Composable BoxScope.() -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     // 渐变模糊的采样层：先铺一层**与 Scaffold 容器同色**的打底，再记录页面内容。
@@ -133,7 +159,21 @@ fun AppScaffold(
     //
     // 改成与 containerColor 同值后：顶栏模糊区的底色 == 页面底色，
     // 视觉上只剩「磨砂过渡」，不再有分块感。
-    val surfaceColor = MaterialTheme.colorScheme.surfaceContainer
+    //
+    // ## 2026-10-23：改回 miuix 色（莫奈统一的根因就在这一行）
+    //
+    // 上面那条「同值」纪律是对的，但**取色引擎取错了**。全项目只有
+    // `MiuixTheme.colorScheme` 真正跟着用户的莫奈种子走；M3 那套在
+    // `rememberM3Scheme` 里对「自定义种子色」是硬编码蓝（见该函数）。
+    //
+    // 于是这一行让**页面底色**（Scaffold containerColor + 顶栏模糊打底 +
+    // `LocalPageBackdrop` 采样源底面）来自 M3 的蓝系色阶，而全站控件来自
+    // miuix 的莫奈色阶 —— 两套色阶不同族，深色下页面像换了一层底。
+    //
+    // 取 miuix 的 `surface`：它是「页面层」语义，与控件用的 surface 同族，
+    // 也和 `PageSurface` / 各页根容器铺的 `MiuixTheme.colorScheme.surface`
+    // 完全同值（否则又会回到「顶栏一块、内容一块」）。
+    val surfaceColor = MiuixTheme.colorScheme.surface
 
     // ★★ 2026-10-04：**高低版本分流**（miuix-blur 的 minSdk 是 33）。
     //
@@ -153,6 +193,8 @@ fun AppScaffold(
             surfaceColor = surfaceColor,
             bottomBar = bottomBar,
             topBarActions = topBarActions,
+            leadingAction = leadingAction,
+            overlay = overlay,
             content = content,
         )
         return
@@ -170,6 +212,7 @@ fun AppScaffold(
                 title = title,
                 onBack = onBack,
                 actions = topBarActions,
+                leadingAction = leadingAction,
             )
         },
     ) { innerPadding ->
@@ -233,6 +276,11 @@ fun AppScaffold(
                 }
                 // 底栏画在内容之上、采样源之外。
                 bottomBar?.invoke(this)
+
+                // 覆盖层画在底栏**之上**：抽屉展开时要连底栏一起盖住，
+                // 否则底栏会从抽屉下沿漏出一条。
+                // 同样在采样源之外，不会被玻璃采到。
+                overlay?.invoke(this)
             }
         }
     }
@@ -283,6 +331,20 @@ private fun BlurredTopBar(
     title: String,
     onBack: (() -> Unit)?,
     actions: (@Composable RowScope.() -> Unit)?,
+    /**
+     * 左上角的**主操作**（目前只有「打开侧边栏」用）。
+     *
+     * ## 为什么要与 onBack 分开而不是复用它
+     *
+     * 语义完全不同：返回是「回到上一层」，抽屉是「在当前层打开一个面板」。
+     * 上一轮已经因为「把返回位复用成进入下一页」被用户指出过 ——
+     * 同一个位置承载两种语义，用户永远猜不准按下去会发生什么。
+     *
+     * 优先级：有 leadingAction 时**不显示**返回键。原因是两者同时出现的场景
+     * 不存在（对话首页没有返回键；二级页没有对话框入口），
+     * 而同时显示会把标题挤到中间一小条。
+     */
+    leadingAction: (@Composable () -> Unit)? = null,
 ) {
     // 运行时 shader 不可用时（理论上 minSdk 33 已支持，此处仅作兜底），
     // 渐变模糊会整体跳过，若顶栏仍设透明会出现标题与内容叠字，
@@ -316,13 +378,15 @@ private fun BlurredTopBar(
                 // 支持模糊时透明，让下层的渐变模糊透出来；不支持时退回实色。
                 color = if (blurSupported) Color.Transparent else MiuixTheme.colorScheme.surface,
                 navigationIcon = {
-                    if (onBack != null) {
-                        IconButton(onClick = onBack) {
+                    when {
+                        leadingAction != null -> leadingAction()
+                        onBack != null -> IconButton(onClick = onBack) {
                             Icon(
                                 imageVector = MiuixIcons.Regular.Back,
                                 contentDescription = "返回",
                             )
                         }
+                        else -> Unit
                     }
                 },
                 // 右侧动作槽：会话列表这类「明确的操作」放这里，

@@ -1,9 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-
     <!-- 基础主题：Compose 接管全部绘制，这里只负责窗口层。 -->
     <style name="Theme.Praxis" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@android:color/transparent</item>
+        <!--
+          ## 为什么 windowBackground 不能是 transparent（2026-10-23 修白屏）
+
+          原来是 `@android:color/transparent`。透明窗口在
+          「splash 已退出、Compose 还没画第一帧」的那一小段里没有底色可画 ——
+          直接露出桌面或黑底，表现为启动时一次明显闪烁。
+
+          现在指向一个跟随深浅的实色（`values-night` 会覆盖），
+          与 splash 的 `windowSplashScreenBackground` 取同一个色，
+          整条启动链没有换色断裂。
+        -->
+        <item name="android:windowBackground">@color/praxis_window_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <!-- 不写 tools:targetApi：minSdk 已 28，该属性必然存在，
@@ -11,9 +21,27 @@
         <item name="android:windowLightStatusBar">true</item>
     </style>
 
+    <!--
+      ## 启动屏（SplashScreen API）
+
+      ### 为什么 background 是 `?attr/colorBackground` 而不是 `@android:color/white`
+
+      原来硬编码白色。深色模式下用户打开 App 先被一块纯白糊一下 ——
+      这正是「先白屏」里最刺眼的那一帧。
+
+      改成跟随系统明暗的 `@color/praxis_window_background`（`values-night`
+      里有深色值），保证：
+        - 浅色主题：splash 底色 = 浅 surface，与后续 Compose 首帧同色系；
+        - 深色主题：splash 底色 = 深 surface，**根本不会出现白屏**。
+
+      ### 为什么不在这里换图标
+
+      默认会取应用图标（adaptive-icon 的 foreground）。Praxis 的图标本身
+      是白底蓝块，在深色 surface 上依然清晰，不需要额外的
+      `windowSplashScreenAnimatedIcon` 覆盖 —— 多写一个 item 只会多一处要同步的地方。
+    -->
     <style name="Theme.Praxis.Starting" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@android:color/white</item>
+        <item name="windowSplashScreenBackground">@color/praxis_window_background</item>
         <item name="postSplashScreenTheme">@style/Theme.Praxis</item>
     </style>
-
 </resources>

@@ -4,7 +4,46 @@ kotlin = "2.4.20"
 ksp = "2.3.12"
 coreKtx = "1.18.0"
 lifecycle = "2.9.4"
-activityCompose = "1.11.0"
+# ⚠️ 不能低于 1.13.0 —— 这是 miuix 0.9.4 下拉/弹窗的一个硬约束。
+#
+# ## 降回去会怎样（真实闪退，2026-10-23）
+#
+# 点击任意 miuix 下拉（主题模式 / 调色板 / 颜色规范…）立刻崩：
+#
+# ```
+# IllegalStateException: No NavigationEventDispatcher was provided via
+#   LocalNavigationEventDispatcherOwner
+#   at NavigationEventHandlerKt.NavigationEventHandler(NavigationEventHandler.kt:82)
+#   at NavigationEventHandlerKt.NavigationBackHandler(NavigationEventHandler.kt:148)
+#   at MiuixPopupUtils$Companion.PopupEntry(MiuixPopupUtils.kt:530)
+#   at MiuixPopupUtils$Companion.MiuixPopupHost(MiuixPopupUtils.kt:560)
+# ```
+#
+# 机制：miuix 0.9.4 的 `PopupEntry` 为了支持「返回键关浮层」，内部调用
+# `NavigationBackHandler`；而它从 `LocalNavigationEventDispatcherOwner.current`
+# 取宿主，**该 CompositionLocal 没有 fallback 值**（源码 `getCurrent` 直接取值），
+# 取不到就抛异常。
+#
+# 而 `androidx.activity:activity:1.11.0` 的 `ComponentActivity` **没有实现**
+# `NavigationEventDispatcherOwner`（javap 确认 implements 列表里没有它），
+# 1.13.0 起才实现。
+#
+# ## 注意：升级 activity **只是必要条件，不是充分条件**
+#
+# `activity-compose:1.13.0` 的 `setContent` → `setOwners()` 只设 ViewTree 的
+# Lifecycle/ViewModelStore/SavedState 三个 owner，**并不 provide 这个
+# CompositionLocal**。真正的 provide 在 `MainActivity.setContent` 里用
+# `CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides ...)`
+# 完成 —— 两处必须同时存在。
+#
+# ## 兼容性已核对
+#
+# - `minCompileSdk=36`（项目 compileSdk=37）✓
+# - `minAndroidGradlePluginVersion=8.9.1`（项目 AGP 9.4.1）✓
+activityCompose = "1.13.0"
+# navigationevent 的版本不单独指定：由 miuix（要求 >=1.1.2）与
+# activity-compose（传递 1.0.0）共同裁决，Gradle 取高版本。
+navigationEvent = "1.2.0"
 composeBom = "2026.08.00"
 composeUi = "1.12.0"
 material3 = "1.4.0"
@@ -30,6 +69,17 @@ androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtim
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 androidx-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "splashscreen" }
+# 浮层返回键链路（miuix 的 `MiuixPopupHost` 依赖它）。
+#
+# ## 为什么必须显式声明，不能靠 miuix 传递
+#
+# `MainActivity` 直接 `import androidx.navigationevent.compose.*`
+# （provide `LocalNavigationEventDispatcherOwner`），属于**直接使用**。
+# 靠传递依赖拿到 API 是隐患：上游 miuix 哪天把它改成 `runtimeOnly`
+# 或调整传递关系，这里会突然编译不过，且报错落在使用方（本项目）。
+#
+# 与 `compose-foundation` 那条注释是同一个道理。
+androidx-navigationevent-compose = { module = "androidx.navigationevent:navigationevent-compose", version.ref = "navigationEvent" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
@@ -37,6 +87,23 @@ compose-ui = { module = "androidx.compose.ui:ui", version.ref = "composeUi" }
 compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics", version.ref = "composeUi" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling", version.ref = "composeUi" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview", version.ref = "composeUi" }
+# Compose Foundation：`LazyColumn` / `ScrollState` / `gestures.scrollBy` 都在这。
+# 之前全仓没有显式声明，一直靠 material3 与 miuix 传递带进来 —— 那是隐式依赖，
+# 上游任一模块调整传递关系就会突然编不过，且报错落在使用方（如 ui:design）。
+# 版本不写死：由 compose-bom 统一裁决。
+compose-foundation = { module = "androidx.compose.foundation:foundation" }
+# Compose Animation（**含 `animateColor`**）。与 foundation 那条是同一个道理：
+# `animateColor` 在 `androidx.compose.animation:animation`，而 foundation / material3
+# 只传递 `animation-core`（`animateFloat` / `tween` 那批）。
+#
+# ## 为什么必须显式声明
+#
+# `ui:design` 的 `AnimatedFluidBackground`（引导页低版本流光）直接用
+# `transition.animateColor(...)`。此前它住在 `:ui:widgets`，靠那里的传递链编过；
+# 搬到 `:ui:design` 后若仍不声明，就是「手上有能用但没声明的依赖」——
+# 上游任一模块调整传递关系时，报错会落在 `ui:design`（使用方），
+# 与本项目既有的 foundation 教训完全一致。
+compose-animation = { module = "androidx.compose.animation:animation" }
 compose-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
 compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended", version.ref = "materialIconsExtended" }
 
@@ -47,6 +114,20 @@ miuix-blur = { module = "top.yukonga.miuix.kmp:miuix-blur-android", version.ref 
 miuix-preference = { module = "top.yukonga.miuix.kmp:miuix-preference-android", version.ref = "miuix" }
 miuix-icons = { module = "top.yukonga.miuix.kmp:miuix-icons-android", version.ref = "miuix" }
 miuix-navigation = { module = "top.yukonga.miuix.kmp:miuix-nav-android", version.ref = "miuix" }
+
+# `miuix-squircle`：超椭圆（squircle）圆角实现。
+#
+# ## 为什么必须显式声明（2026-10-24 引入 `LocalSquircleEnabled` 时发现）
+#
+# `miuix-ui` 的 `build.gradle.kts` 里**没有**对 squircle 的依赖声明
+# （只在 baselineProfiles 里引用了它的 profile 文件）。也就是说
+# `top.yukonga.miuix.kmp.squircle.*` 里的类型（`LocalSquircleEnabled`、
+# `squircleSurface` 等）无法通过 `miuix-ui` 传递拿到 —— 它们是独立 artifact。
+#
+# 实测：`miuix-ui` 内部用了 `squircleSurface`，说明它自己有依赖，但 Gradle 的
+# `implementation` 不会把该依赖暴露给**下游编译期**。所以凡是直接 import
+# `kmp.squircle` 包的模块，都必须自己声明这一行。
+miuix-squircle = { module = "top.yukonga.miuix.kmp:miuix-squircle-android", version.ref = "miuix" }
 
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }

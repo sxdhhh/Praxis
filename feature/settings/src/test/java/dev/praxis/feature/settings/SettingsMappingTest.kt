@@ -31,7 +31,7 @@ class SettingsMappingTest {
     @Test
     fun `tier covering requirement maps to Allow`() {
         assertEquals(
-            dev.praxis.ui.widgets.ToolAccessLevel.Allow,
+            dev.praxis.feature.settings.tools.ToolAccessLevel.Allow,
             DefaultPermissionPolicy.decide(PermissionTier.ROOT, PermissionTier.STANDARD).toAccessLevel(),
         )
     }
@@ -40,7 +40,7 @@ class SettingsMappingTest {
     fun `one tier short maps to Ask`() {
         // 差一档：策略会给 ASK。页面上必须显示「需确认」而不是「拒绝」。
         assertEquals(
-            dev.praxis.ui.widgets.ToolAccessLevel.Ask,
+            dev.praxis.feature.settings.tools.ToolAccessLevel.Ask,
             DefaultPermissionPolicy.decide(PermissionTier.DEBUGGER, PermissionTier.ROOT).toAccessLevel(),
         )
     }
@@ -48,7 +48,7 @@ class SettingsMappingTest {
     @Test
     fun `two tiers short maps to Forbid`() {
         assertEquals(
-            dev.praxis.ui.widgets.ToolAccessLevel.Forbid,
+            dev.praxis.feature.settings.tools.ToolAccessLevel.Forbid,
             DefaultPermissionPolicy.decide(PermissionTier.STANDARD, PermissionTier.ROOT).toAccessLevel(),
         )
     }

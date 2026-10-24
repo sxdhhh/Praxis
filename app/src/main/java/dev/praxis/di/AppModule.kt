@@ -32,13 +32,68 @@ val appModule = module {
             PraxisDatabase::class.java,
             "praxis.db",
         )
-            .addMigrations(PraxisDatabase.MIGRATION_2_3)
+            .addMigrations(
+                PraxisDatabase.MIGRATION_2_3,
+                PraxisDatabase.MIGRATION_3_4,
+                // v5：角色卡 + 提示词标签。角色卡里是用户手写的人设，
+                // 丢一张就等于让他重写几千字，所以同样不给破坏性迁移。
+                PraxisDatabase.MIGRATION_4_5,
+                // v6：sessions 加 displayOrder（对齐 Operit 的会话排序）。
+                //
+                // ## 为什么这一步也必须是显式迁移
+                //
+                // 它只是「加一列 + 回填」，看起来可以直接删库重建 ——
+                // 但 sessions 表是**消息的外键父表**（`ON DELETE CASCADE`），
+                // 破坏性迁移等于把用户全部聊天记录清空。
+                //
+                // 回填逻辑（`displayOrder = -createdAt`）保证了升级后
+                // 列表顺序与升级前一致，用户察觉不到这次 schema 变动。
+                PraxisDatabase.MIGRATION_5_6,
+                // v7：messages 加 variantGroupId / variantIndex（消息变体）。
+                //
+                // ## 为什么也必须是显式迁移
+                //
+                // messages 表存的是用户全部聊天记录，删库重建 = 全丢。
+                // 这次只加两个可空列 + 一个索引，**不需要回填**（NULL 就是
+                // 老消息的正确值，见 `MIGRATION_6_7` 的 KDoc）。
+                PraxisDatabase.MIGRATION_6_7,
+            )
             .build()
     }
-
     single<SessionDao> { get<PraxisDatabase>().sessionDao() }
     single<dev.praxis.data.db.MessageDao> { get<PraxisDatabase>().messageDao() }
     single<dev.praxis.data.db.MemoryDao> { get<PraxisDatabase>().memoryDao() }
+
+    // 角色系统 DAO（实体与 DAO 定义在 :core:data，库在 :app）。
+    single<dev.praxis.core.data.character.CharacterCardDao> {
+        get<PraxisDatabase>().characterCardDao()
+    }
+    single<dev.praxis.core.data.character.PromptTagDao> {
+        get<PraxisDatabase>().promptTagDao()
+    }
+
+    /**
+     * 角色仓储。
+     *
+     * 用 [dev.praxis.core.data.settings.createCharacterRepository] 而不是
+     * 直接 `get<DataStore<Preferences>>()`：DataStore 从未按类型注册过
+     * （它是 Context 的私有扩展属性），按类型注入会在启动时报「找不到定义」。
+     * 工厂函数内部复用与设置页同一个 DataStore 实例，
+     * 避免 `multiple DataStores active for the same file` 崩溃。
+     *
+     * ## 为什么显式写类型
+     *
+     * 不写类型时 Koin 用**推断类型**注册。推断出的类型是对的，但
+     * `koinInject<CharacterRepository>()` 在多个实现（比如将来加一个
+     * 无 Room 的降级实现）时会变得有歧义。显式声明让注册表一眼可读：
+     * 「这个类型由这一行提供」，而不是靠读 lambda 返回值去猜。
+     */
+    single<dev.praxis.core.data.character.CharacterRepository> {
+        dev.praxis.core.data.settings.createCharacterRepository(
+            context = androidContext(),
+            database = get<PraxisDatabase>(),
+        )
+    }
 
     // 记忆存储端口（实现在 :app，契约在 core:memory）。
     single<dev.praxis.core.memory.MemoryStore> {
@@ -76,10 +131,24 @@ val appModule = module {
         dev.praxis.data.ChatRepository(
             sessionDao = get(),
             messageDao = get(),
+            // 中间插入（摘要）需要 withTransaction，所以要把库实例传进去。
+            db = get(),
         )
     }
     single<dev.praxis.feature.chat.ChatPersistence> {
         dev.praxis.data.RoomChatPersistence(get())
+    }
+    /**
+     * 终端会话快照端口（进程重启后恢复 scrollback 与命令历史）。
+     *
+     * 显式写类型 + 用 `createAppPreferencesStore` 拿全局 DataStore：
+     * 后者保证与设置页复用同一个 `praxis_settings` 文件，
+     * 否则会因「同文件两个 DataStore」在启动时抛异常。
+     */
+    single<dev.praxis.feature.terminal.TerminalSnapshotPort> {
+        dev.praxis.data.terminal.DataStoreTerminalSnapshot(
+            dataStore = dev.praxis.core.data.settings.createAppPreferencesStore(androidContext()),
+        )
     }
 
     // 设置存储：主题等持久化都走这里（DataStore，非 Room）。
@@ -93,12 +162,89 @@ val appModule = module {
         )
     }
 
+    // 内存监控：全局单例。
+    //
+    // ## 为什么必须是 single 而不是每次取新的
+    //
+    // 它持有 `lastTrimLevel`（来自 `onTrimMemory` 的状态）与一个轮询 job。
+    // 若每次 `get()` 都新建一个实例：
+    //  - `Application.onTrimMemory` 转发到实例 A 的 trim level，而
+    //    聊天页订阅的是实例 B —— 系统明确的回收请求被静默丢弃；
+    //  - 每进一次聊天页就多一个轮询协程（泄漏）。
+    //
+    // `androidContext()` 而不是 `get<Context>()`：Koin 的 androidContext
+    // 拿的是 Application context，正好是这个场景需要的（不需要 Activity）。
+    single { dev.praxis.data.memory.MemoryMonitor(androidContext()) }
+
+    // 模型列表拉取：设置页「拉取」按钮的后端。
+    //
+    // 单独一个 single 而不是在设置页 new 一个：它内部持有一个 OkHttpClient
+    // （连接池 + 线程池）。每次进设置页 new 一个会白丢连接池，且
+    // 频繁创建线程池在低端机上可观。这里与 OpenAiCompatProvider 分开也是
+    // 有意的 —— 那个的 readTimeout 是 0（为 SSE 长连接），拉列表不能用它。
+    single<dev.praxis.core.ai.ModelCatalogFetcher> {
+        dev.praxis.data.ai.OkHttpModelCatalogFetcher()
+    }
+
+    // Linux 容器执行端口（proot）。
+    //
+    // 单独一个 single 而不是在设置页与工具层各 new 一个：
+    // 两处必须操作**同一份** rootfs 与会话表，否则「AI 装的用户在设置页看不到」。
+    single { dev.praxis.data.linux.ProotEnvPort(androidContext()) }
+
     // 工具层：文件工具挂到应用私有目录下，沙箱边界由 FileTools 负责。
     single {
         val root = java.io.File(androidContext().filesDir, "workspace")
         root.mkdirs()
         ToolRegistry().apply {
             registerAll(*FileTools(root).all().toTypedArray())
+
+            // ## Linux 容器工具（AI 可调用 Kali）
+            //
+            // user 的要求是「内置一个 kali linux，然后让 ai 可以调用」。
+            // 这些工具就是「可调用」那一半：模型能在容器里真跑 nmap / python3 / apt。
+            //
+            // 与设置页共用同一个 ProotEnvPort 实例（见下方 single）：
+            // AI 装好的环境，用户在设置页能看到「已安装」；反之也成立。
+            // 各建一份会得到「AI 说装好了，设置页显示未安装」这种用户无法理解的状态。
+            run {
+                val linuxPort = dev.praxis.data.linux.LinuxToolPortImpl(
+                    context = androidContext(),
+                    envPort = get<dev.praxis.data.linux.ProotEnvPort>(),
+                    // 默认 Kali。
+                    distro = dev.praxis.core.linux.LinuxDistro.Kali,
+                )
+                registerAll(
+                    dev.praxis.data.linux.LinuxStatusTool(linuxPort),
+                    dev.praxis.data.linux.LinuxListToolsTool(linuxPort),
+                    dev.praxis.data.linux.LinuxExecTool(linuxPort),
+                )
+            }
+            // ## 终端会话 7 工具（1:1 对齐 Operit）
+            //
+            // 与上面的 `linux_exec` 并存，不是替换：
+            //  - `linux_exec` = 无会话、一次性执行（快速跑一条）；
+            //  - 这 7 个 = 有状态会话（`cd` 跨调用保留、可发按键、可看屏幕）。
+            //
+            // 会话端口用 `ProotTerminalSessionPort`，它复用同一个
+            // `ProotEnvPort` 取环境 —— 与设置页看到的是同一份 rootfs。
+            run {
+                // `LinuxEnvPort` 在 Koin 里没有单独绑定（设置页那边是直接 new
+                // `ProotEnvPort` 的）。这里用同一个 `ProotEnvPort` single，
+                // 保证「AI 装好的环境设置页能看到」——两份实例会得到两份 rootfs 视图。
+                val sessionPort = dev.praxis.data.linux.ProotTerminalSessionPort(
+                    context = androidContext(),
+                    envPort = get<dev.praxis.data.linux.ProotEnvPort>(),
+                )
+                registerAll(
+                    dev.praxis.core.linux.CreateTerminalSessionTool(sessionPort),
+                    dev.praxis.core.linux.ExecuteInTerminalSessionTool(sessionPort),
+                    dev.praxis.core.linux.ExecuteInTerminalSessionStreamingTool(sessionPort),
+                    dev.praxis.core.linux.CloseTerminalSessionTool(sessionPort),
+                    dev.praxis.core.linux.InputInTerminalSessionTool(sessionPort),
+                    dev.praxis.core.linux.GetTerminalScreenTool(sessionPort),
+                )
+            }
         }
     }
     single { ToolExecutor(get<ToolRegistry>()) }
@@ -109,4 +255,12 @@ val appModule = module {
         val state: dev.praxis.core.tool.ToolPermissionState = get()
         state.snapshot()
     }
+
+    // ── 系统授权检测（2026-10-22 新增）──────────────────────────────
+    //
+    // 独立 single 而不是在权限页里 new：检测结果被多处读
+    // （权限页、将来的工具执行前置检查），而且它持有 StateFlow，
+    // 每次 new 会让各页面各自持有一份不同步的状态。
+    single { dev.praxis.core.data.permission.CapabilityDetector(androidContext()) }
+    single { dev.praxis.core.data.permission.CapabilityRequester(androidContext()) }
 }

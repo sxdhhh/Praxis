@@ -37,6 +37,33 @@ class ShellCommandRunner(
     private val timeoutSeconds: Long = DEFAULT_TIMEOUT_SECONDS,
 ) : CommandRunner {
 
+    /**
+     * 当前正在跑的进程。
+     *
+     * 只给 [cancel] 用。用 `@Volatile` 而不是加锁：写入方（IO 线程）与
+     * 读取方（主线程点 Ctrl+C）只需可见性，不需要互斥。
+     */
+    @Volatile
+    private var current: Process? = null
+
+    /**
+     * 中断当前命令。
+     *
+     * 先让子进程自己退出（`destroy` 发 SIGTERM，shell 有机会收尾），
+     * 再兜底强杀。**不能只调协程 cancel**：那样 Process 还活着，
+     * 输出流没人读 → 写满管道后永久阻塞。
+     */
+    override fun cancel() {
+        val process = current
+        if (process == null) return
+        runCatching { process.destroy() }
+        // 给 200ms 收尾时间，超时则强杀。
+        if (!process.waitFor(200, TimeUnit.MILLISECONDS)) {
+            runCatching { process.destroyForcibly() }
+        }
+        current = null
+    }
+
     override suspend fun run(command: String, onOutput: (String) -> Unit): Int =
         withContext(Dispatchers.IO) {
             val builder = ProcessBuilder("sh", "-c", command)
@@ -48,6 +75,7 @@ class ShellCommandRunner(
             }
 
             val process = builder.start()
+            current = process
             try {
                 // 逐行读会丢掉「没有换行的进度条」，所以按块读。
                 val reader = BufferedReader(InputStreamReader(process.inputStream))
@@ -68,6 +96,7 @@ class ShellCommandRunner(
             } finally {
                 // 无论正常结束还是异常，都不能留孤儿进程。
                 if (process.isAlive) process.destroyForcibly()
+                if (current === process) current = null
             }
         }
 

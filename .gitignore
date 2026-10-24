@@ -19,3 +19,12 @@ captures/
 *.jks
 *.keystore
 keystore.properties
+
+# ── 内置 Linux rootfs（由 scripts/fetch-rootfs.sh 生成）────────────
+# 为什么排除：
+#  1. 体积：Ubuntu 30 MB + Kali 131 MB，进 git 会让仓库涨到 160 MB+；
+#  2. 可重复获取：脚本带大小/魔数校验，任何人跑一次就有；
+#  3. 换版本会重写历史：镜像每月更新，进 git 每次都是一次大对象。
+# CI 需要按文件名缓存这个目录（见 scripts/fetch-rootfs.sh 头部说明）。
+app/src/main/assets/rootfs/
+app/src/main/assets/rootfs/*.part

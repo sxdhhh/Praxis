@@ -122,4 +122,62 @@ class ThrottledContentWriterTest {
         w.flush(1L)
         assertEquals(1, writes.size)
     }
+
+    // ── drainPending（2026-10-22 新增，第 9 项：onCleared 兜底落盘）──────
+
+    /**
+     * `onCleared` 的兜底必须能拿到「所有」还在节流窗口里的正文。
+     *
+     * 为什么这条值得单测：它是「退出后记录就没了」的最后一道防线。
+     * 一旦 `drainPending` 只返回一条、或返回后不清空，就会出现
+     * 「A 气泡的正文被写进了 B 气泡的行」这类错位 —— 比丢失更难发现。
+     */
+    @Test
+    fun `drainPending returns all pending entries from multiple rows`() {
+        val w = newWriter()
+        // 两行都在窗口内被抑制（先各写一次，再各提交一次）。
+        w.submit(1L, "a1")
+        w.submit(2L, "b1")
+        clock += 10
+        w.submit(1L, "a2")   // 抑制，进 pending
+        w.submit(2L, "b2")   // 抑制，进 pending
+
+        val drained = w.drainPending()
+
+        assertEquals(mapOf(1L to "a2", 2L to "b2"), drained)
+        // drain 本身不触发写入：写入由调用方决定（onCleared 里自己写库）。
+        assertEquals(2, writes.size)
+    }
+
+    /** drain 之后再 drain 必须为空，避免重复写同一份正文。 */
+    @Test
+    fun `drainPending is idempotent after first call`() {
+        val w = newWriter()
+        w.submit(1L, "a")
+        clock += 10
+        w.submit(1L, "ab")
+
+        assertEquals(mapOf(1L to "ab"), w.drainPending())
+        assertTrue(w.drainPending().isEmpty())
+    }
+
+    /** 没有待写内容时返回空 map，不抛异常（onCleared 的常见路径）。 */
+    @Test
+    fun `drainPending on empty writer returns empty map`() {
+        val w = newWriter()
+        assertTrue(w.drainPending().isEmpty())
+    }
+
+    /** drain 之后 flush 不应再写出旧内容（内部状态已清）。 */
+    @Test
+    fun `flush after drain writes nothing more`() {
+        val w = newWriter()
+        w.submit(1L, "a")
+        clock += 10
+        w.submit(1L, "ab")
+        w.drainPending()
+        val before = writes.size
+        w.flush(1L)
+        assertEquals(before, writes.size)
+    }
 }

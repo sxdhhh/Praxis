@@ -33,7 +33,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowUpDown
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowListPopup
+import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 
 /**
  * A standalone dropdown menu styled to look and feel like a SmallTitle.
@@ -111,11 +111,38 @@ fun MiuixDropdown(
         }
 
         // The popup menu itself, shown when isDropdownExpanded is true.
-        WindowListPopup(
+        //
+        // ## 为什么用 OverlayListPopup 而不是 WindowListPopup（真机闪退修复）
+        //
+        // 上游原实现用的是 `WindowListPopup`，它内部是：
+        //
+        // ```
+        // popupHost = { visible, hostContent ->
+        //     if (visible) {
+        //         Dialog(onDismissRequest = ..., properties = platformDialogProperties()) {
+        //             hostContent()          // ← 新开一个 Window
+        //         }
+        //     }
+        // }
+        // ```
+        //
+        // 也就是说每展开一次下拉就**新建一个 Dialog Window**。这在
+        // InstallerX 里没问题（它每个页面是独立 Activity + 独立 ComposeView），
+        // 但在 Praxis 里页面跑在 `NavDisplay` 的 entry 里、外层是单个 Scaffold，
+        // 新 Window 与宿主 Window 的 focus/输入法/转场状态会打架。
+        // 真机现象：外观页点开「莫奈取色」下拉直接闪退。
+        //
+        // `OverlayListPopup` 是 miuix 官方的**同层**版本：走 `PopupLayout`
+        // 在现有 composition 里画浮层，不开新 Window，行为与 `DropdownPreference`
+        // 的内部实现一致（见 miuix-preference 的 OverlayDropdownPopup.kt）。
+        // `renderInRootScaffold = true` 让它绘制到根 Scaffold 的 overlay 层，
+        // 避免被 LazyColumn 的 clip 裁掉。
+        OverlayListPopup(
             show = isDropdownExpanded.value,
             alignment = PopupPositionProvider.Align.Start,
             popupPositionProvider = DropdownWithStartMarginProvider,
             onDismissRequest = { isDropdownExpanded.value = false },
+            renderInRootScaffold = true,
         ) {
             ListPopupColumn {
                 items.forEachIndexed { index, text ->

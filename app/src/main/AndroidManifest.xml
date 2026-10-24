@@ -21,16 +21,127 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!--
+      ## 运行时权限（2026-10-22 补，此前一个都没有）
+
+      用户报「权限管理跟没有一样连个正经的授权检测都没有」。
+      查清单后确认更严重：**这里连权限声明都不存在**，
+      于是无论界面上怎么显示，`checkSelfPermission` 永远返回 DENIED ——
+      不是「检测没做」，是「检测做了也必然是否」。
+
+      ### 通知（API 33+ 才是运行时权限）
+      API < 33 声明它不会报错，系统直接忽略；不声明则在 33+ 上
+      `POST_NOTIFICATIONS` 恒为 DENIED，前台服务通知被静默丢弃。
+
+      ### 存储
+      - `MANAGE_EXTERNAL_STORAGE`：API 30+ 的「所有文件访问」。
+        它**必须**声明，否则设置页里的跳转开关置灰且 `isExternalStorageManager()`
+        永远 false。要求用户在系统设置里手动开。
+      - `READ/WRITE_EXTERNAL_STORAGE`：API ≤ 29 的运行时权限，
+        用 `maxSdkVersion` 限住，避免 30+ 上申请一个已废弃权限。
+        `READ_MEDIA_*` 不在这里申请：Praxis 不用媒体库，
+        申请它只会让用户看到一个没必要的弹窗。
+
+      ### QUERY_ALL_PACKAGES（API 30+ 包可见性）
+      工具里「列出已装应用」这类需要它；不声明的话
+      `getInstalledPackages()` 只返回自己，界面上表现为「手机里只有 Praxis」。
+      用 `<queries>` 精确一点更好，但工具要列全部应用，只能整包声明。
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <!--
+      ═══════════════════════════════════════════════════════════════════
+      权限页登记项对应的系统权限（2026-10-24 补齐）
+      ═══════════════════════════════════════════════════════════════════
+
+      ## 为什么必须在这里声明
+
+      权限页会**检测并引导**这四项（`PraxisCapability` 的 OVERLAY /
+      BATTERY_EXEMPTION / LOCATION / DEVICE_ADMIN）。声明缺失时，
+      检测会一直返回 DENIED，而「去授予」点进系统设置页后
+      **根本找不到 Praxis** —— 那是典型的假按钮。
+
+      也就是说：这一段的每一项都必须与 `PraxisCapability` 一一对应，
+      加能力时同步加这里，否则界面会出现「有按钮、授不了」的状态。
+    -->
+
+    <!-- 悬浮窗：Overlay 浮层（执行进度、取色器） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!--
+      电池优化豁免。
+
+      注意 `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` 是**申请用的权限**，
+      不是豁免本身 —— 豁免状态由 `PowerManager.isIgnoringBatteryOptimizations`
+      回答。没有这行声明时，`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`
+      会被系统直接拒绝（不弹框），表现为「点了没反应」。
+    -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- 位置：检测判据是 FINE 或 COARSE 任一（与 Operit 同口径） -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!--
+      Shizuku 的授权查询走它自己暴露的 provider。
+      API 30+ 的包可见性会让「未在 queries 里声明的包」查不到，
+      这里声明是为了让 `getPackageInfo("moe.shizuku.privileged.api")`
+      能真实反映「装没装」，而不是永远 NameNotFound。
+    -->
+    <queries>
+        <package android:name="moe.shizuku.privileged.api" />
+    </queries>
+
+    <!--
+      usesCleartextTraffic="true"：**故意放开明文 HTTP**，理由如下。
+
+      ## 为什么不能用 networkSecurityConfig 精确放行
+
+      Android 的 network-security-config **不支持 CIDR / IP 通配**，
+      只能逐个写 domain 字面量。而 Praxis 的核心用途是接用户自己的模型服务，
+      地址是任意 `http://内网IP:端口`（自建 llama.cpp / Ollama / one-api 中转 /
+      局域网网关）。无法枚举，所以只能整体放开。
+
+      ## 为什么这不是「安全降级」
+
+      本 App 不对接任何第三方公网明文服务：所有地址都由**用户自己**在设置页填。
+      真正需要保护的只有 API Key，而 Key 只在用户自己指定的主机上传输 ——
+      用户选 http 就等于自己承担该风险（跟浏览器访问 http 站点同理）。
+
+      ## 代价与提示
+
+      放开后，如果用户把 Key 填到公网 http 地址上，Key 会明文过网。
+      所以设置页的接口地址输入框需要给出明确提醒（见 ModelScreen 的说明文案）。
+
+      ## 之前的状态
+
+      此前 Manifest 里**完全没有**这一项，targetSdk 28+ 默认 false，
+      于是真机上 `http://8.163.55.49:8788` 被平台直接拦掉，
+      OkHttp 只拿到一个泛化的 IOException，UI 显示「网络连接失败」。
+      而 `http://127.0.0.1:8787` 能通是因为 —— 不，127.0.0.1 同样被拦；
+      用户能用的那条是走 Termux 代理且代理已在白名单外，属巧合可用。
+    -->
     <application
         android:name=".PraxisApplication"
         android:allowBackup="false"
+        android:usesCleartextTraffic="true"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
         tools:targetApi="31"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Praxis.Starting">
+        android:theme="@style/Theme.Praxis.Starting"
+        android:enableOnBackInvokedCallback="true">
 
         <activity
             android:name=".MainActivity"

@@ -53,6 +53,66 @@ enum class ColorSpecVersion {
 }
 
 /**
+ * 预测性返回动画档位。
+ *
+ * 照抄 InstallerX `PredictiveBackAnimation`（五档），但**去掉 None**：
+ * 上游给 None 是「关掉预测性返回」，而 Praxis 的入口只有侧滑返回，
+ * 关掉它等于「手势划到一半没有任何跟手反馈」，用户会以为卡了。
+ * 所以 Praxis 只保留四种真正能看的动画，默认 [Aosp]。
+ *
+ * 为什么默认 AOSP 而不是 miuix：AOSP 那套是系统返回的观感
+ * （跟手缩放 + 96dp 漂移 + 松手弹跳），用户对它有肌肉记忆；
+ * miuix 自带的 MiuixDefault 是平台风格，在这里反而更像「第三方 App」。
+ */
+enum class PredictiveBackAnimation {
+    /** 系统 AOSP 观感：跟手缩放 + 漂移 + 松手弹跳。 */
+    Aosp,
+
+    /** miuix 自带转场。 */
+    Miuix,
+
+    /** 缩小 + 按手势方向移出屏幕。 */
+    Scale,
+
+    /** 缩放 + 侧移的轻量版（KernelSU 经典）。 */
+    Classic,
+    ;
+
+    companion object {
+        /**
+         * 从持久化值还原。
+         *
+         * 用「按名查找 + 兜底」而不是 `valueOf`：降级安装或枚举改名时
+         * `valueOf` 会抛异常把设置页打挂（这是本项目已确认过的坑）。
+         */
+        fun fromNameOrDefault(name: String?): PredictiveBackAnimation =
+            entries.firstOrNull { it.name == name } ?: Aosp
+    }
+}
+
+/**
+ * Scale / Classic 档位下，返回时**往哪一侧移出**。
+ *
+ * 只有这两个档位会用到；AOSP 与 miuix 由手势方向自己决定。
+ */
+enum class PredictiveBackExitDirection {
+    /** 跟随手势：从左边缘划就从左出，从右边缘划就从右出。 */
+    FollowGesture,
+
+    /** 固定往右出。 */
+    AlwaysRight,
+
+    /** 固定往左出。 */
+    AlwaysLeft,
+    ;
+
+    companion object {
+        fun fromNameOrDefault(name: String?): PredictiveBackExitDirection =
+            entries.firstOrNull { it.name == name } ?: FollowGesture
+    }
+}
+
+/**
  * 主题设置快照（不可变，供 UI 直接读）。
  *
  * `seedColorArgb` 用 Long：DataStore 与 StateFlow 里不夹带 Compose 类型，
@@ -64,6 +124,11 @@ data class ThemeSettings(
     val seedColorArgb: Long = DEFAULT_SEED_ARGB,
     val paletteStyle: PaletteStyle = PaletteStyle.TonalSpot,
     val colorSpec: ColorSpecVersion = ColorSpecVersion.Spec2021,
+    /** 预测性返回动画档位。 */
+    val predictiveBackAnimation: PredictiveBackAnimation = PredictiveBackAnimation.Aosp,
+    /** Scale / Classic 档位下的移出方向。 */
+    val predictiveBackExitDirection: PredictiveBackExitDirection =
+        PredictiveBackExitDirection.FollowGesture,
 ) {
     companion object {
         /** 默认品牌蓝。 */

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      深色下的启动窗口底色（与 `values/colors.xml` 里同名项成对，见那里的长注释）。
+
+      `#1C1B1F` 是 M3 baseline 的 dark surface。深色主题下
+      splash → 窗口空档 → Compose 首帧 三段的底色全部落在这一档，
+      不会再出现「先白一下」。
+    -->
+    <color name="praxis_window_background">#1C1B1F</color>
+</resources>

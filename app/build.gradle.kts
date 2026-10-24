@@ -67,6 +67,46 @@ android {
             "API_KEY",
             "\"${localProp("praxis.apiKey", "PRAXIS_API_KEY", "")}\"",
         )
+
+        /**
+         * PTY（伪终端）只编 arm64-v8a。
+         *
+         * ## 为什么只留一个 ABI
+         *
+         * `pty.c` 里用的是 `forkpty()`，它来自 bionic 的 `libutil`；
+         * 32 位 ABI 上符号名与结构体布局都和 64 位不同，一份源码编两份产物
+         * 需要额外验证。而本项目已有的 `libproot.so` / `libtalloc.so` 也只有
+         * arm64-v8a（见 `app/src/main/jniLibs/`）—— proot 本身不跑 32 位，
+         * PTY 单独为 32 位编译没有意义。
+         */
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+    }
+
+    /**
+     * 原生构建：目前只有 PTY 一个库。
+     *
+     * ## 为什么现在才引入 NDK
+     *
+     * 之前全项目的 proot / busybox 都是**预编译好的 .so 直接放 jniLibs**
+     * （`libproot.so` 等），不需要 NDK 参与构建。
+     * 但 PTY 是**自己写的 JNI**（`pty.c`），必须编出
+     * `libpty.so` —— 没有它，Kotlin 侧的 `System.loadLibrary("pty")`
+     * 会抛 `UnsatisfiedLinkError`，终端就退化成管道模式
+     * （`vim`/`top` 会直接报错，`Ctrl+C` 也不生效）。
+     *
+     * ## 为什么版本写 3.22.1
+     *
+     * AGP 内置的 CMake 版本可能与 `cmake_minimum_required(3.18.1)` 不匹配。
+     * 显式指定让「同一份代码在不同 AGP 上编出同样的东西」，
+     * 也避免 CI 机器上找不到 CMake 时静默跳过。
+     */
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     // 签名配置在 buildTypes 之前先建好：AGP 9 的 signingConfigs 容器类型在版本间变过，
@@ -93,6 +133,19 @@ android {
         getByName("debug") {
             applicationIdSuffix = ".debug"
             isMinifyEnabled = false
+            /**
+             * 调试包关闭 PNG 压缩（AAPT2 crunch）。
+             *
+             * ## 为什么这条能省时间
+             *
+             * `crunchPngs` 默认对 debug 变体是**开启**的，会对每张 png 做
+             * 有损最优压缩（遍历调色板 + 滤波），在 8 核容器上是纯串行的一小段。
+             * 它产出的是「体积略小」的调试包 —— 调试阶段没有任何价值，
+             * 因为调试包不发布、不进商店、不受体积限制。
+             *
+             * release 不设这一项（保持默认 true），发布包该省的空间还是要省。
+             */
+            isCrunchPngs = false
         }
         getByName("release") {
             isMinifyEnabled = true
@@ -111,6 +164,64 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    /**
+     * native 库必须落地为**真实文件**，否则 proot 无法执行。
+     *
+     * ## 为什么这一句是 Linux 容器能不能跑的硬前提
+     *
+     * Android 10+ 起禁止从应用私有目录执行可执行文件（W^X）。唯一稳定可执行的
+     * 位置是 `nativeLibraryDir`，而系统只会把 `lib*.so` 解压到那里并给 `-rwxr-xr-x`。
+     *
+     * 但 AGP 默认会把 native 库**压缩**在 APK 里、安装时由系统按需 mmap ——
+     * 那种情况下 `nativeLibraryDir` 里可能没有真实文件（或没有执行位），
+     * proot 会以「cannot execute: required file not found」失败。
+     *
+     * `useLegacyPackaging = true` 强制 extractNativeLibs=true，
+     * 让 proot / libtalloc / libandroid-shmem 三个文件真实落地且可执行。
+     *
+     * ## 三个文件的名字为什么要这样取
+     *
+     * - `libproot.so`：proot 二进制改名（打包器只认 `lib*.so`）；
+     * - `libtalloc.so`：原包是 `libtalloc.so.2`，但 `lib*.so.2` **不匹配**
+     *   `lib*.so` 规则会被打包器丢弃。已用 patchelf 把 proot 的 NEEDED
+     *   从 `libtalloc.so.2` 改成 `libtalloc.so`，两边一致；
+     * - `libandroid-shmem.so`：proot 依赖的共享内存实现。
+     *
+     * 三者的 RPATH 都已设为 `$ORIGIN`，所以它们在同一个 `nativeLibraryDir`
+     * 里能互相找到，不依赖任何绝对路径（Termux 的
+     * `/data/data/com.termux/files/usr/lib` 在普通 App 里不存在）。
+     */
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    /**
+     * 内置 rootfs 必须**不压缩**打包。
+     *
+     * ## 为什么
+     *
+     * `assets/rootfs/` 里的 tar.gz 与 tar.xz 本身已是压缩流。再让 AAPT2
+     * 做一次 deflate 的后果：
+     *
+     *  1. **几乎不省空间**：压缩过的数据再压通常只减 0~1%，甚至变大；
+     *  2. **拖慢构建**：131 MB 的 Kali 镜像每次打包都要过一遍 deflate；
+     *  3. **运行时多一层解压**：`AssetManager.open()` 会流式解 deflate，
+     *     拷 131 MB 变成「边解压边写」，耗时翻倍且更耗 CPU。
+     *
+     * 用 `noCompress` 后 assets 里的字节与源文件完全一致，拷贝就是纯 I/O。
+     *
+     * ## 为什么用后缀匹配而不是路径前缀
+     *
+     * AGP 的 `noCompress` 只接受**后缀名**，不接受路径通配。
+     * 因此两个内置资产的文件名后缀必须分别是 `.tar.gz` 与 `.tar.xz`
+     * （见 `LinuxDistro.builtInAsset`），这也是那两个常量这样命名的原因。
+     */
+    androidResources {
+        noCompress += listOf("tar.gz", "tar.xz")
     }
 
     lint {
@@ -147,7 +258,6 @@ ksp {
 
 dependencies {
     implementation(project(":core:model"))
-    implementation(project(":core:common"))
     implementation(project(":core:data"))
     implementation(project(":core:ai"))
     implementation(project(":core:tool"))
@@ -158,12 +268,21 @@ dependencies {
     implementation(project(":ui:design"))
     implementation(project(":ui:widgets"))
     implementation(project(":ui:navigation"))
+    implementation(project(":ui:icons"))
     implementation(project(":feature:chat"))
     implementation(project(":feature:settings"))
+    // Linux 环境页的纯逻辑（proot 参数 / 镜像表 / SSH·FRP 脚本）。
+    // :app 不直接用这些类型，但 ProotEnvPort 需要它们；feature:settings 那边
+    // 用的是 implementation 依赖，所以 :app 也要显式声明。
+    implementation(project(":core:linux"))
     implementation(project(":feature:terminal"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
+    // 浮层返回键链路：`MainActivity` 直接 provide
+    // `LocalNavigationEventDispatcherOwner`（miuix 下拉/弹窗的硬依赖）。
+    // 不靠 miuix 传递 —— 那是隐式依赖，见 libs.versions.toml 的注释。
+    implementation(libs.androidx.navigationevent.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -176,6 +295,14 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.extended)
+    // `AnimatedContent` / `fadeIn` / `togetherWith` 都在
+    // `androidx.compose.animation:animation`，foundation / material3 只传递
+    // `animation-core`（`animateFloat` / `tween` 那批）。
+    //
+    // `:ui:design` 用 `api` 声明了它，所以本模块**能**编过；但那是别人的
+    // 传递依赖 —— 上游哪天把 `api` 改成 `implementation`，这里立刻编不过，
+    // 而报错落在本文件（使用方），排查方向完全错。项目纪律：直接使用必显式声明。
+    implementation(libs.compose.animation)
     debugImplementation(libs.compose.ui.tooling)
 
     implementation(libs.miuix.core)

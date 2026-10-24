@@ -71,6 +71,72 @@ class TerminalBuffer(
     /** 已写到行尾，下一个字符需先换行（真实终端的“延迟折行”语义）。 */
     private var pendingWrap: Boolean = false
 
+    /**
+     * 屏幕区**曾经写到过的最深行号**（0 基，含）。
+     *
+     * ## 为什么不能直接用 [cursorRow] 当「内容高度」
+     *
+     * 绝大多数输出确实是「光标一直往下推」，用 `cursorRow` 就够了。
+     * 但 ANSI 允许光标往回跳（`moveTo` / `moveBy`，`clear` 前的进度条重绘、
+     * `top`、`vim` 都这么干）。一次 `ESC[1;1H` 就把 `cursorRow` 拉回 0，
+     * 于是「按光标裁剪」会把下面已经写好的内容整段裁掉 —— 用户看到屏幕突然
+     * 只剩第一行。
+     *
+     * 也不能在 UI 层「扫所有行找最后一个非空格子」：`publish()` 在每次按键
+     * 都会调一次（`onInputChange`），而一次全屏扫描是
+     * `rows × columns = 200 × 80 = 16000` 格 —— 打字时每键 16000 次判断，
+     * 那是把输入延迟直接写进主线程。
+     *
+     * 所以在这里**增量维护**：写字符 / 换行时顺手取 max，UI 只需读一个 Int。
+     *
+     * ## 为什么它不需要在 scrollUp 时递减
+     *
+     * 全屏滚动时行整体上移，最深行不变（内容只是往上挪，屏幕仍是满的）；
+     * 局部滚动区（`scrollTop > 0`）不影响这块「内容高度」的语义。
+     * 可见行数只需要「屏幕被写到多深」，与具体是哪几行无关。
+     */
+    var deepestUsedRow: Int = 0
+        private set
+
+    /**
+     * 每一行的修改计数（行号 → 递增版本）。
+     *
+     * ## 为什么需要它（终端打字卡顿的直接原因，2026-10-24）
+     *
+     * `TerminalViewModel.publish()` 每次都会调 `linesOf` 把整个屏幕重建成
+     * `List<TerminalLine>`（每行 80 个 `RenderCell`）。而 `onInputChange`
+     * 每按一个键都会 `publish()` 一次 —— 于是**每敲一个字符**就分配
+     * `行数 × 80` 个对象（200 行就是 16000 个）。
+     *
+     * 结果是三件事一起变慢：分配、GC、以及 LazyColumn 里所有可见行的
+     * `remember(visible)` 全部失效（`visible` 是新建的 list，虽然
+     * data class 判等能命中，但构建它的成本已经付出）。
+     *
+     * 有了行版本号，`linesOf` 可以对**没变的行复用上一次的 `TerminalLine`
+     * 对象**（引用相等 → `remember` 直接命中 → 传输与比较都变成 O(1)）。
+     *
+     * ## 为什么用 Int 数组而不是 Map
+     *
+     * 行号是 `0 until rows` 的连续下标，用 `IntArray(rows)` 最省：
+     * 无装箱、无哈希、且能整体 `fill` 复位。Map 在每键调用的路径上是浪费。
+     *
+     * ## 什么时候递增
+     *
+     * 只在**真的改写了这一行**的地方：`writeCell`、`clearRow`、
+     * `clearRowRange`，以及 `scrollUp`/`scrollDown` 里被搬动的行。
+     * 用 `++` 而不是 `= 1`：同一个值被连续改写两次（进度条）也要能区分
+     * 「又变了」，否则复用的快照会停留在第一次的状态。
+     */
+    private val rowVersions: IntArray = IntArray(rows)
+
+    /** 取某行的修改计数（供 UI 判断能否复用上一次的快照）。 */
+    fun rowVersion(row: Int): Int = if (row in 0 until rows) rowVersions[row] else 0
+
+    /** 把整屏的版本号推进一格（用于「整体搬迁后所有行都可能变了」）。 */
+    private fun bumpAllRowVersions() {
+        for (i in rowVersions.indices) rowVersions[i]++
+    }
+
     var scrollTop: Int = 0
         private set
     var scrollBottom: Int = rows - 1
@@ -163,6 +229,10 @@ class TerminalBuffer(
         } else if (cursorRow < rows - 1) {
             cursorRow += 1
         }
+        // 换行本身就意味着「这一行已经属于内容」：即使新行还没写字符，
+        // 视觉上光标已经在那里了。不更新的话 `echo` 输出最后一行不带换行时
+        // 行数会少 1，看着像最后一行被吃掉。
+        if (cursorRow > deepestUsedRow) deepestUsedRow = cursorRow
     }
 
     /** 回车。 */
@@ -229,6 +299,10 @@ class TerminalBuffer(
             continuation.add(scrollBottom, MutableList(columns) { false })
             continuation.removeAt(scrollTop)
         }
+        // 行整体上移 → 每一格的内容都换了行号，UI 的快照一行都不能复用。
+        // 这是终端最频繁的路径（每次输出到屏底都滚一行），
+        // 不推进的话复用逻辑会拿旧快照画出**错行**（上滚后文字停在原位）。
+        bumpAllRowVersions()
     }
 
     /** 在滚动区内下滚 [n] 行。 */
@@ -239,6 +313,8 @@ class TerminalBuffer(
             continuation.removeAt(scrollBottom)
             continuation.add(scrollTop, MutableList(columns) { false })
         }
+        // 行整体下移 → 每一格的内容都换了行号，UI 的快照一行都不能复用。
+        bumpAllRowVersions()
     }
 
     /**
@@ -251,14 +327,27 @@ class TerminalBuffer(
             0 -> {
                 clearRowRange(cursorRow, cursorColumn, columns)
                 for (r in cursorRow + 1 until rows) clearRow(r)
+                // 光标以下全被清掉 → 内容高度收缩到光标行。
+                // 不收缩的话 `clear` 之后行数仍是清屏前那么高，界面留着
+                // 一大片空白（正是「清屏了但还是能往下滚」的来源）。
+                deepestUsedRow = cursorRow
             }
 
             1 -> {
                 for (r in 0 until cursorRow) clearRow(r)
                 clearRowRange(cursorRow, 0, cursorColumn + 1)
+                // 光标以上被清空，但光标以下还可能有内容 → 高度至少是光标行。
+                // 这里不能收缩到 cursorRow：下面那些行还在屏幕上。
+                if (deepestUsedRow < cursorRow) deepestUsedRow = cursorRow
             }
 
-            2 -> for (r in 0 until rows) clearRow(r)
+            2 -> {
+                for (r in 0 until rows) clearRow(r)
+                // 整屏清空 → 内容高度归零。`TerminalSession.reset()` 走的就是
+                // 这条分支，之后 `moveTo(1,1)` 把光标放回首行，于是
+                // 「清屏后只剩 1 行」——与真实终端一致。
+                deepestUsedRow = 0
+            }
         }
     }
 
@@ -303,11 +392,18 @@ class TerminalBuffer(
         if (row !in 0 until rows || column !in 0 until columns) return
         grid[row][column] = Cell(c, s)
         continuation[row][column] = false
+        // 维护「屏幕被写到多深」：`deepestUsedRow` 的 KDoc 说明了为什么必须增量维护。
+        // 注意这里**不跳过空格**：`echo "a b"` 里那个空格也是写出来的内容，
+        // 跳过会让中间空格行判定变浅（虽然那不影响行数，但少一条特例更不容易出错）。
+        if (row > deepestUsedRow) deepestUsedRow = row
+        // 这一行变了 → 让 UI 知道不能复用上一帧的快照（见 rowVersions 的 KDoc）。
+        rowVersions[row]++
     }
 
     private fun clearRow(row: Int) {
         grid[row] = MutableList(columns) { Cell() }
         continuation[row] = MutableList(columns) { false }
+        if (row in rowVersions.indices) rowVersions[row]++
     }
 
     private fun clearRowRange(row: Int, from: Int, to: Int) {
@@ -317,6 +413,8 @@ class TerminalBuffer(
             grid[row][c] = Cell()
             continuation[row][c] = false
         }
+        // 只清了一部分也要算「变了」：UI 上这一行确实从有色文本变成空白。
+        if (end > start && row in rowVersions.indices) rowVersions[row]++
     }
 
     companion object {

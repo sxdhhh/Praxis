@@ -51,6 +51,8 @@ internal fun LowFrostedTopBar(
     surfaceColor: Color,
     modifier: Modifier = Modifier,
     actions: (@Composable RowScope.() -> Unit)? = null,
+    /** 左上角主操作（打开侧边栏）；优先于 onBack，见 `AppScaffold` 的说明。 */
+    leadingAction: (@Composable () -> Unit)? = null,
 ) {
     Box(modifier.fillMaxWidth()) {
         // 半透明磨砂底：与 Scaffold 页面底色同色的表面色、略透。
@@ -66,13 +68,15 @@ internal fun LowFrostedTopBar(
                 modifier = Modifier.fillMaxWidth(),
                 color = Color.Transparent,
                 navigationIcon = {
-                    if (onBack != null) {
-                        IconButton(onClick = onBack) {
+                    when {
+                        leadingAction != null -> leadingAction()
+                        onBack != null -> IconButton(onClick = onBack) {
                             Icon(
                                 imageVector = MiuixIcons.Regular.Back,
                                 contentDescription = "返回",
                             )
                         }
+                        else -> Unit
                     }
                 },
                 actions = {

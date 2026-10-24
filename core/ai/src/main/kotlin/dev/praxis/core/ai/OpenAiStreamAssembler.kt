@@ -85,9 +85,19 @@ class OpenAiStreamAssembler(
     fun finish(): List<AiStreamEvent> {
         val events = mutableListOf<AiStreamEvent>()
         if (toolBuckets.isNotEmpty()) {
-            val calls = toolBuckets.values.map { bucket ->
+            val calls = toolBuckets.entries.map { (index, bucket) ->
                 ToolCall(
-                    id = bucket.id.ifEmpty { "call_${bucket.name}" },
+                    // ## id 兜底为什么带 index
+                    //
+                    // 上游正常会发 id（`call_abc123`）。但有些自建网关/旧版本
+                    // 只发 index 不发 id —— 那时旧的兜底是 `"call_${name}"`，
+                    // 于是「同一个工具被并行调用两次」（比如同时读两个文件）
+                    // 会得到**两个完全相同的 id**。
+                    //
+                    // 后果很具体：回传 tool 消息时两条 `tool_call_id` 相同，
+                    // OpenAI 会报 `duplicate tool_call_id`，或者模型把两份结果
+                    // 对错位。带上 index 就不会撞。
+                    id = bucket.id.ifEmpty { "call_${index}_${bucket.name}" },
                     name = bucket.name,
                     // 不 trim、不改一个字符：这是要回传上游的原文。
                     argumentsJson = bucket.args.toString(),

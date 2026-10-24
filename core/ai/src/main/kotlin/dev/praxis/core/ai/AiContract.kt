@@ -7,13 +7,19 @@ package dev.praxis.core.ai
  * 这样 provider 换掉（OpenAI / Anthropic / 本地 llama）时，上层一行不用改。
  */
 
-/** 思考强度。用于把「让模型想多久」从各家不同参数里抽象出来。 */
-enum class ThinkingEffort {
-    None,
-    Low,
-    Medium,
-    High,
-}
+/**
+ * 思考强度。
+ *
+ * ## 为什么是 typealias 而不是在这里定义
+ *
+ * 它同时被 `ModelSettings`（`core:model`）与 `ChatRequest`（本模块）需要，
+ * 而依赖方向是 `core:ai → core:model`。定义在这里会让 `core:model`
+ * 必须反向依赖 `core:ai` —— 循环依赖，编译直接失败。
+ *
+ * 所以真正的枚举在 `dev.praxis.core.model.settings.ThinkingEffort`；
+ * 这里保留别名，使既有的 `dev.praxis.core.ai.ThinkingEffort` 写法全部继续可用。
+ */
+typealias ThinkingEffort = dev.praxis.core.model.settings.ThinkingEffort
 
 /** 聊天角色。工具结果用 [Tool]，不复用 [User]。 */
 enum class ChatRole {
@@ -34,7 +40,71 @@ data class ChatMessage(
     val text: String = "",
     val toolCalls: List<ToolCall> = emptyList(),
     val toolResult: ToolResult? = null,
+    /**
+     * 附带图片（多模态输入）。
+     *
+     * ## 为什么挂在消息上而不是单独的 content parts 列表
+     *
+     * OpenAI 兼容协议里，带图片的 user 消息形态是：
+     *
+     * ```json
+     * {"role":"user","content":[
+     *   {"type":"text","text":"这是什么"},
+     *   {"type":"image_url","image_url":{"url":"data:image/png;base64,…"}}
+     * ]}
+     * ```
+     *
+     * 也就是「文本 + 图片」混在同一个 `content` 数组里。用
+     * `text: String` + `images: List<ChatImage>` 两个字段表达它，
+     * 序列化时再拼成数组 —— 好处是**现有 44 处 `ChatMessage(...)` 调用点
+     * 一行都不用改**（字段有默认值），而且 `text` 的语义没变
+     * （它始终是「这条消息的文字部分」）。
+     *
+     * 若改成 `content: List<ContentPart>` 的通用模型，44 处调用点全要改，
+     * 且 `ContextAssembler` / `SummaryCondenser` / `ToolExecutor` 里大量
+     * 把 `text` 当字符串处理的地方都要加适配层 —— 收益只是理论上的通用性。
+     *
+     * ## 为什么必须有默认空列表
+     *
+     * 见上：保住 44 处调用点。也表达了「没有图片是常态」。
+     */
+    val images: List<ChatImage> = emptyList(),
 )
+
+/**
+ * 一张随消息发送的图片。
+ *
+ * ## 为什么存 base64 而不是本地文件路径
+ *
+ * 协议要的是 `data:<mime>;base64,<payload>` 这种内联形态。存路径的话，
+ * 序列化时还得同步读文件（在 IO 线程、且文件可能已被用户删掉/被
+ * 系统清理）。而图片一旦被用户「发送」，它的内容就应该固定下来 ——
+ * 这与聊天记录「不可变」的性质一致。
+ *
+ * 代价是内存：一张 1MB 的图变成约 1.37MB 的 base64 字符串。
+ * 这也是必须在**选图时就压缩**的原因（见 `ChatImageData` 的说明），
+ * 而不是把原图直接塞进来。
+ *
+ * ## 为什么 mimeType 单独存
+ *
+ * `data:` URL 必须声明类型（`data:image/png;base64,…`）。服务端靠它
+ * 决定怎么解码；写错（比如把 jpeg 写成 png）在部分网关上会直接 400。
+ * 所以它不能靠猜，必须在解码图片时从文件头/ImageDecoder 拿准。
+ */
+data class ChatImage(
+    /** MIME 类型，如 `image/png` / `image/jpeg` / `image/webp`。 */
+    val mimeType: String,
+    /** 原始字节的 base64（**不含** `data:` 前缀，序列化时再拼）。 */
+    val base64: String,
+) {
+    /**
+     * 拼成协议要的 `data:` URL。
+     *
+     * 为什么不直接存成 `dataUrl` 一个字段：分开存让「换 mime 不重新编码」
+     * 成为可能，也让日志里截断 base64 时不会把前缀一起截掉。
+     */
+    fun toDataUrl(): String = "data:$mimeType;base64,$base64"
+}
 
 /** 模型发起的一次工具调用。 */
 data class ToolCall(
@@ -49,6 +119,29 @@ data class ToolResult(
     val callId: String,
     val content: String,
     val isError: Boolean = false,
+    /**
+     * 产生这个结果的工具名。
+     *
+     * ## 为什么必须有（2026-10-22 补）
+     *
+     * OpenAI 规范里 `role: "tool"` 消息的 `name` 是**可选**，但相当一批
+     * 兼容网关（自建中转、部分国产平台）会校验它，并与上一条 assistant
+     * 消息里 `tool_calls[].function.name` 比对；缺了就：
+     *
+     * ```
+     * 400 invalid_request_error: tool message must have a name
+     * ```
+     *
+     * 这类报错在「只用 OpenAI 官方」时永远看不到，所以很容易被判成
+     * 「用户用的是劣质中转」。实际上是我们少发了一个字段。
+     *
+     * ## 为什么默认空串而不是 null
+     *
+     * 空串 = 「不知道名字」，序列化时**不写** name 字段（与旧行为一致）；
+     * null 会强迫所有调用点处理，而大多数场景（无 tool 的历史消息、
+     * 单测）确实没有名字。用空串能让旧代码零改动地继续工作。
+     */
+    val name: String = "",
 )
 
 /** 一次请求的入参。 */
@@ -59,6 +152,25 @@ data class ChatRequest(
     val temperature: Double = 0.7,
     val maxTokens: Int? = null,
     val thinkingEffort: ThinkingEffort = ThinkingEffort.None,
+    /**
+     * 是否用流式（SSE）请求。
+     *
+     * ## 为什么这个开关必须存在（2026-10-24）
+     *
+     * 此前 provider 里写死 `put("stream", true)`，用户没有任何办法关掉它。
+     * 两种真实场景需要关：
+     *
+     *  1. **会吐 `<think>` / `<tool>` 标签的模型**：逐字渲染时先显示半个标签，
+     *     再被解析器吃掉，正文会剧烈抖动；
+     *  2. **网络极差**：一段段跳字的观感比等一整段更差，还更容易断在半路。
+     *
+     * ## 非流式下 UI 仍然要有反馈
+     *
+     * 关掉流式不等于关掉进度：`stage` 仍会停在 `Connecting`，
+     * 收到完整响应后一次性 seal 进气泡。所以这里只影响**传输方式**，
+     * 不影响状态机的阶段语义。
+     */
+    val stream: Boolean = true,
 )
 
 /** 工具声明（发给模型的那一份）。 */

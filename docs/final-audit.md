@@ -1,4 +1,4 @@
-# Praxis 最终审计（R31 更新）
+# Praxis 最终审计（R37 更新）
 
 > 对照 `/home/praxis-design/` 五份文档（1069 行）逐条核对。
 > 结论分三类：**已达成** / **主动放弃（附原因）** / **未达成（附缺口）**。
@@ -47,8 +47,9 @@
 | P1 | 顶部渐变模糊 | 已达成 | `AppScaffold` 的 `progressiveTextureBlur` |
 | P1 | 底栏玻璃折射 | **代码已接线，真机未验证** | `LocalPageBackdrop` 下发内容层采样源 → 底栏 `drawBackdrop(vibrancy→blur→lens)` |
 | P1 | 低版本降级 | 已达成 | `LowAppScaffold` + `LowFrostedTopBar` |
-| P2 | 丝滑滚动（到顶/到底） | 已达成（仅 Lazy 版） | `AutoFollowScrollLazy`（Chat/Terminal 已用）；非 Lazy 版零调用 |
+| P2 | 丝滑滚动（到顶/到底） | 已达成（仅 Lazy 版） | `AutoFollowScrollLazy` = apixiaoyuan v5 弹簧引擎（k=130/c=24/m=1，245 行逐行移植）；Chat / Terminal / Log 三处已用；非 Lazy 版零调用 |
 | P2 | 拖拽列表防回流 | 已达成 | `isWaitingForUpdate` 守卫 |
+| P2 | 预测性返回转场 | 已达成（四档可选） | `ui:navigation/transition/`：AOSP（InstallerX 260 行逐行移植）/ miuix / Scale / Classic；外观页可切且立即生效 |
 | P2 | 对话框关闭动画不跳过 | 已达成 | `LocalDismissState` |
 | P3 | 流式打字机效果 | 已达成 | `AiStreamEvent.Delta` + 同一气泡改文本 |
 | P3 | 消息落库、重启可读 | 已达成 | `ChatPersistence` + Room v3 |
@@ -201,18 +202,164 @@ python3 tools/audit_scroll_inset.py --strict
 | 备份 | `backup_rules.xml` / `data_extraction_rules.xml` 已全量排除，不存在跨设备解密问题 |
 | 测试 | 5 例（只测判别函数；encrypt/decrypt 需真机 Keystore） |
 
-## 五之二、服务商密钥加密（R17）
+## 五之三、API 配置页对齐 Operit（R34）
 
 | 项 | 实现 |
 |---|---|
-| 方案 | Android Keystore + AES/GCM/NoPadding（128-bit tag） |
-| 不用 EncryptedSharedPreferences 的理由 | 依赖 Tink，多 ROM 有初始化抛异常导致设置页打不开的案例 |
-| 存储格式 | base64(iv):base64(ciphertext)，IV 每次随机 |
-| 加密失败 | 降级存明文（保可用性） |
-| 解密失败 | 返回空串 = 未配置，提示用户重填（不崩） |
-| 旧数据 | looksEncrypted() 判别，启动时 migrateApiKeyIfNeeded() 自动升级 |
-| 备份 | 两个 backup 规则文件已全量排除，不存在跨设备解密问题 |
-| 测试 | 5 例（只测判别函数；encrypt/decrypt 需真机 Keystore） |
+| 参照物 | Operit `ModelApiSettingsSection.kt`（2197 行）/ `ModelConfigData.kt`（30+ 字段）/ `ApiProviderConfigCollect.kt`（38 种服务商） |
+| 抄的是什么 | **「选服务商 → 自动回填默认端点与默认模型」** 这条流程；不是字段数量 |
+| 预设表 | `core:model/settings/ApiProvider.kt`，14 项（国内 5 + 国际 4 + 本地 3 + 自定义），纯数据无 Compose 依赖，可纯 JVM 单测 |
+| 未抄字段 | 多 Key 池、topP/topK/penalty、上下文总结、llama.cpp/MNN 参数、自定义请求头、各家专有开关 —— 判据是「填了会不会真的进请求体」 |
+| 控件 | 全部 miuix：`Card` + `SmallTitle` + `TextField` + `OverlaySpinnerPreference` + `SliderPreference` + `TextButton` |
+| 弹层 | 用 Overlay 版而非 Window 版（Window 版内部开 Dialog 新 Window，单 Activity + NavDisplay 下抢焦点闪退） |
+| 保存 | 保持显式保存（Operit 是边改边自动存）；`baseUrl` 半截字符串自动落盘会存坏，且触发无效请求 |
+| 温度 | 本版才成为真控件：同时修掉 `SettingsBackedProvider` 只 `copy(model)` 导致 `settings.temperature` 从未进过请求体的缺陷 |
+| 端点拼接 | 抽到 `core:ai/ChatEndpoint.kt`；修正旧规则只认「正好以 /v1 结尾」导致智谱 `/v4`、阿里云 `/compatible-mode/v1` 被插成 `.../v4/v1/chat/completions` → 404 |
+| 清除密钥 | 新增显式按钮。密钥留空在 `onSave` 里表示「不修改」，此前「想删 Key」无任何表达方式（填空格会被 `isNotBlank()` 拦掉） |
+| 测试 | `ChatEndpointTest`（13 例，逐条对应真实故障）+ `ApiProviderPresetsTest`（6 例，钉住预设表默认值正确性） |
+
+## 五之四、主页聊天栏对齐 Operit（R35）
+
+| 项 | 实现 |
+|---|---|
+| 参照物 | Operit `ClassicChatInputSection.kt`（778 行）与 `AgentChatInputSection.kt`（3339 行） |
+| 抄的结构 | 纵向容器：**阶段提示在上、输入行在下**；圆形图标按钮而非文字按钮 |
+| 输入框 | 裸 `BasicTextField` + 自画 Surface → miuix `TextField`（`useLabelAsPlaceholder = true`、`minLines=1 / maxLines=5`） |
+| 按钮 | `TextButton("发送"/"生成中")` → `IconButton` 40dp 圆钮，三态（Send 档 / Stopwatch 档 / 禁用） |
+| 阶段提示 | 新增 `ChatStage`（Idle/Connecting/Receiving/ExecutingTool）+ 转圈 + 文案，入场 fade 300 / expand 400 |
+| 停止键 | 新增 `ChatViewModel.cancel()`：取消协程 + flush 半截内容 + 状态归位 |
+| 未抄 | 附件面板、全屏输入、待发队列、@提及高亮、Token 超限、语音 —— 均无对应链路 |
+
+### 顺带修掉的两个真缺陷
+
+1. **`CancellationException` 被当成错误**：`catch (e: Exception)` 排在前面，会把用户主动取消捕获成「未知错误」气泡。修正为 `CancellationException` 分支前置并重新抛出。
+2. **`feature:chat` 缺 miuix-icons 直接依赖**：此前靠 `ui:widgets` 的 `api` 传递；改为本模块 `implementation(libs.miuix.icons)`。
+
+### 测试
+
+`ChatStageTest`（6 例）：阶段推进顺序、流式中重复 send 被拒、取消后状态归位且保留半截正文、取消不产生错误气泡、空闲取消是空操作、每个非空闲阶段都有文案。
+用 `Dispatchers.setMain(UnconfinedTestDispatcher())` 驱动 `viewModelScope`（纯 JVM 无 Main 会直接抛异常）。
+
+## 五之五、丝滑滚动回到 apixiaoyuan 正源（R36）
+
+用户指出：「丝滑滚动用 apixiaoyuan 的，你之前看到是 nizou 那个项目的」。
+
+### 错误事实链（已完全取证）
+
+| 时间 | 事实 |
+|---|---|
+| 基线 `63507cb` | `AutoFollowScroll.kt` = **245 行**，与 apixiaoyuan 原版 **只差 package 一行**（v5 弹簧引擎） |
+| `f8ef00d` | 提交信息写「丝滑滚动改照抄 apixiaoyuan 原生 animateScrollToItem」，内容却是换成 `animateScrollToItem` + `-2` 余量 → **107 行** |
+| 真因 | 那个写法来自 **`cn.nizou.sxd/CustomScoreScreen.kt:317`**，不是 apixiaoyuan。apixiaoyuan 全仓**零** `animateScrollToItem` / `animateScrollTo` |
+| 后果 | 注释与提交信息都声称「照抄 apixiaoyuan」，实际把正源实现删了，引用的是一个不存在的出处 |
+
+### 两套方案不是一回事
+
+| 方案 | 出处 | 解决什么 |
+|---|---|---|
+| `animateScrollToItem` + `-2` | cn.nizou.sxd `CustomScoreScreen.kt:317` | 一次滚动动画；追加时反复重启，速度接不上 |
+| `LOG_SCROLL_ANIMATION_THRESHOLD = 500` | cn.nizou.sxd `LogsScreen.kt:689` | 手动跳转多远才瞬跳 |
+| **弹簧跟随引擎** | apixiaoyuan `AutoFollowScroll.kt`（k=130/c=24/m=1） | **持续跟随**：内容高度离散变化→每帧连续速度轨迹，v 从不归零 |
+
+### 处置
+
+1. `git checkout 63507cb -- AutoFollowScroll.kt`，恢复 245 行 v5 弹簧引擎，并与上游逐字 diff 验证（仅 package 不同）。
+2. `feature:settings/LogScreen` 接入 `AutoFollowScrollLazy(itemCount = entries.size)`（上游 `LogScreen.kt:153` 原样）。日志页此前只有跳顶/跳底 FAB、无自动跟随。
+3. 保留日志页的 500 阈值 FAB，但注释明确写出它是 **cn.nizou.sxd 的值**、与自动跟随无关。
+4. `ChatScreen` / `TerminalScreen` 的错误注释同步纠正（原注释把引用指错了项目）。
+5. 显式补齐 `compose-foundation` 依赖（`ui:design` 与 `ui:theme`）——它是 `ScrollState` / `LazyListState` / `gestures.scrollBy` / `isSystemInDarkTheme` 的来源，之前全仓靠 material3 与 miuix 隐式传递。
+
+### 未构建
+
+本轮仍按要求**未构建**（R32–R36 五轮累积）。
+
+## 五之六、Linux 环境：Ubuntu 容器 + SSH + FRP（R37）
+
+用户要求：「终端使用 operit 的 ubuntu，并且可以开启 frp 服务器和 ssh，然后可以换源为国内镜像源，但是界面要自写可以部分参考 apixiaoyuan」。
+
+### 取证结果：Operit 主仓**没有**这套能力
+
+搜通了 `/root/Operit`：
+
+| 搜什么 | 结果 |
+|---|---|
+| `proot` / `rootfs` / `ubuntu` | 只在 `PathMapper.kt`、`RawSnapshotBackupManager.kt` 等文件里作为**路径字符串**出现 |
+| `sshd` / `frpc` / `frps` | 只出现在 `OpenSourceLicenses.kt`（开源许可列表） |
+| `rootfs` / `alpine` / `debian` 容器 | 只有 `templates/flutter/linux`（模板目录，与本主题无关） |
+| 终端执行层 | `StandardShellExecutor` = `Runtime.exec` + `shell -c`，标准 Android 权限 |
+
+结论：Operit 的终端是**系统 shell**，不是 Ubuntu 容器。所以「用 operit 的 ubuntu」这件事在源码层面不成立 —— 本能力按需求新写。
+
+### apixiaoyuan 的相反结论（必须记录，否则以后还会重蹈）
+
+`cn.apixiaoyuan.app/core/pk/host/TerminalSession.kt` 的 KDoc 明确断言过：
+
+> 「Android 自带 `/system/bin/sh` + toybox 就是一个完整用户态……再塞一个 Ubuntu rootfs 只是把同样的东西换成 200MB 的另一份副本，而且还要 proot 才能跑（国产 ROM 上常被限制）。」
+
+那条结论对它的目标（终端里跑 node）成立。本次需求不同，**必须**要真发行版，理由三条：
+
+| 需求 | 系统 sh | 为什么必须容器 |
+|---|:-:|---|
+| `apt` 装包 | ✗ | toybox 没有包管理器 |
+| 换国内镜像源 | ✗ | 没有 apt 就没有 sources.list |
+| `sshd` / `frpc` | ✗ | 需 glibc 用户态与完整 `/etc`；Android 是 bionic |
+
+### 架构：纯逻辑在 `core:linux`，执行在 `:app`
+
+沿用项目既有的「端口在里、实现在外」（与 `CommandRunner` / `ChatPersistence` 同套路）：
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| `core:linux`（纯 JVM） | `UbuntuMirror.kt` | 6 个国内镜像 + 2 个 LTS 版本 + `ubuntu-base` 下载地址构造 |
+| 同上 | `ProotCommand.kt` | proot 参数构造、换源脚本、DNS 脚本 |
+| 同上 | `RemoteAccess.kt` | `SshConfig` / `SshdScript` / `FrpConfig` / `FrpScript` |
+| `feature:settings` | `LinuxEnvScreen.kt`（472 行） | 界面（自写，miuix 控件） |
+| 同上 | `LinuxEnvViewModel.kt` | 状态机 + `LinuxEnvPort` 端口 |
+| `:app` | `ProotEnvPort.kt`（338 行） | 下载、toybox 解压、ProcessBuilder 起 proot |
+
+### 已验证的硬前提（2026-10-21 实测）
+
+| 前提 | 验证方式 | 结果 |
+|---|---|---|
+| `nativeLibraryDir` 里的文件可执行 | `ls -la /data/app/.../lib/arm64/` | `-rwxr-xr-x` ✅ |
+| `useLegacyPackaging = true` | `praxis.android.application.gradle.kts:27` | 已设，native 库落地为真实文件 ✅ |
+| toybox tar 支持 gzip 与忽略 owner | `toybox tar --help` | `-z` / `-o` 均支持 ✅ |
+| 设备有 sha256sum / ps / kill | `toybox` applet 列表 | 有；**无** wget/curl/awk ⚠️ |
+| 清华 ubuntu-base arm64 可下 | `curl -I` | HTTP 200，29,865,086 字节 ✅ |
+
+### 三个 Android 特有的坑（都写进了代码注释与单测）
+
+1. **端口必须 ≥ 1024**：普通应用无 `CAP_NET_BIND_SERVICE`，写 22 会让 sshd 直接退出，用户看到的是「已开启但连不上」。`SshConfig.portProblem` 当场提示。
+2. **`UsePAM no`**：proot 里 `pam_loginuid` / `pam_systemd` 写不了 `/proc/self/loginuid`，会把**所有**密码登录拒掉。
+3. **`sshd -D`**：不加 `-D` 它自己 fork 到后台，我们的进程句柄立即退出 → UI 永远显示「已停止」，但 sshd 其实在跑。
+
+### 换源的两个必做细节
+
+- **arm64 必须用 ports 池**（`ubuntu-ports`），用主池会报「找不到包」；
+- **deb822 与传统 sources.list 都要写**：24.04 读前者、22.04 读后者，只写一个就会出现「换源后 apt 还在连官方」。
+
+### 未做（如实列出）
+
+| 项 | 状态 |
+|---|---|
+| proot 二进制本身 | **未随 APK 打包**（需上游二进制 + WeKit 那份 `android-ptrace-events.patch`）。缺它时页面明确显示「缺少 proot」而不是假装能用 |
+| rootfs 预置 | 不做 assets 预置，一律运行时下载（APK 体积） |
+| 终端页接入容器 | 容器的交互 shell 目前与系统终端**并存**；未做「在终端页里切换 shell」 |
+| FRP 服务端 | 需用户自备公网 frps |
+
+### 测试
+
+`core:linux`：`UbuntuMirrorTest`（9 例）+ `ProotCommandTest`（15 例）+ `SshConfigTest`（11 例）+ `FrpConfigTest`（8 例）。
+`feature:settings`：`LinuxEnvViewModelTest`（12 例，含「busy 必须复位」「端口 22 不许开启」「停止级联」）。
+
+## 五之七、已知遗留
+
+| 项 | 状态 |
+|---|---|
+| `PermissionTier` 不持久化 | `AppModule` 固定 `STANDARD`，重启回到标准档 |
+| R32–R37 累积未编译 | 六轮按用户要求未构建，下轮统一验证 |
+| 视觉观感验收 | 玻璃折射、顶栏渐变模糊、转场动画、底部让位四处均未做主观确认 |
+| release 签名 | 仍缺 `PRAXIS_KEYSTORE` / `PRAXIS_STORE_PASS` / `PRAXIS_KEY_PASS` |
 
 ## 六、lint 结论
 

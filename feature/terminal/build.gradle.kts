@@ -28,4 +28,7 @@ dependencies {
     api(libs.miuix.ui)
 
     testImplementation(libs.junit)
+    // TerminalViewModel 单测要替换 Dispatchers.Main（viewModelScope 绑主线程）。
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.kotlinx.coroutines.core)
 }
