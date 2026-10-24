@@ -110,6 +110,25 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
 
     override fun isProotAvailable(): Boolean = prootBinary.isFile
 
+    /**
+     * 校正已有 rootfs 的权限位 —— 见接口 KDoc。
+     *
+     * ## 为什么复用安装流程里的 normalizeRootfsPermissions
+     *
+     * 新装与修复必须走**同一份**规则。若各写一套，会出现
+     * 「新装的能用、修复过的还是坏的」这种最难查的分叉。
+     *
+     * @return 是否成功；rootfs 不存在时返回 true（没什么可修的）。
+     */
+    override suspend fun repairPermissions(env: LinuxEnvironment): Boolean =
+        withContext(Dispatchers.IO) {
+            val root = env.rootfsDir
+            if (!root.isDirectory) return@withContext true
+            runCatching {
+                normalizeRootfsPermissions(root) { /* 修复期日志对调用方无意义 */ }
+            }.isSuccess
+        }
+
     override fun isInstalled(env: LinuxEnvironment): Boolean = env.isInstalled
 
     // ── 安装 ────────────────────────────────────────────────────────
@@ -254,6 +273,18 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
                 onLine("替换后找不到 /bin/sh，安装失败。")
                 return@withContext false
             }
+
+            // ⑥-b 权限归一化（兜底）。
+            //
+            // `-p` 已经让 tar 保留权限，但还有两种情况会留下 0700/0600：
+            // 内置 tarball 本身打包时丢了权限位；或某些 ROM 的 toybox tar
+            // 不认 `-p`。而 0700 的目录会让 proot 容器里的链接器读不到
+            // `/etc/ld.so.cache`，表现是 `execve: No such file or directory`
+            // —— 终端里任何命令都失败，且报错完全指不到权限。
+            //
+            // 所以这里无条件再校正一遍。开销是一次目录遍历，
+            // 相比「装完不能用、还查不出原因」完全不值一提。
+            normalizeRootfsPermissions(target, onLine)
 
             runCatching { tarball.delete() }
             onLine("安装完成（${env.distro.label}）。")
@@ -820,6 +851,73 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
     }
 
     /**
+     * 把 rootfs 的权限位校正回「可读可执行」。
+     *
+     * ## 规则
+     *
+     * | 类型 | 目标权限 |
+     * |---|---|
+     * | 目录 | `rwxr-xr-x`（0755） |
+     * | 已有任一执行位的普通文件 | `rwxr-xr-x`（0755） |
+     * | 其余普通文件 | `rw-r--r--`（0644） |
+     * | 符号链接 | 不动（改它会作用到目标） |
+     *
+     * ## 为什么「保留执行位」而不是一律 0755
+     *
+     * 一律给执行位会让容器里每个文本文件都变成可执行（`ls -l` 满屏绿色，
+     * 且 `find -executable` 之类判断全部失真）。所以只有原本带执行位的
+     * 才继续带执行位。
+     *
+     * ## 为什么必须跳过符号链接
+     *
+     * `File.setReadable` 走 `chmod`，对符号链接会**作用到目标**。
+     * rootfs 里 `bin -> usr/bin`、`lib -> usr/lib` 这类链接很多，
+     * 不跳过等于在远处改目录权限，且顺序不可控。
+     */
+    private fun normalizeRootfsPermissions(root: File, onLine: (String) -> Unit) {
+        var dirs = 0
+        var files = 0
+        var failed = 0
+        // 广度优先显式栈：递归在 rootfs 这种深树上容易踩栈，且不好控进度。
+        val stack = ArrayDeque<File>()
+        stack.addLast(root)
+        while (stack.isNotEmpty()) {
+            val current = stack.removeLast()
+            val children = runCatching { current.listFiles() }.getOrNull() ?: continue
+            for (child in children) {
+                // 符号链接：`canonicalPath` 与 `absolutePath` 不一致即视为链接。
+                val isSymlink = runCatching {
+                    child.canonicalPath != child.absolutePath
+                }.getOrDefault(false)
+                if (isSymlink) continue
+
+                val ok = if (child.isDirectory) {
+                    dirs++
+                    child.setReadable(true, false) &&
+                        child.setExecutable(true, false) &&
+                        child.setWritable(true, true)
+                } else {
+                    files++
+                    val hadExec = child.canExecute()
+                    child.setReadable(true, false) && child.setWritable(true, true) &&
+                        if (hadExec) child.setExecutable(true, false) else true
+                }
+                if (!ok) failed++
+                if (child.isDirectory) stack.addLast(child)
+            }
+        }
+        // 根目录本身也要放开（否则 `cd /` 进不去）。
+        root.setReadable(true, false)
+        root.setExecutable(true, false)
+        root.setWritable(true, true)
+
+        onLine(
+            "权限归一化：$dirs 个目录、$files 个文件" +
+                if (failed > 0) "（$failed 个无法修改，可能影响容器启动）" else "，完成。",
+        )
+    }
+
+    /**
      * 跑一次 tar。
      *
      * @param excludes 需要跳过的条目名（硬链接条目）。空列表表示不排除任何东西。
@@ -838,10 +936,10 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
             //   xz   → -J（已实测本机 toybox tar 的 usage 里明确列了 `J  xz compression`）
             //   raw  → 不给压缩标志
             val mode = when (format) {
-                TarFormat.Gzip -> "-xzof"
-                TarFormat.Xz -> "-xJof"
-                TarFormat.Raw -> "-xof"
-                TarFormat.Unknown -> "-xof" // 不会走到（调用方已拦下）
+                TarFormat.Gzip -> "-xzopf"
+                TarFormat.Xz -> "-xJopf"
+                TarFormat.Raw -> "-xopf"
+                TarFormat.Unknown -> "-xopf" // 不会走到（调用方已拦下）
             }
             onLine("解压参数：tar $mode")
             val argv = mutableListOf(

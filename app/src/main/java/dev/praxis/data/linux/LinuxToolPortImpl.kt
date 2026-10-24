@@ -100,6 +100,21 @@ class LinuxToolPortImpl(
         }
 
         // ③ 执行。加锁避免并发串台。
+        //
+        // ## 为什么在这里自愈一次
+        //
+        // 旧版解压缺 `-p`，导致 rootfs 权限是 0700/0600，容器里 execve
+        // 会因为读不到 `/etc/ld.so.cache` 而报
+        // `No such file or directory`（指不到权限，极易误判成「没装好」）。
+        //
+        // 修好解压参数只对**新装**生效；已经在用的环境还是坏的。
+        // 在这里先修一次，用户（和模型）都不用知道有过这个 bug。
+        //
+        // 开销：一次目录遍历 + chmod。只在第一次调用时真正改文件，
+        // 后续 set 已满足权限时系统调用很快返回。
+        // 自愈：先把权限校正一次（幂等）。
+        runCatching { envPort.repairPermissions(env) }
+
         execMutex.withLock {
             execMutexGuard(
                 command = command,

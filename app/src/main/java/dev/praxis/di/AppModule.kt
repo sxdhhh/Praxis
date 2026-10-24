@@ -245,6 +245,26 @@ val appModule = module {
                     dev.praxis.core.linux.GetTerminalScreenTool(sessionPort),
                 )
             }
+            // ## 宿主 Android shell 工具（移植 Operit 的 SuperAdmin 能力）
+            //
+            // 与上面两组的分界（模型最容易搞混的地方）：
+            //  - `linux_exec` / 终端会话 = 在 **proot 容器**里跑（nmap / apt / python3）；
+            //  - `host_shell` = 在 **手机系统**上跑（pm / am / settings / dumpsys）。
+            //
+            // 容器里没有 `pm`，手机上也没有 `apt`。少任何一边，模型都会
+            // 用错工具然后开始尝试「在容器里装 Android 工具链」这种歪路。
+            //
+            // 档位是 ROOT（见 HostShellTool 的 KDoc）：不到 ROOT 的用户
+            // 连工具都看不到，而不是发出去再被拒。
+            run {
+                // 两个工具**共用同一个 Port**：`hasRoot()` 会真的跑一次 `su -c id`，
+                // 建成两个实例等于每次调用探活两遍（用户看到的是「点了没反应」）。
+                val hostShell = dev.praxis.data.shell.AndroidHostShellPort(androidContext())
+                registerAll(
+                    dev.praxis.data.shell.HostShellTool(hostShell),
+                    dev.praxis.data.shell.HostShellChannelsTool(hostShell),
+                )
+            }
         }
     }
     single { ToolExecutor(get<ToolRegistry>()) }

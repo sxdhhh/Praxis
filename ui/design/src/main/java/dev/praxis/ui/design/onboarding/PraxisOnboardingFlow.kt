@@ -27,6 +27,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import dev.praxis.ui.design.effect.BgEffectBackground
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -159,9 +164,44 @@ private fun StartupScreen(onNext: () -> Unit) {
     val context = LocalContext.current
     val blur = !GlassBackend.useLowPipeline
 
+    // 采样源：玻璃品牌要「透出背后的流光」，就必须先把流光录进一个
+    // GraphicsLayer，再让 textureBlur 去采它。与关于页
+    // （`AboutScreen.kt` 的 `rememberLayerBackdrop { drawContent() }`）同一做法。
+    //
+    // 只有模糊可用时才建 —— 低版本建了也用不上，白占一层图层。
+    val backdrop = if (blur) {
+        rememberLayerBackdrop { drawContent() }
+    } else {
+        null
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
+        // ── 采样层：**只放流光**，不放 AndroidView ────────────────
+        //
+        // `layerBackdrop` 的 `drawContent()` 会逐帧录制这层子树。
+        // 把 AndroidView（一整棵原生 View 树）放进来会让 hwui 递归建
+        // RenderNode 到 512 层，直接打穿 RenderThread 栈 —— device 实测
+        // `signal 11 / stack overflow in RenderNode::prepareTreeImpl`。
+        //
+        // 所以采样层只留一个 Compose 绘制的 shader 层（树浅），
+        // AndroidView 移到外面正常绘制。
         if (blur) {
-            HyperCeilerStartupGlow(modifier = Modifier.fillMaxSize())
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(backdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier),
+            ) {
+                HyperCeilerStartupGlow(modifier = Modifier.fillMaxSize())
+            }
+            // 品牌：关于页同款玻璃（textureBlur + 三层 blend + DstIn）。
+            //
+            // 采样源与流光层是同一个 backdrop，所以品牌玻璃透出的
+            // 正是背后那片流光 —— 这与关于页的层次完全一致。
+            ProvisionGlassBrand(
+                backdrop = backdrop,
+                iconSize = 96.dp,
+                modifier = Modifier.align(Alignment.Center),
+            )
         }
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -192,17 +232,15 @@ private fun StartupScreen(onNext: () -> Unit) {
                 // **箭头已画在 drawable 内**，白色箭头压在半透明黑上清晰。
                 //
                 // 这也是用户明确指出的点：「按钮背景应该是黑色的」。
-                // ## 图形换成 Praxis 自己的（不解：原版是 HyperCeiler 的品牌）
+                // ## 品牌图交给 Compose（上面那层 `ProvisionGlassBrand`）
                 //
-                // 原版这两个 drawable 是 HyperCeiler 的「H」字标与图形。
-                // 照抄会把自己的应用装成别人的产品 —— 所以换成
-                // `provision_logo_praxis`（与 `ic_launcher_foreground` 同一条
-                // 「P」形 path），并给它三色斜向渐变（原版是单色白）。
+                // XML 的 `logo_image` / `text_logo_image` 只保留**布局占位**
+                // （撑出 90dp 与下方字标的间距，让按钮位置不变），
+                // 自身不显图 —— 否则会把 Compose 画的玻璃品牌盖住。
                 //
-                // `aapt:attr` 渐变在 drawable 内声明，所以 ImageView 直接显示
-                // 就是彩色的，不需要 Kotlin 侧着色。
-                logo.setImageResource(R.drawable.provision_logo_praxis)
-                textLogo.setImageResource(R.drawable.provision_text_praxis)
+                // 这两个 View 的原图是 HyperCeiler 的品牌资源，留着也不该显示。
+                logo.visibility = View.GONE
+                textLogo.visibility = View.GONE
                 if (!blur) {
                     background.setImageResource(R.drawable.provision_logo_image_bg)
                 }
@@ -216,34 +254,15 @@ private fun StartupScreen(onNext: () -> Unit) {
                 nextLayout.visibility = View.INVISIBLE
 
                 // 图标：delay 60ms；0.5 → 0.95（440ms）→ 1.0（700ms）。
+                // 图标动画保留在 XML 层：它驱动 `logo_image_wrapper` 的淡入，
+                // 而 Compose 品牌层叠在同一位置 —— wrapper 现在是「动画时钟」。
+                //
+                // 不能整段删掉：下面按钮的 1340ms 是接在这段之后的时序依赖，
+                // 删了会让按钮提前出现、破坏与原版一致的节奏。
                 root.postDelayed({
-                    logo.visibility = View.VISIBLE
                     logoWrapper.visibility = View.VISIBLE
-                    logo.scaleX = 0.5f
-                    logo.scaleY = 0.5f
-                    logo.animate().scaleX(0.95f).scaleY(0.95f)
-                        .setDuration(440)
-                        .setInterpolator(android.view.animation.DecelerateInterpolator())
-                        .withEndAction {
-                            logo.animate().scaleX(1f).scaleY(1f)
-                                .setDuration(700)
-                                .setInterpolator(android.view.animation.DecelerateInterpolator())
-                                .start()
-                        }
-                        .start()
-
-                    textLogo.scaleX = 0.5f
-                    textLogo.scaleY = 0.5f
-                    textLogo.animate().scaleX(0.95f).scaleY(0.95f)
-                        .setDuration(440)
-                        .setInterpolator(android.view.animation.DecelerateInterpolator())
-                        .withEndAction {
-                            textLogo.animate().scaleX(1f).scaleY(1f)
-                                .setDuration(700)
-                                .setInterpolator(android.view.animation.DecelerateInterpolator())
-                                .start()
-                        }
-                        .start()
+                    logoWrapper.alpha = 0f
+                    logoWrapper.animate().alpha(1f).setDuration(440).start()
                 }, 60)
 
                 // 按钮：delay 1340ms；alpha 0→1 + scale 0.9→1，450ms。
@@ -544,13 +563,55 @@ private fun BasicScreen(onBack: () -> Unit, onNext: () -> Unit) {
  */
 @Composable
 private fun CongratulationScreen(onFinish: () -> Unit) {
-    val context = LocalContext.current
     val blur = !GlassBackend.useLowPipeline
 
+    // ── 背景：关于页同款流光（用户要求第 2 条）────────────────────
+    //
+    // ## 为什么不用原来的做法
+    //
+    // 上一版是「黑色 Box + HyperCeilerStartupGlow」。那是**开屏**的粒子光晕，
+    // 不是完成页该有的底 —— 而用户明确要求「最后一个界面背景用关于页的」。
+    //
+    // 关于页（`AboutScreen.kt`）的底是 `BgEffectBackground`：
+    // AGSL 绘制的流动渐变，随取色/深浅主题给不同预设，并且滚到底可以淡出。
+    // 这里直接用它，参数取关于页那组（`dynamicBackground = true`）。
+    //
+    // ## 为什么还要 `layerBackdrop`
+    //
+    // 品牌与按钮要做玻璃，而玻璃必须**采到背后那片流光**才有颜色。
+    // 把采样源挂在背景层（`bgModifier`）而不是挂在内容层，是这条纪律：
+    // 采样源只装「你想透出来的东西」，不装消费者自己 ——
+    // 否则会采到内容自己，出现「玻璃折射玻璃」的重影。
+    // 关于页第 393 行也是挂在 `bgModifier` 上。
+    val backdrop = if (blur) {
+        rememberLayerBackdrop { drawContent() }
+    } else {
+        null
+    }
+
+    // ## AndroidView 必须在 `BgEffectBackground` **之外**
+    //
+    // 上一版把它放进去（作为 content 的一部分），而 content 与 `bgModifier`
+    // 里的 `layerBackdrop` 共享同一棵渲染子树 —— 于是那棵原生 View 树
+    // 也被录进 RenderNode，触发与本页开屏同一个栈溢出崩溃。
+    //
+    // 这里改成两层并列：底层流光（被采样）+ 上层的 AndroidView（不采样）。
+    // 视觉不变：XML 根已设为透明，文字与按钮照旧浮在流光之上。
     Box(modifier = Modifier.fillMaxSize()) {
-        if (blur) {
-            HyperCeilerStartupGlow(modifier = Modifier.fillMaxSize())
+        BgEffectBackground(
+            dynamicBackground = true,
+            modifier = Modifier.fillMaxSize(),
+            bgModifier = backdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier,
+        ) {
+            ProvisionGlassBrand(
+                backdrop = backdrop,
+                iconSize = 96.dp,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(bottom = 120.dp),
+            )
         }
+
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -561,14 +622,22 @@ private fun CongratulationScreen(onFinish: () -> Unit) {
                 val stateText = root.findViewById<TextView>(R.id.system_state_text)
                 val next = root.findViewById<View>(R.id.next)
 
-                // 原版 initView：文案先「正在准备」，logo 与按钮都藏起来。
-                // 完成页 XML 的 `android:src` 写的是原版 HyperCeiler 图，
-                // 这里显式换成 Praxis 的（含渐变）。
-                root.findViewById<ImageView>(R.id.logo_image)
-                    ?.setImageResource(R.drawable.provision_logo_praxis)
-                root.findViewById<ImageView>(R.id.text_logo_image)
-                    ?.setImageResource(R.drawable.provision_text_praxis)
+                // ## XML 里的品牌图全部隐藏，并让根布局透明
+                //
+                // 完成页 XML 的根是 `FrameLayout` + 黑色底（`#FF000000`）。
+                // 那层黑会把 `BgEffectBackground` 的流光整个盖掉 ——
+                // 这正是上一版「背景一片黑、看不到渐变」的原因。
+                //
+                // 所以把根的背景清掉（`setBackgroundColor(Color.TRANSPARENT)`），
+                // 让 Compose 的流光透上来。文字与按钮仍由 XML 提供，
+                // 它们的位置/尺寸来自原版布局，不动。
+                (root as? ViewGroup)?.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                root.findViewById<ImageView>(R.id.logo_image)?.visibility = View.GONE
+                root.findViewById<ImageView>(R.id.text_logo_image)?.visibility = View.GONE
+
+                // 原版 initView：文案先「正在准备」，按钮藏起来。
                 stateText.setText(R.string.provision_system_preparing)
+                // wrapper 保留可见性做动画时钟，但内容已隐藏，所以不会显示任何图。
                 wrapper.visibility = View.INVISIBLE
                 next.visibility = View.INVISIBLE
                 next.isEnabled = false
@@ -577,16 +646,15 @@ private fun CongratulationScreen(onFinish: () -> Unit) {
                 root.postDelayed({
                     stateText.setText(R.string.provision_system_complete)
 
-                    // logo：alpha 0→1 + translationY 100→0，1500ms
+                    // wrapper：只做淡入（内部图形已 GONE）。
                     wrapper.visibility = View.VISIBLE
                     wrapper.alpha = 0f
-                    wrapper.translationY = 100f
-                    wrapper.animate().alpha(1f).translationY(0f)
+                    wrapper.animate().alpha(1f)
                         .setDuration(1500)
                         .setInterpolator(android.view.animation.DecelerateInterpolator())
                         .start()
 
-                    // 按钮：alpha 0→1，450ms，delay 1000
+                    // 按钮：alpha 0→1，450ms，delay 1000 —— 与原版一致。
                     next.visibility = View.VISIBLE
                     next.alpha = 0f
                     next.animate().alpha(1f)

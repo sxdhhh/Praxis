@@ -200,6 +200,28 @@ interface LinuxEnvPort {
     fun defaultEnvironment(distro: LinuxDistro): LinuxEnvironment
 
     /** rootfs 是否已解压到 [env]。 */
+    /**
+     * 校正已有 rootfs 的权限位（幂等）。
+     *
+     * ## 为什么需要它，而不是让用户重装
+     *
+     * 旧版解压参数缺 `-p`，toybox tar 按 umask 重算权限，rootfs 里
+     * 目录成了 0700、文件成了 0600。后果不是「有点不对」，而是
+     * **终端里任何命令都失败**：
+     *
+     * ```
+     * proot error: execve("/usr/bin/sh"): No such file or directory
+     * ```
+     *
+     * 而真因是链接器读不到 `/etc/ld.so.cache`（0600）→ 找不到 libc。
+     * 报错完全指不到权限，用户只会以为「环境坏了」。
+     *
+     * 重装能解决，但那要重新下载几百 MB。这个方法直接在原 rootfs 上
+     * 走一遍 `chmod`，几秒完成，且不碰用户数据。
+     *
+     * @return 是否成功（rootfs 不存在也算成功 —— 没什么要修的）。
+     */
+    suspend fun repairPermissions(env: LinuxEnvironment): Boolean
     fun isInstalled(env: LinuxEnvironment): Boolean
 
     /**
