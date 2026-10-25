@@ -1,6 +1,7 @@
 package dev.praxis.data.linux
 
 import android.content.Context
+import android.util.Log
 import dev.praxis.core.linux.LinuxEnvironment
 import dev.praxis.core.linux.LinuxDistro
 import dev.praxis.core.linux.LinuxExecResult
@@ -81,6 +82,20 @@ class ProotTerminalSessionPort(
         val pty: dev.praxis.core.terminal.Pty? = null,
     )
 
+    private val TAG = "ProotTermSession"
+
+    /**
+     * 「会话已死」的内部标记。
+     *
+     * 泵线程在流结束时把它塞进 [ScreenTap]；[readUntilSentinel] 见到它就能
+     * 立刻返回明确原因，而不是一直等到超时。
+     *
+     * 为什么用不可见字符包裹：终端输出可能是任意字节，用普通文本（如 `[dead]`）
+     * 会与用户命令的真实输出撞车，于是把正常内容误判成会话死亡。
+     * NUL 包裹的固定标记在真实输出里不会出现。
+     */
+    private val DEAD_MARKER = "\u0000PRAXIS_SESSION_DEAD\u0000"
+
     private val live = ConcurrentHashMap<String, Live>()
     private val counter = AtomicInteger(1)
 
@@ -119,8 +134,27 @@ class ProotTerminalSessionPort(
             cols = 80,
         )
         if (pty != null) {
-            Thread({ pumpStream(pty.stdout, tap) }, "praxis-term-pty-$id")
-                .apply { isDaemon = true }.start()
+            var deadReason: String? = null
+            Thread(
+                {
+                    // ## 泵线程必须在 EOF 时记下「会话已死」（2026-10-25 修）
+                    //
+                    // 旧实现是 `readLine() ?: break`：流一断就静静退出循环，
+                    // 什么都不留下。后果是后续 `execute()` 往 `item.writer`
+                    // 写命令时抛 `Stream closed` —— 用户看到的是
+                    // 「exit=-1 / Stream closed」，完全指不到「子进程早就退出了」。
+                    //
+                    // 这里在退出前跑一次 `waitFor` 拿退出码，把它记进 tap，
+                    // 于是上层能把「会话已死，退出码 N」如实报给调用方。
+                    pumpStream(pty.stdout, tap)
+                    val code = runCatching { pty.process.waitFor() }.getOrNull()
+                    deadReason = "会话进程已退出（退出码 ${code ?: "未知"}）。"
+                    tap.offer(DEAD_MARKER)
+                    Log.w(TAG, "PTY 会话 $id 已结束，退出码=$code")
+                },
+                "praxis-term-pty-$id",
+            ).apply { isDaemon = true }.start()
+
             val info = TerminalSessionInfo(id = id, name = name, currentDirectory = "/root")
             val item = Live(
                 info = info,
@@ -131,6 +165,31 @@ class ProotTerminalSessionPort(
             )
             live[id] = item
             refreshCwd(item)
+
+            // ## 启动后必须验证一次存活（2026-10-25 修）
+            //
+            // `Pty.start` 只保证 fork 成功、拿到 master fd；它**不知道**
+            // proot 里的 shell 会不会立刻退出（rootfs 缺 shell、参数错、
+            // 权限不足都会让它秒退）。
+            //
+            // 不验证的话：`create` 报「会话已就绪」，用户/模型接着发命令，
+            // 每条都拿 `Stream closed`。这就是用户截图里的 t1/t2 现象 ——
+            // 会话看起来建成了，实则是个空壳。
+            //
+            // 等 400ms 再判：proot 启动 + shell 初始化通常 100~200ms，
+            // 给够了才不会把「还在启动」误判成「已死」。
+            kotlinx.coroutines.delay(400)
+            if (!pty.process.isAlive) {
+                live.remove(id)
+                runCatching { pty.destroy() }
+                val why = deadReason ?: "会话进程启动后立即退出。"
+                Log.e(TAG, "会话 $id 启动失败：$why")
+                throw IllegalStateException(
+                    "无法建立终端会话：$why\n" +
+                        "常见原因：Linux 环境未安装完成、rootfs 缺 /bin/sh、" +
+                        "或 proot 启动参数不适用于本机。可先在「Linux 环境」页确认状态。",
+                )
+            }
             return@withContext live[id]!!.info
         }
 
@@ -141,7 +200,27 @@ class ProotTerminalSessionPort(
         val process = pb.start()
         val writer = OutputStreamWriter(process.outputStream)
         // 后台泵：把输出同时喂给「屏幕缓冲」与「当前等待者」。
-        Thread({ pumpStream(process.inputStream, tap) }, "praxis-term-$id").apply { isDaemon = true }.start()
+        // EOF 时同样补一条死亡标记（理由见上面 PTY 分支的注释）。
+        Thread(
+            {
+                pumpStream(process.inputStream, tap)
+                val code = runCatching { process.waitFor() }.getOrNull()
+                Log.w(TAG, "管道会话 $id 已结束，退出码=$code")
+                tap.offer(DEAD_MARKER)
+            },
+            "praxis-term-$id",
+        ).apply { isDaemon = true }.start()
+
+        // 管道分支同样要验证存活：没验证的话 proot 秒退时同样得到空壳会话。
+        kotlinx.coroutines.delay(400)
+        if (!process.isAlive) {
+            live.remove(id)
+            runCatching { process.destroyForcibly() }
+            throw IllegalStateException(
+                "无法建立终端会话：proot 进程启动后立即退出。" +
+                    "可先在「Linux 环境」页确认状态。",
+            )
+        }
 
         val info = TerminalSessionInfo(
             id = id,
@@ -171,6 +250,25 @@ class ProotTerminalSessionPort(
     ): LinuxExecResult = withContext(Dispatchers.IO) {
         val item = live[command.sessionId]
             ?: return@withContext LinuxExecResult(-1, "会话 ${command.sessionId} 不存在。")
+
+        // ## 写之前先确认会话还活着（2026-10-25 修「Stream closed」）
+        //
+        // 旧实现直接 `item.writer.write(script)`。子进程已经退出时，底层的
+        // master fd 已关闭，写入抛 `java.io.IOException: Stream closed` ——
+        // 用户与模型都只看到这一句，完全指不到「会话进程早就死了」。
+        //
+        // 这里先探活：死了就直接返回明确原因，并把这条死会话从表里摘掉，
+        // 让调用方（以及模型）知道该重建会话，而不是反复在死会话上重试。
+        val processAlive = runCatching { item.process.isAlive }.getOrDefault(false)
+        if (!processAlive) {
+            live.remove(command.sessionId)
+            runCatching { item.pty?.destroy() ?: item.process.destroyForcibly() }
+            return@withContext LinuxExecResult(
+                -1,
+                "会话 ${command.sessionId} 的进程已退出，无法执行命令。\n" +
+                    "请先用 create_terminal_session 重建会话再试。",
+            )
+        }
 
         val interactive = TerminalSessionCommand.classifyInteractive(command.command)
         val timeout = if (command.timeoutSeconds > 0) command.timeoutSeconds else defaultTimeout
@@ -207,6 +305,19 @@ class ProotTerminalSessionPort(
 
         val exit = readResult.exitCode
         val timedOut = readResult.timedOut && exit == TIMEOUT_EXIT_CODE
+
+        // 会话已死：直接返回明确原因，并且**不要**把这条会话写回 `live`
+        // （写回去会让它继续以「活着」的身份被复用，下一条命令又是同样的失败）。
+        readResult.failureReason?.let { reason ->
+            live.remove(command.sessionId)
+            runCatching { item.pty?.destroy() ?: item.process.destroyForcibly() }
+            return@withContext LinuxExecResult(
+                exitCode = -1,
+                output = collected.toString().trimEnd() + "\n" + reason +
+                    "\n请先用 create_terminal_session 重建会话再试。",
+                timedOut = false,
+            )
+        }
 
         // 刷新 cwd 与交互状态。
         val cwd = readCwdFile() ?: item.info.currentDirectory
@@ -259,7 +370,18 @@ class ProotTerminalSessionPort(
 
     // ── 内部：哨兵协议 ────────────────────────────────────────
 
-    private class ReadOutcome(val exitCode: Int, val timedOut: Boolean)
+    /**
+     * 一次「下发命令 → 读到哨兵」的结果。
+     *
+     * [failureReason] 只在**会话已死**这类硬失败时非空：它与「命令返回非零」
+     * 是两件不同的事，必须能分开 —— 前者说明会话本身不能再用（要重建），
+     * 后者只说明这条命令失败（会话仍可用）。
+     */
+    private class ReadOutcome(
+        val exitCode: Int,
+        val timedOut: Boolean,
+        val failureReason: String? = null,
+    )
 
     /**
      * 下发 [script] 并一直读到哨兵行。
@@ -291,6 +413,25 @@ class ProotTerminalSessionPort(
                 return@withContext ReadOutcome(TIMEOUT_EXIT_CODE, true)
             }
             val line = item.output.pollLine(deadline) ?: continue
+
+            // ## 会话已死的显式信号（2026-10-25 修）
+            //
+            // 旧实现只有「哨兵」与「超时」两种出口。子进程一死，泵线程
+            // 因 EOF 退出、屏幕上再也不会出现哨兵，于是这条命令要**干等
+            // 到完整超时**（默认 600 秒）才返回 —— 用户看到的就是
+            // 「发一条 echo 卡住很久，然后报失败」。
+            //
+            // 泵线程现在会在 EOF 时塞一条死标；这里见到就立刻返回，
+            // 并带上真实的退出原因，而不是让调用方猜。
+            if (line.contains(DEAD_MARKER)) {
+                val why = "会话进程已退出（终端流已关闭），命令未执行完。"
+                return@withContext ReadOutcome(
+                    exitCode = -1,
+                    timedOut = false,
+                    failureReason = why,
+                )
+            }
+
             if (line.startsWith(SENTINEL)) {
                 val code = line.removePrefix(SENTINEL).removePrefix(":").trim().toIntOrNull() ?: 0
                 return@withContext ReadOutcome(code, false)

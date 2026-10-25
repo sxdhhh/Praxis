@@ -63,6 +63,8 @@ class RoomChatPersistence(
                 role = row.role,
                 content = row.content,
                 toolName = row.toolName,
+                // 透出参数：恢复后的工具卡片要能在折叠区显示「当时跑的是什么」。
+                toolArgs = row.toolArgs,
                 isError = row.isError,
                 createdAt = row.createdAt,
                 orderIndex = row.orderIndex,
@@ -105,6 +107,8 @@ class RoomChatPersistence(
                 role = row.role,
                 content = row.content,
                 toolName = row.toolName,
+                // 透出参数：恢复后的工具卡片要能在折叠区显示「当时跑的是什么」。
+                toolArgs = row.toolArgs,
                 isError = row.isError,
                 createdAt = row.createdAt,
                 orderIndex = row.orderIndex,

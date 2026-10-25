@@ -782,6 +782,54 @@ class ChatViewModel(
         _state.update { it.copy(notice = "这张图片读不了，换一张试试") }
     }
 
+    /** 相机不可用时提示（无相机应用 / FileProvider 未注册）。 */
+    fun notifyCameraUnavailable() {
+        _state.update { it.copy(notice = "打不开相机，检查是否装了相机应用") }
+    }
+
+    /** 截屏失败时提示（授权被拒以外的情况：服务起不来 / 无画面）。 */
+    fun notifyScreenCaptureFailed() {
+        _state.update { it.copy(notice = "截屏失败，稍后再试") }
+    }
+
+    /** 用户选了文件但当前发不出去时提示（文件附件无下游通路）。 */
+    fun notifyFileAttachmentUnsupported() {
+        _state.update { it.copy(notice = "文件附件暂未接通，先发图片吧") }
+    }
+
+    /** 位置拿不到时提示（无权限 / 定位关闭 / 无缓存位置）。 */
+    fun notifyLocationUnavailable() {
+        _state.update { it.copy(notice = "拿不到位置：检查定位开关与权限") }
+    }
+
+    /** 通知读取被拒时提示（需用户去系统设置授予「通知使用权」）。 */
+    fun notifyNotificationAccessRequired() {
+        _state.update { it.copy(notice = "需要授予「通知使用权」才能读通知") }
+    }
+
+    /** 记忆库为空时提示（点「记忆」附件但还没有任何记忆）。 */
+    fun notifyMemoryEmpty() {
+        _state.update { it.copy(notice = "还没有记忆，先去记忆页存几条") }
+    }
+
+    /** 读不到已安装应用列表时提示。 */
+    fun notifyPackagesUnavailable() {
+        _state.update { it.copy(notice = "读不到应用列表") }
+    }
+
+    /**
+     * 取最近写入的记忆正文（附件面板的「记忆」格用）。
+     *
+     * 与 `recallMemoryBlock` 的区别：那个要查询词做相关度检索（发送前自动调用），
+     * 这个只是「我最近记了什么」，用于用户手动把记忆作为上下文带进这一句。
+     *
+     * 空列表表示没记忆或端口不可用 —— 调用方转为提示，不静默失败。
+     */
+    suspend fun recentMemories(limit: Int = MemoryPort.RECENT_LIMIT): List<String> =
+        memoryPort?.let { port ->
+            runCatching { port.recent(limit) }.getOrDefault(emptyList())
+        } ?: emptyList()
+
     /**
      * 清掉一次性提示（由输入栏的 4 秒计时器调用）。
      *

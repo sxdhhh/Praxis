@@ -48,6 +48,13 @@ import dev.praxis.feature.settings.ai.maskApiKey
 fun ChatTab(
     viewModel: ChatViewModel,
     settingsRepository: SettingsRepository,
+    /** 已加载技能（插件组数据源）。 */
+    skillRegistry: dev.praxis.core.plugin.SkillRegistry,
+    /** 全部工具名（底栏工具组的就地开关数据源）。 */
+    toolNames: List<String> = emptyList(),
+    /** 当前禁用的工具（运行态，与设置页共用 permissionState）。 */
+    disabledTools: Set<String> = emptySet(),
+    onToggleTool: ((String, Boolean) -> Unit)? = null,
     modelSettings: ModelSettings,
     /**
      * 当前会话 id。
@@ -150,12 +157,60 @@ fun ChatTab(
 
     val state by viewModel.state.collectAsStateWithLifecycle()
 
+    // ---- 自动朗读（TTS）----
+    //
+    // ## 为什么用 DisposableEffect 管声命周期
+    //
+    // TextToSpeech 初始化是异步的，且必须 shutdown()，否则
+    // 一直占音频焦点（抢音乐、弄乱蓝牙路由）。
+    // key 用 viewModel：切会话换 ViewModel 实例时释放旧引擎。
+    var speechReady by remember { mutableStateOf(false) }
+    val speechReader = remember(viewModel) {
+        dev.praxis.data.attachment.SpeechReader(context) { ok -> speechReady = ok }
+    }
+    androidx.compose.runtime.DisposableEffect(viewModel) {
+        onDispose { speechReader.shutdown() }
+    }
+
+    // 设备是否有 TTS 引擎（决定能力这一层就判，不等初始化）。
+    // 没引擎时 autoReadReplies 传 null，行为组里那一行整体不显示。
+    val ttsAvailable = remember(context) {
+        dev.praxis.data.attachment.SpeechReader.isAvailable(context)
+    }
+    val autoReadReplies by settingsRepository.autoReadReplies
+        .collectAsStateWithLifecycle(initialValue = false)
+
+    // ## 触发点：流式结束那一刻
+    //
+    // 不能用「最后一条气泡文本变了就念」：流式输出时文本每帧
+    // 都在变，会连续念十几遍。必须用 isStreaming 的**下滑沿**。
+    var lastSpokenBubbleId by remember { mutableStateOf(-1L) }
+    androidx.compose.runtime.LaunchedEffect(state.isStreaming, autoReadReplies, speechReady) {
+        if (state.isStreaming || !autoReadReplies || !speechReady) return@LaunchedEffect
+        val bubble = state.bubbles.lastOrNull { it.role == dev.praxis.feature.chat.BubbleRole.Assistant }
+        if (bubble == null || bubble.text.isBlank()) return@LaunchedEffect
+        // 同一条不重复念（切回该会话、重组都会重跑这个 effect）。
+        if (bubble.id == lastSpokenBubbleId) return@LaunchedEffect
+        lastSpokenBubbleId = bubble.id
+        speechReader.speak(bubble.text)
+    }
+
+
     // 写设置的短命协程（只在底部设置条的「思考强度」里用一次）。
     //
     // 用 `rememberCoroutineScope` 而不是 `viewModelScope`：ViewModel 不持
     // `SettingsRepository`（见 `ChatScreen.modelName` 的 KDoc），而这条写入
     // 是纯 UI 动作 —— 页面离开时取消即可，不需要跨配置变更存活。
     val settingsScope = rememberCoroutineScope()
+
+    // 记忆 / 插件（底栏分区）
+    val autoMemoryEnabled by settingsRepository.autoMemoryEnabled
+        .collectAsStateWithLifecycle(initialValue = true)
+    val disabledSkills by settingsRepository.disabledSkills
+        .collectAsStateWithLifecycle(initialValue = emptySet())
+    val skillNames = remember(skillRegistry) {
+        skillRegistry.all().map { it.name }.sorted()
+    }
 
     /**
      * 对话显示风格：直接在本组件读取，不从 `PraxisApp` 一路传参。
@@ -224,6 +279,265 @@ fun ChatTab(
     LaunchedEffect(modelSettings, sessionId) {
         apiKeyMasked = maskApiKey(settingsRepository.apiKey())
     }
+
+    // ── 附件面板（加号）──────────────────────────────────────
+    //
+    // ## 这里补的是一条**从未接通过**的通路
+    //
+    // `ChatScreen` 从第一版起就有 `onRequestPickImage` 参数，但 ChatTab
+    // 从来没传过它。于是 `if (onPickImage != null)` 恒为 false，底栏
+    // 那个按钮从未显示 —— 不是设计取舍，是漏接线。
+    //
+    // ## 为什么用系统 SAF 而不是自建选择器
+    //
+    // `ActivityResultContracts.GetContent` / `OpenDocument` 由系统提供
+    // 选图/选文件界面，零额外依赖、自动处理存储权限（SAF 不需要
+    // READ_EXTERNAL_STORAGE）。自建会引入权限申请与适配成本。
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val attachmentScope = rememberCoroutineScope()
+    var attachmentPanelOpen by remember { mutableStateOf(false) }
+
+    // ---- 位置 / 通知（附件面板）----
+    //
+    // 结果以**文字**插进输入框：ChatState.attachments 是 List<ChatImage>（只装图），
+    // 而位置/通知本质是可读文本，插进输入框后用户还能自己编辑或删掉。
+    var pendingLocationAfterGrant by remember { mutableStateOf(false) }
+
+    fun appendToInput(text: String) {
+        val cur = viewModel.state.value.input
+        val sep = if (cur.isBlank()) "" else "\n"
+        viewModel.onInputChange(cur + sep + text)
+    }
+
+    val locationPermissionLauncher =
+        androidx.activity.compose.rememberLauncherForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions(),
+        ) { granted ->
+            val ok = granted[android.Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                granted[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+            if (ok && pendingLocationAfterGrant) {
+                pendingLocationAfterGrant = false
+                attachmentScope.launch {
+                    val text = dev.praxis.data.attachment.LocationReader.read(context)
+                    if (text != null) appendToInput(text)
+                    else viewModel.notifyLocationUnavailable()
+                    attachmentPanelOpen = false
+                }
+            } else {
+                pendingLocationAfterGrant = false
+            }
+        }
+
+    val requestLocation: () -> Unit = {
+        val fine = androidx.core.content.ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (fine) {
+            attachmentScope.launch {
+                val text = dev.praxis.data.attachment.LocationReader.read(context)
+                if (text != null) appendToInput(text)
+                else viewModel.notifyLocationUnavailable()
+                attachmentPanelOpen = false
+            }
+        } else {
+            pendingLocationAfterGrant = true
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                ),
+            )
+        }
+    }
+
+    val attachNotifications: () -> Unit = {
+        val text = dev.praxis.data.attachment.PraxisNotificationListener
+            .readActive(context)
+        if (text != null) appendToInput(text)
+        else viewModel.notifyNotificationAccessRequired()
+        attachmentPanelOpen = false
+    }
+
+    // ---- 记忆（附件面板的「记忆」格）----
+    //
+    // 把最近写入的记忆拼成一段带进输入框，用户可直接编辑/删减。
+    // 空列表时提示，不静默 —— 用户点了没反应会以为坏了。
+    val attachMemory: () -> Unit = {
+        attachmentScope.launch {
+            val items = viewModel.recentMemories()
+            if (items.isEmpty()) {
+                viewModel.notifyMemoryEmpty()
+            } else {
+                appendToInput(
+                    buildString {
+                        append("[记忆] 最近 ").append(items.size).append(" 条：") 
+                        items.forEach { append('\n').append("- ").append(it) } 
+                    },
+                )
+            }
+            attachmentPanelOpen = false
+        }
+    }
+
+    // ---- 智能包（已安装应用）----
+    //
+    // 读 PackageManager 的元信息（名称/包名/版本/系统与否），不解析 APK
+    // 二进制 —— 后者要落盘、要授权、还要解 DEX，成本高一个量级。
+    val attachPackages: () -> Unit = {
+        attachmentScope.launch {
+            val apps = dev.praxis.data.attachment.PackageInfoReader.readAll(context)
+            if (apps.isEmpty()) {
+                viewModel.notifyPackagesUnavailable()
+            } else {
+                appendToInput(dev.praxis.data.attachment.PackageInfoReader.format(apps))
+            }
+            attachmentPanelOpen = false
+        }
+    }
+
+    // 选图片：GetContent("image/*")。回调里用 ChatImagePreparer 解码，
+    // 它是「缩放到 1024 长边 + JPEG 85 + 控制在 1.2MB 内」的现成实现。
+    val pickImageLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+
+    // ---- 拍照（系统相机，零新依赖）----
+    //
+    // TakePicture 的回调只给 Boolean（是否拍了），目标文件要在**启动前**
+    // 用 FileProvider 建好，所以这里要先存一份 pendingUri。
+    var pendingCameraUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    val takePictureLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.TakePicture(),
+    ) { saved ->
+        val uri = pendingCameraUri
+        pendingCameraUri = null
+        if (!saved || uri == null) {
+            // 用户取消也走这里。取消不该弹错 —— 那是正常操作。
+            attachmentPanelOpen = false
+            return@rememberLauncherForActivityResult
+        }
+        attachmentScope.launch {
+            val image = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                dev.praxis.data.chat.ChatImagePreparer.prepare(context, uri)
+            }
+            if (image != null) {
+                viewModel.addAttachment(image)
+                // 图已编码进内存（ChatImage 是 base64），源文件没用了。
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching { context.contentResolver.delete(uri, null, null) }
+                }
+            } else {
+                viewModel.notifyImageUnreadable()
+            }
+            attachmentPanelOpen = false
+        }
+    }
+
+    // 启动相机：先建目标文件，拿不到 URI 就提示（FileProvider 未注册等）。
+    val takePhoto: () -> Unit = {
+        val uri = dev.praxis.data.attachment.CameraCapture.newTarget(context)
+        if (uri == null) {
+            viewModel.notifyCameraUnavailable()
+            attachmentPanelOpen = false
+        } else {
+            pendingCameraUri = uri
+            runCatching { takePictureLauncher.launch(uri) }
+                .onFailure { viewModel.notifyCameraUnavailable() }
+        }
+    }
+
+    // ---- 屏幕内容（MediaProjection，一次性抓帧）----
+    //
+    // ## 为什么用 Activity 中转而不是 launcher
+    //
+    // 授权结果必须交给一个 mediaProjection 类型的前台服务去消费（API 34+
+    // 硬要求），而服务不能自己发起 Activity 跳转。所以走
+    // ScreenCaptureActivity（弹框）→ ScreenCaptureService（抓帧）两段。
+    //
+    // ## 为什么用 ActivityResult 等它回来
+    //
+    // 授权 + 抓帧是异步的，且时间不定（用户可能盯着确认框看几秒）。
+    // 这里启动 Activity 后挂起等待，回来时立刻读结果。
+    val captureScreen: () -> Unit = {
+        attachmentScope.launch {
+            dev.praxis.data.attachment.ScreenCapture.reset()
+            val started = runCatching {
+                context.startActivity(
+                    android.content.Intent(
+                        context,
+                        dev.praxis.data.attachment.ScreenCaptureActivity::class.java,
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }.isSuccess
+            if (!started) {
+                viewModel.notifyScreenCaptureFailed()
+                attachmentPanelOpen = false
+                return@launch
+            }
+            // 轮询等结果：授权框可能停留任意久，所以给足 30 秒；
+            // 一旦拿到文件立刻走，不白等。
+            var waited = 0
+            while (waited < 30_000) {
+                val file = dev.praxis.data.attachment.ScreenCapture.pendingResult
+                val error = dev.praxis.data.attachment.ScreenCapture.pendingError
+                if (file != null) {
+                    val uri = android.net.Uri.fromFile(file)
+                    val image = kotlinx.coroutines.withContext(
+                        kotlinx.coroutines.Dispatchers.IO,
+                    ) {
+                        dev.praxis.data.chat.ChatImagePreparer.prepare(context, uri)
+                    }
+                    if (image != null) {
+                        viewModel.addAttachment(image)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            runCatching { file.delete() }
+                        }
+                    } else {
+                        viewModel.notifyImageUnreadable()
+                    }
+                    break
+                }
+                if (error != null) {
+                    viewModel.notifyScreenCaptureFailed()
+                    break
+                }
+                kotlinx.coroutines.delay(200)
+                waited += 200
+            }
+            // 超时且没有任何结果：用户可能一直没点确认。不弹错 ——
+            // 那是「还没决定」，不是失败。
+            attachmentPanelOpen = false
+        }
+    }
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        attachmentScope.launch {
+            val image = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                dev.praxis.data.chat.ChatImagePreparer.prepare(context, uri)
+            }
+            if (image != null) {
+                viewModel.addAttachment(image)
+            } else {
+                // 读不到不是静默丢弃：ChatScreen 有 4 秒提示机制，
+                // 「点了选图什么都没发生」是最难排查的用户反馈。
+                viewModel.notifyImageUnreadable()
+            }
+            attachmentPanelOpen = false
+        }
+    }
+
+    // 选文件：OpenDocument("*/*")。当前只有图片有下游消费方
+    // （`ChatState.attachments` 是 `List<ChatImage>`），所以文件这里
+    // 只把 URI 记为不可用并提示 —— 不做成「看起来能用但发不出去」。
+    val pickFileLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.notifyFileAttachmentUnsupported()
+        }
+        attachmentPanelOpen = false
+    }
+
 
     ChatScreen(
         state = state,
@@ -319,11 +633,55 @@ fun ChatTab(
         // 写盘走 settingsScope（与思考强度同口径：纯 UI 动作，页面离开
         // 即取消，不跨配置变更存活）。
         disableStreamOutput = disableStreamOutputRaw,
+        // ---- 自动朗读 ----
+        autoReadReplies = if (ttsAvailable) autoReadReplies else null,
+        onToggleAutoReadReplies = if (ttsAvailable) { { enabled ->
+            settingsScope.launch { settingsRepository.setAutoReadReplies(enabled) }
+        } } else null,
         onToggleDisableStreamOutput = { disabled ->
             settingsScope.launch {
                 settingsRepository.setDisableStreamOutput(disabled)
             }
         },
+        // 底栏「记忆」分区
+        autoMemoryEnabled = autoMemoryEnabled,
+        onToggleAutoMemory = { enabled ->
+            settingsScope.launch { settingsRepository.setAutoMemoryEnabled(enabled) }
+        },
+        // 底栏「插件」分区
+        skillNames = skillNames,
+        disabledSkills = disabledSkills,
+        onToggleSkill = { name, enabled ->
+            settingsScope.launch {
+                val next = if (enabled) disabledSkills - name else disabledSkills + name
+                settingsRepository.setDisabledSkills(next)
+            }
+        },
+        // 底栏「工具」分区的就地开关。
+        //
+        // 写两处：
+        //  1. permissionState（**运行态**，决定下一批调用发什么给模型）；
+        //  2. settingsRepository（**持久化**，否则重启就复活）。
+        //
+        // 只写 1 不写 2 是旧实现的缺陷：`ToolPermissionState` 是内存态，
+        // 用户关掉一个工具，重启后它又回来了。
+        toolNames = toolNames,
+        disabledTools = disabledTools,
+        onToggleTool = onToggleTool,
+        // ── 附件面板（加号）────────────────────────────────
+        //
+        // 四个参数一起传：少任何一个，加号要么不显示（onOpenAttachmentPanel
+        // 为 null），要么面板点了没反应。
+        onRequestPickImage = { pickImageLauncher.launch("image/*") },
+        onPickFile = { pickFileLauncher.launch(arrayOf("*/*")) },
+        onAttachLocation = requestLocation,
+        onAttachNotifications = attachNotifications,
+        onCaptureScreen = captureScreen,
+        onTakePhoto = takePhoto,
+        onAttachMemory = attachMemory,
+        onAttachPackages = attachPackages,
+        attachmentPanelOpen = attachmentPanelOpen,
+        onOpenAttachmentPanel = { attachmentPanelOpen = !attachmentPanelOpen },
         displayStyle = displayStyle,
         // 会话身份：让滚动状态与 item key 能按会话区分（见该参数 KDoc）。
         sessionKey = sessionId,

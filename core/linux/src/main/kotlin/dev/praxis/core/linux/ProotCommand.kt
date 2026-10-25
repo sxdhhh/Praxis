@@ -261,10 +261,52 @@ object ProotCommand {
         // ⚠️ 这是 proot 的**开关**，不是要执行的程序。
         args += "-0"
 
-        // 静默 proot 自己的 info 日志（否则终端里满屏 `proot info:`）。
-        // 注意 `-q` 的参数是「以哪个命令的名义运行」，proot 用它做日志前缀；
-        // 传 `/bin/true` 是社区惯例，proot 不会真的去执行它。
-        args += listOf("-q", "/bin/true")
+        // ── 日志级别：用 `-v`，**绝不能用 `-q`** ─────────────────
+        //
+        // ## 这条注释曾写错，导致容器一条命令都跑不起来
+        //
+        // 旧代码是 `args += listOf("-q", "/bin/true")`，注释写着
+        // 「静默 proot 自己的 info 日志……传 /bin/true 是社区惯例，
+        // proot 不会真的去执行它」。
+        //
+        // 那个理解是**反的**。看本机 `libproot.so --help` 的原文：
+        //
+        // ```
+        //   -q *command*, --qemu=*command*
+        //     Execute guest programs through QEMU as specified by *command*.
+        // ```
+        //
+        // `-q` 是 **--qemu**，语义是「所有 guest 程序都通过这个 QEMU 前端执行」。
+        // 传 `/bin/true` 等于告诉 proot：「用 /bin/true 去跑一切」。
+        // `/bin/true` 读完参数就退出、什么都不执行，于是**每一个 guest 程序都
+        // 被它吃掉**，proot 只能报：
+        //
+        // ```
+        // proot error: execve("/usr/bin/sh"): No such file or directory
+        // ```
+        //
+        // 这句报错把「被 QEMU 前端吞掉」说成「文件不存在」，还附了五条
+        // 全部指向错误方向的「可能原因」（脚本解释器缺失 / ELF 解释器缺失 /
+        // 架构不符 / qemu 异常 / loader 有问题）。
+        //
+        // ## 真机实测（2026-10-25，aarch64 / SDK 37）
+        //
+        // 同一份 rootfs、同一套环境变量（PROOT_LOADER / PROOT_TMP_DIR 均已设）：
+        //
+        // | 参数 | 结果 |
+        // |---|---|
+        // | `-0 -r <rootfs> --link2symlink -q /bin/true -w /root /bin/sh -c ...` | `execve: No such file or directory`，退出 |
+        // | 去掉 `-q /bin/true`，其余完全不变 | 正常输出 |
+        //
+        // 另外 `--kill-on-exit`、`-b /dev`、`-b /proc`、`-b /sys`、`-b /dev/null`
+        // 都逐项单独验证过，**均不影响**。唯一杀手就是 `-q`。
+        //
+        // ## 那日志怎么静默
+        //
+        // proot 的 info 日志受 `-v <level>` 控制，默认级别本来就不打印
+        // `proot info:`（那是 `-v 1` 以上）。所以正确做法是**不传任何
+        // 日志相关参数**，而不是用 `-q` 去「假装静默」。
+        args += listOf("-v", "0")
 
         // ── bind ──────────────────────────────────────────────────
         //

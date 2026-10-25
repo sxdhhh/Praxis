@@ -33,6 +33,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.widgets.FoldableContent
 
 /**
  * 功能模型配置页（对齐 Operit「功能模型配置」的信息架构）。
@@ -207,7 +208,11 @@ private fun FunctionSlotRow(
             }
         }
 
-        if (expanded) {
+        // ## 展开必须有动画（2026-10-25，同 PackageGroupsCard）
+        //
+        // 旧写法 `if (expanded) { Column(...) }` 是一帧内塞入布局。
+        // 改用项目统一的 `FoldableContent`，常驻调用、只翻 `visible`。
+        FoldableContent(visible = expanded) {
             Column(Modifier.padding(horizontal = 16.dp)) {
                 Text(
                     text = slot.description,

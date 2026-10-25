@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 的可见路径。
+
+  只暴露 cache 下的 praxis_camera 子目录，不暴露整个 cache/files：
+  FileProvider 一旦把某个根暴露出去，任何拿到 content:// 授权的应用都能
+  在**那个根**里按路径猜文件名读取。限制到最小子目录是唯一有效的收窄方式
+  （Android 不支持给 provider 配「仅单文件」授权）。
+
+  相机拍照的目标文件就落在这里（见 CameraCapture.kt）。
+-->
+<paths>
+    <cache-path
+        name="praxis_camera"
+        path="praxis_camera/" />
+</paths>

@@ -20,6 +20,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 截屏服务：Android 14+ 要求 mediaProjection 类型的前台服务。
+         没有这条声明，startForeground(...TYPE_MEDIA_PROJECTION) 会抛
+         SecurityException，截屏直接失败。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <!--
       ## 运行时权限（2026-10-22 补，此前一个都没有）
@@ -154,6 +158,52 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 通知监听：附件面板的「通知」格要读当前活跃通知。
+             没有这个声明，NotificationManager.activeNotifications 会返回空
+             或抛 SecurityException。用户还需在系统设置里授予「通知使用权」，
+             代码侧无法静默开启（这是 Android 的隐私边界，故意留的）。 -->
+        <!-- 截屏：授权 Activity 只负责弹系统确认框，抓帧在 Service 里做。
+             excludeFromRecents + 无动画：它是个不可见的中间人，
+             出现在最近任务里会让用户莫名其妙。 -->
+        <activity
+            android:name="dev.praxis.data.attachment.ScreenCaptureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- 截屏前台服务。foregroundServiceType 必须是 mediaProjection，
+             否则 API 34+ 的 getMediaProjection() 会拒绝。 -->
+        <service
+            android:name="dev.praxis.data.attachment.ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+        <service
+            android:name="dev.praxis.data.attachment.PraxisNotificationListener"
+            android:exported="false"
+            android:label="Praxis 通知读取"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+
+        <!-- FileProvider：拍照要把输出文件交给系统相机写入。
+             直接把 file:// 路径给相机在 targetSdk>=24 会抛 FileUriExposedException，
+             必须走 content:// + grantUriPermission。路径白名单见
+             res/xml/praxis_file_paths.xml（只开 cache/praxis_camera）。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.praxis.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/praxis_file_paths" />
+        </provider>
+
     </application>
 
 </manifest>

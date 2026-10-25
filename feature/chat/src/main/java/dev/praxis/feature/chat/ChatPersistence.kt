@@ -138,6 +138,19 @@ data class PersistedMessage(
     val role: String,
     val content: String,
     val toolName: String?,
+    /**
+     * 工具参数原文（仅 `role = "tool"` 有值）。
+     *
+     * ## 为什么要暴露它（2026-10-25）
+     *
+     * 恢复历史时要把 `role = "tool"` 的行还原成**工具卡片**，而卡片的
+     * 折叠区里显示的是「调用参数」。没有这一列，恢复后的卡片就只剩
+     * 名字与结果 —— 用户展开看不到自己当时让模型跑的是什么命令。
+     *
+     * 底层 `MessageEntity.toolArgs` 一直有存（在线路径写了），
+     * 缺的只是把它从端口透出来这一步。
+     */
+    val toolArgs: String? = null,
     val isError: Boolean,
     /**
      * 写入时间（毫秒）。

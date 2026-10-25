@@ -147,7 +147,30 @@ class ExecuteInTerminalSessionTool(
             TerminalSessionCommand(
                 sessionId = session.id,
                 command = command,
-                timeoutSeconds = (args.int(PARAM_TIMEOUT) ?: TerminalSessionCommand.DEFAULT_TIMEOUT_SECONDS.toInt()).toLong(),
+                // ## 默认值必须走 `int()` 的 default 参数，不能靠 `?:`
+                //
+                // 旧写法是 `args.int(PARAM_TIMEOUT) ?: DEFAULT`。
+                // 看起来兜住了，实际**兜不住**：`ToolArguments.int()` 在
+                // 参数缺失时是 `throw ToolArgumentException("缺少必需的整数参数")`
+                // （见 ToolArguments.kt:29），异常直接抛出，`?:` 右侧永远执行不到。
+                //
+                // 后果就是用户截图里那一行：
+                //
+                // ```
+                // execute_in_terminal_session 失败
+                // 参数错误：缺少必需的整数参数：timeout_seconds
+                // ```
+                //
+                // 而模型没传它是**完全合理**的 —— schema 的 `required` 里只有
+                // `command`，参数说明也写着「默认 600」。模型照着 schema 调用，
+                // 却被运行时报了必填缺失。
+                //
+                // 修法：把默认值交给 `int(name, default)`，它会在缺失时返回
+                // default 而不是抛异常。
+                timeoutSeconds = args.int(
+                    PARAM_TIMEOUT,
+                    TerminalSessionCommand.DEFAULT_TIMEOUT_SECONDS.toInt(),
+                ).toLong(),
             ),
         )
         return ToolResult(renderSessionResult(port, session.id, command, result), result.exitCode != 0)
@@ -208,7 +231,30 @@ class ExecuteInTerminalSessionStreamingTool(
             TerminalSessionCommand(
                 sessionId = session.id,
                 command = command,
-                timeoutSeconds = (args.int(PARAM_TIMEOUT) ?: TerminalSessionCommand.DEFAULT_TIMEOUT_SECONDS.toInt()).toLong(),
+                // ## 默认值必须走 `int()` 的 default 参数，不能靠 `?:`
+                //
+                // 旧写法是 `args.int(PARAM_TIMEOUT) ?: DEFAULT`。
+                // 看起来兜住了，实际**兜不住**：`ToolArguments.int()` 在
+                // 参数缺失时是 `throw ToolArgumentException("缺少必需的整数参数")`
+                // （见 ToolArguments.kt:29），异常直接抛出，`?:` 右侧永远执行不到。
+                //
+                // 后果就是用户截图里那一行：
+                //
+                // ```
+                // execute_in_terminal_session 失败
+                // 参数错误：缺少必需的整数参数：timeout_seconds
+                // ```
+                //
+                // 而模型没传它是**完全合理**的 —— schema 的 `required` 里只有
+                // `command`，参数说明也写着「默认 600」。模型照着 schema 调用，
+                // 却被运行时报了必填缺失。
+                //
+                // 修法：把默认值交给 `int(name, default)`，它会在缺失时返回
+                // default 而不是抛异常。
+                timeoutSeconds = args.int(
+                    PARAM_TIMEOUT,
+                    TerminalSessionCommand.DEFAULT_TIMEOUT_SECONDS.toInt(),
+                ).toLong(),
             ),
             onChunk = { chunks += it },
         )

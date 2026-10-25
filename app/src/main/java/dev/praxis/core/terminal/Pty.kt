@@ -129,6 +129,22 @@ open class Pty(
          * @param cols 列数；<=0 时用 40
          * @return 起不来时返回 null（调用方降级）
          */
+        /**
+         * 非阻塞探活：子进程是否还在。
+         *
+         * `android.os.Process.sendSignal(pid, 0)` 是 POSIX 的「信号 0」技巧：
+         * 不发任何信号，只做权限与存在性检查。进程在就返回 true。
+         *
+         * 为什么不用 [waitFor]：那个会**阻塞**等子进程退出，
+         * 在 `isAlive()` 这种高频调用里会让 UI 卡住。
+         */
+        fun isProcessAlive(pid: Int): Boolean = try {
+            android.os.Process.sendSignal(pid, 0)
+            true
+        } catch (t: Throwable) {
+            false
+        }
+
         fun start(
             command: Array<String>,
             environment: Map<String, String>,
@@ -253,4 +269,34 @@ private class NoopProcess(private val childPid: Int) : Process() {
         // 这里额外发一次 SIGTERM 兜底：有些子进程忽略 SIGHUP。
         runCatching { android.os.Process.sendSignal(childPid, 15) }
     }
+
+    /**
+     * 覆写 [isAlive]。
+     *
+     * ## 为什么必须覆写（2026-10-25）
+     *
+     * `Process.isAlive()` 的默认实现是「调 `exitValue()` 且不抛异常」：
+     *
+     * ```java
+     * public boolean isAlive() {
+     *     try { exitValue(); return false; }
+     *     catch (IllegalThreadStateException e) { return true; }
+     * }
+     * ```
+     *
+     * 而本类的 `exitValue()` 在未完成时**主动抛** `IllegalThreadStateException`
+     * （那是 Process 契约要求的），于是默认 `isAlive()` 得到的结论恰好是反的：
+     * 进程还活着 → 抛异常 → 被 catch → 返回 true。
+     * …这看起来是对的，但前提是 `finished` 从未被置位。
+     *
+     * 真正的问题是**没有人去轮询子进程**：`finished` 只在 `waitFor()` 被调用
+     * 时才更新，而终端会话这条路上没人调 `waitFor()`。所以子进程已经死了，
+     * `isAlive()` 仍然返回 true，上层继续往一个已关闭的 master fd 写数据，
+     * 拿到 `Stream closed`。
+     *
+     * 正确做法：`isAlive()` 自己去做一次**非阻塞的存活探测**，
+     * 存活状态以内核为准，而不是以本地标志为准。
+     */
+    override fun isAlive(): Boolean =
+        if (finished) false else Pty.isProcessAlive(childPid)
 }

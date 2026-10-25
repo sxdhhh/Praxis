@@ -9,12 +9,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -49,6 +53,10 @@ import dev.praxis.ui.widgets.FoldableContent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Slider
+import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.Memory
+import top.yukonga.miuix.kmp.basic.Switch
 
 /**
  * 输入区右下角的设置入口 —— 1:1 对齐 Operit `ClassicChatSettingsBar`。
@@ -124,8 +132,40 @@ internal fun ChatSettingsBar(
     toolTier: PermissionTier? = null,
     onSetToolTier: ((PermissionTier) -> Unit)? = null,
     onOpenToolSettings: (() -> Unit)? = null,
+    /** 是否自动朗读（null = 设备无 TTS，整行不显示）。 */
+    autoReadReplies: Boolean? = null,
+    onToggleAutoReadReplies: ((Boolean) -> Unit)? = null,
     disableStreamOutput: Boolean = false,
     onToggleDisableStreamOutput: ((Boolean) -> Unit)? = null,
+    /**
+     * 是否自动保存记忆（对应 Operit 记忆组的 `enableMemoryAutoUpdate`）。
+     *
+     * null = 上层没接这条能力。与其它可选参数同一纪律：宁可少一行，
+     * 也不显示一个点了没反应的开关。
+     */
+    autoMemoryEnabled: Boolean = true,
+    onToggleAutoMemory: ((Boolean) -> Unit)? = null,
+    /**
+     * 已加载的技能名（插件组数据源，对应 Operit `pluginInputMenuToggles`）。
+     *
+     * 空列表时整个「插件」分区不显示：没有技能却给一个空分区，
+     * 用户会以为功能坏了。
+     */
+    skillNames: List<String> = emptyList(),
+    /** 被关掉的技能名集合。 */
+    disabledSkills: Set<String> = emptySet(),
+    onToggleSkill: ((String, Boolean) -> Unit)? = null,
+    /**
+     * 全部工具名（工具组里逐个开关的数据源）。
+     *
+     * 对应 Operit 工具组的 `toolSlotToggles`。Praxis 的 `disabledTools`
+     * 与权限档位是独立维度（见 `ToolPermissionState` KDoc）：档位是
+     * 「能力上限」，这里的开关是「用户就是不想让它跑」。
+     */
+    toolNames: List<String> = emptyList(),
+    /** 被禁用的工具名集合。 */
+    disabledTools: Set<String> = emptySet(),
+    onToggleTool: ((String, Boolean) -> Unit)? = null,
 ) {
     // 一个能力都没有就整个入口不渲染。
     // 判据用「有没有任何可用能力」而不是「有没有模型回调」——
@@ -148,6 +188,8 @@ internal fun ChatSettingsBar(
     var showBehaviorSection by remember { mutableStateOf(false) }
     // 思考强度四档的二级展开（对应上游 `ThinkingSettingsItem` 的 expanded）。
     var showThinkingList by remember { mutableStateOf(false) }
+    var showMemorySection by remember { mutableStateOf(false) }
+    var showPluginsSection by remember { mutableStateOf(false) }
 
     Box(modifier = modifier) {
         IconButton(
@@ -170,22 +212,65 @@ internal fun ChatSettingsBar(
 
         if (showMenu) {
             Popup(
-                alignment = Alignment.TopEnd,
+                alignment = Alignment.TopStart,
                 onDismissRequest = { showMenu = false },
                 properties = PopupProperties(
                     focusable = true,
                     dismissOnBackPress = true,
-                    dismissOnClickOutside = true,
+                    // ## dismissOnClickOutside 必须是 false
+                    //
+                    // 改成「满屏 Box 自己接点击」之后，Popup 的 outside 区域
+                    // 已经不存在了（内容铺满整屏），这个开关只会让
+                    // 「点卡片内部」也被判成 outside 而误关。
+                    dismissOnClickOutside = false,
                 ),
             ) {
-                // 280dp 宽、最多 420dp 高、超出可滚 —— 前两个值与上游同源。
+                // ── 为什么这里必须是「满屏 Box」而不是直接放 Card ──────
                 //
-                // 高度上限必须给：分区全展开时内容远超一屏，不设上限
-                // 会让 Popup 顶到状态栏之外，最后几个开关永远点不到。
+                // ## 这是「展开收起时一抖一抖」的真因
+                //
+                // 旧写法把 Card 直接作为 Popup 的内容。于是 **Popup 窗口的
+                // 尺寸 = 卡片尺寸**，而卡片里有 `FoldableContent`
+                // （expandVertically）—— 展开动画的 400ms 里，卡片高度
+                // 每帧都在变，Popup 窗口就每帧重新测量、重新定位。
+                //
+                // Popup 是独立 Window，重新定位不是单纯的重绘：它每帧都在
+                // 申请新的窗口区域。观感就是面板一边长高一边抖，且因为要等
+                // 窗口 relayout，动画显得很慢。
+                //
+                // 上游（AgentChatInputSection.kt:2299-2315）用的是完全不同的
+                // 结构：Popup 内容是一个 `fillMaxSize` 的 Box（**尺寸恒定**），
+                // 卡片在 Box 里 `contentAlignment = BottomEnd` 定位。
+                // 这样折叠内容怎么变，Popup 窗口始终是整屏，不需要重新定位。
+                //
+                // 这里照搬该结构。
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { showMenu = false },
+                        ),
+                    // 向上弹出：卡片贴底（BottomEnd），不是贴顶。
+                    contentAlignment = Alignment.BottomEnd,
+                ) {
+                // 280dp 宽、最多 420dp 高、超出可滚 —— 与上游 300dp 同量级。
+                //
+                // 高度上限必须给：分区全展开时内容远超一屏。
+                // `padding(bottom = 96.dp)` 把卡片抬到输入栏之上 ——
+                // 这是「往上出现」的落点，与上游 44dp + 自身高度同思路，
+                // Praxis 输入栏更高（两行），所以取 96dp。
                 Card(
                     modifier = Modifier
+                        .padding(bottom = 96.dp, end = 8.dp)
                         .width(280.dp)
-                        .heightIn(max = 420.dp),
+                        .heightIn(max = 420.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                        ),
                 ) {
                     Column(
                         modifier = Modifier
@@ -193,6 +278,42 @@ internal fun ChatSettingsBar(
                             .verticalScroll(rememberScrollState())
                             .padding(vertical = 4.dp),
                     ) {
+                        // ── 记忆 ────────────────────────────────────────
+                        //
+                        // 对应 Operit `AgentMemorySelectorItem` +
+                        // 记忆 slot 的 toggles（AgentChatInputSection.kt:2335）。
+                        //
+                        // ## 与 Operit 的差异（如实说明，不是漏做）
+                        //
+                        // Operit 的记忆组有两个东西：**记忆空间选择器**（下拉
+                        // 切换 MemorySpace）和**自动更新开关**。
+                        //
+                        // Praxis 的 `MemoryPort` 是单库（`recall`/`remember`），
+                        // 没有「多空间」概念，所以这里只有自动更新开关。
+                        // 等底层支持多空间时，这一组加一个下拉即可。
+                        if (onToggleAutoMemory != null) {
+                            FoldSection(
+                                title = "记忆",
+                                value = if (autoMemoryEnabled) "自动保存" else "已关闭",
+                                icon = Icons.Outlined.Memory,
+                                expanded = showMemorySection,
+                                showTopDivider = false,
+                                onExpandedChange = { showMemorySection = it },
+                            ) {
+                                SwitchRow(
+                                    title = "自动保存记忆",
+                                    detail = if (autoMemoryEnabled) {
+                                        "对话结束后自动提取值得记的内容"
+                                    } else {
+                                        "已关闭：只有手动保存才写入"
+                                    },
+                                    checked = autoMemoryEnabled,
+                                    onCheckedChange = { onToggleAutoMemory(it) },
+                                )
+                            }
+                        }
+
+
                         // ── 模型 ────────────────────────────────────────
                         if (onOpenModelSettings != null || onPickThinkingEffort != null) {
                             FoldSection(
@@ -222,16 +343,67 @@ internal fun ChatSettingsBar(
                                         trailing = if (showThinkingList) "收起" else "展开",
                                         onClick = { showThinkingList = !showThinkingList },
                                     )
-                                    if (showThinkingList) {
-                                        ThinkingEffort.entries.forEach { effort ->
-                                            ChoiceRow(
-                                                label = effort.menuLabel(),
-                                                selected = effort == thinkingEffort,
-                                                onClick = {
-                                                    showThinkingList = false
-                                                    onPickThinkingEffort(effort)
+                                    // ## 为什么是滑动条而不是四个选项（2026-10-25）
+                                    //
+                                    // 思考强度是**有顺序的量**（None < Low < Medium < High），
+                                    // 不是并列的四选一。这类量用滑动条表达更准确：
+                                    // 用户能一眼看出「还能往上调」，而不是面对四个
+                                    // 同等权重的文字行。
+                                    //
+                                    // ## 动画
+                                    //
+                                    // 两层动画叠加：
+                                    //  1. `FoldableContent` 管**展开**（高度 + 淡入）；
+                                    //  2. miuix `Slider` 自己管**取值过渡**（拇指与
+                                    //     轨道用动画跟随目标值，不是瞬间跳）。
+                                    //
+                                    // 展开必须常驻调用、只翻 `visible`，
+                                    // 包 `if` 会让收起动画来不及播。
+                                    FoldableContent(visible = showThinkingList) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        ) {
+                                            val efforts = ThinkingEffort.entries
+                                            val index = efforts.indexOf(thinkingEffort)
+                                                .coerceAtLeast(0)
+                                            Slider(
+                                                value = index.toFloat(),
+                                                onValueChange = { v ->
+                                                    // 就地吸附到最近的档位：
+                                                    // `steps = 2` 已经给出 4 个停靠点，
+                                                    // 这里 round 是防浮点抖动。
+                                                    val i = v.toInt()
+                                                        .coerceIn(0, efforts.lastIndex)
+                                                    if (efforts[i] != thinkingEffort) {
+                                                        onPickThinkingEffort(efforts[i])
+                                                    }
                                                 },
+                                                valueRange = 0f..efforts.lastIndex.toFloat(),
+                                                // 4 个位置 → 中间停靠点 2 个。
+                                                steps = (efforts.size - 2).coerceAtLeast(0),
+                                                showKeyPoints = true,
+                                                modifier = Modifier.fillMaxWidth(),
                                             )
+                                            // 档位文字：左端与右端是端点，中间两档均分。
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                            ) {
+                                                efforts.forEach { effort ->
+                                                    Text(
+                                                        text = effort.chipLabel(),
+                                                        fontSize = 11.sp,
+                                                        color = if (effort == thinkingEffort) {
+                                                            MiuixTheme.colorScheme.primary
+                                                        } else {
+                                                            MiuixTheme.colorScheme
+                                                                .onSurfaceVariantSummary
+                                                        },
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -257,11 +429,38 @@ internal fun ChatSettingsBar(
                                         onClick = { onSetToolTier(tier) },
                                     )
                                 }
+                                // ## 为什么是就地开关而不是跳转（2026-10-25）
+                                //
+                                // 旧写法是一行 ActionRow「管理单个工具」，点了跳设置页。
+                                // 但用户要的是「就在底栏里关掉某个工具」，跳页多一层。
+                                // Operit 的 `AgentToolsPermissionGroupItem` 也是就地列出
+                                // slot toggles（AgentChatInputSection.kt:2397）。
+                                if (toolNames.isNotEmpty() && onToggleTool != null) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                                            .height(1.dp)
+                                            .background(
+                                                MiuixTheme.colorScheme.outline.copy(alpha = 0.2f),
+                                            ),
+                                    )
+                                    toolNames.forEach { name ->
+                                        val enabled = name !in disabledTools
+                                        SwitchRow(
+                                            title = name,
+                                            detail = if (enabled) "可用" else "已禁用",
+                                            checked = enabled,
+                                            onCheckedChange = { onToggleTool(name, it) },
+                                        )
+                                    }
+                                }
+                                // 管理页保留：它能做这里做不到的事（看工具描述、参数表）。
                                 if (onOpenToolSettings != null) {
                                     ActionRow(
                                         icon = Icons.Outlined.Security,
-                                        title = "管理单个工具",
-                                        detail = "禁用不想用的工具",
+                                        title = "工具详情",
+                                        detail = "看描述与参数，或管理全部工具",
                                         onClick = {
                                             showMenu = false
                                             onOpenToolSettings()
@@ -272,16 +471,26 @@ internal fun ChatSettingsBar(
                         }
 
                         // ── 行为 ────────────────────────────────────────
-                        if (onToggleDisableStreamOutput != null) {
+                        if (onToggleDisableStreamOutput != null || onToggleAutoReadReplies != null) {
                             FoldSection(
                                 title = "行为",
                                 // 与上游 `behaviorSummary` 同口径：摘要直接写「现在是哪种」，
                                 // 不写「点击切换」那种无信息量的说明。
-                                value = if (disableStreamOutput) "非流式" else "流式",
+                                value = listOfNotNull(
+                                    if (disableStreamOutput) "非流式" else "流式",
+                                    if (autoReadReplies == true) "朗读" else null,
+                                ).joinToString(" · "),
                                 icon = Icons.Outlined.Speed,
                                 expanded = showBehaviorSection,
                                 onExpandedChange = { showBehaviorSection = it },
                             ) {
+                                // ## 为什么要再包一层 null 检查
+                                //
+                                // 外层条件已经是「任一非空」（||），Kotlin 无法从
+                                // `a != null || b != null` 推出 `a != null`，所以启用
+                                // smart cast 会失败，`onToggleDisableStreamOutput(...)` 报
+                                // 「Smart cast to 'Function1<Boolean, Unit>' is impossible」。
+                                if (onToggleDisableStreamOutput != null) {
                                 ActionRow(
                                     icon = Icons.Outlined.Speed,
                                     title = "关闭流式输出",
@@ -296,7 +505,237 @@ internal fun ChatSettingsBar(
                                         onToggleDisableStreamOutput(!disableStreamOutput)
                                     },
                                 )
+                                }
+
+                                // ── 自动朗读 ──
+                                //
+                                // 用 SwitchRow 而不是 ActionRow：这是纯状态（开/关），
+                                // 没有「点了会跳转」的语义。
+                                if (autoReadReplies != null && onToggleAutoReadReplies != null) {
+                                    SwitchRow(
+                                        title = "自动朗读回复",
+                                        detail = if (autoReadReplies) {
+                                            "回复生成完后念出来"
+                                        } else {
+                                            "已关闭"
+                                        },
+                                        checked = autoReadReplies,
+                                        onCheckedChange = { onToggleAutoReadReplies(it) },
+                                    )
+                                }
                             }
+                        }
+
+                        // ── 插件 ────────────────────────────────────────
+                        //
+                        // 对应 Operit `AgentPluginSettingsGroupItem`
+                        // （AgentChatInputSection.kt:2431）。
+                        //
+                        // ## 数据源
+                        //
+                        // Operit 的插件槽位来自 `InputMenuTogglePluginRegistry`
+                        // （第三方能往里注册开关）。Praxis 没有那套插件注册表，
+                        // 但**有** `SkillRegistry` —— 技能就是 Praxis 的插件。
+                        // 所以这里列出已加载的技能，逐个开关。
+                        //
+                        // ## 为什么关掉是「记黑名单」
+                        //
+                        // 见 `SettingsRepository.disabledSkills` 的注释：
+                        // 技能是扫盘出来的，存「开着的」会让新技能默认关闭，
+                        // 用户会以为没生效。存「关掉的」，新技能默认开启。
+                        if (skillNames.isNotEmpty() && onToggleSkill != null) {
+                            FoldSection(
+                                title = "插件",
+                                value = "${skillNames.size - disabledSkills.count { it in skillNames }}"
+                                    + "/${skillNames.size}",
+                                icon = Icons.Outlined.Extension,
+                                expanded = showPluginsSection,
+                                onExpandedChange = { showPluginsSection = it },
+                            ) {
+                                skillNames.forEach { name ->
+                                    val enabled = name !in disabledSkills
+                                    SwitchRow(
+                                        title = name,
+                                        detail = if (enabled) "启用中" else "已禁用",
+                                        checked = enabled,
+                                        onCheckedChange = { onToggleSkill(name, it) },
+                                    )
+                                }
+                            }
+                        }
+
+                    }
+                }
+            }
+        }
+    }
+}
+}
+
+
+/**
+ * 模型胶囊 —— 对齐 Operit `AgentChatInputSection.kt:891-931` 的 Surface。
+ *
+ * ## 为什么放在本文件而不是 ChatScreen.kt
+ *
+ * 它需要 `Icons` / `Popup` / `PopupProperties` / `TextOverflow` 这些符号，
+ * 而本文件**已经**全部 import（`ChatSettingsBar` 自己就要用）。
+ * 放进 `ChatScreen.kt` 得再补 8 个 import，且那里用的是 miuix 的 `Icon`
+ * 而非 Material 的 —— 两套图标体系混在一个文件里最容易出错。
+ *
+ * ## 它弹的是**自己的**面板（这是本轮修的错）
+ *
+ * Operit 底栏三个按钮弹三个不同面板：
+ *
+ * | 按钮 | 弹出 | 上游行号 |
+ * |---|---|---|
+ * | 模型胶囊 | `AgentModelSelectorPopup`（选模型 / 思考 / MaxContext） | 1392 |
+ * | Tune | `AgentExtraSettingsPopup`（记忆 / 工具 / 行为 / 插件） | 1417 |
+ * | 加号 | `AttachmentSelectorPanel`（9 类附件） | 750 |
+ *
+ * 三者互斥：`onModelSelectorClick` 先关 ExtraSettings（第 569 行），
+ * Tune 的 onClick 也先关模型面板（第 941 行）。展开中的那个 tint 变 primary。
+ *
+ * ## 面板结构（照上游 1550-1560 行）
+ *
+ * `Popup(TopStart)` + 内部 `Box(fillMaxSize).clickable(onDismiss)` +
+ * `Card` 贴右下角。**卡片尺寸恒定、只改透明度** —— 若对卡片做 scale，
+ * Popup 每帧重新测量并重新定位，观感就是持续抖动。
+ */
+@Composable
+fun ModelPill(
+    modelName: String,
+    models: List<String>,
+    activeIndex: Int,
+    onClickModel: (Int) -> Unit,
+    onManageModels: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    // 展开时文字变 primary（上游 950-955 行同一判据）。
+    val pillColor = if (expanded) {
+        MiuixTheme.colorScheme.primary
+    } else {
+        MiuixTheme.colorScheme.onSurface
+    }
+
+    Box(modifier = modifier) {
+        // 胶囊本体：12dp 圆角 + 1dp 描边（上游 widthIn max 220dp）。
+        Row(
+            modifier = Modifier
+                .padding(end = 2.dp)
+                .widthIn(max = 220.dp)
+                .height(34.dp)
+                .border(
+                    width = 1.dp,
+                    color = MiuixTheme.colorScheme.outline.copy(alpha = 0.2f),
+                    shape = RoundedCornerShape(12.dp),
+                )
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = modelName.ifBlank { "未配置模型" },
+                style = MiuixTheme.textStyles.footnote1,
+                color = pillColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.width(4.dp))
+            Icon(
+                imageVector = if (expanded) {
+                    Icons.Default.KeyboardArrowUp
+                } else {
+                    Icons.Default.KeyboardArrowDown
+                },
+                contentDescription = null,
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+
+        if (expanded) {
+            Popup(
+                alignment = Alignment.TopStart,
+                onDismissRequest = { expanded = false },
+                properties = PopupProperties(
+                    focusable = true,
+                    dismissOnBackPress = true,
+                    // 上游同样 false：靠外层 Box 的 clickable 关闭，
+                    // 这样点卡片内部不会误关。
+                    dismissOnClickOutside = false,
+                ),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { expanded = false },
+                        ),
+                    contentAlignment = Alignment.BottomEnd,
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .padding(bottom = 44.dp, end = 12.dp)
+                            .width(260.dp)
+                            .heightIn(max = 380.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = {},
+                            ),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                                .padding(vertical = 4.dp),
+                        ) {
+                            if (models.isEmpty()) {
+                                Text(
+                                    text = "还没有模型，先去设置里填一个",
+                                    style = MiuixTheme.textStyles.footnote2,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    modifier = Modifier.padding(
+                                        horizontal = 12.dp,
+                                        vertical = 6.dp,
+                                    ),
+                                )
+                            } else {
+                                models.forEachIndexed { index, name ->
+                                    ChoiceRow(
+                                        label = name,
+                                        selected = index == activeIndex,
+                                        onClick = {
+                                            onClickModel(index)
+                                            expanded = false
+                                        },
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                                    .height(1.dp)
+                                    .background(
+                                        MiuixTheme.colorScheme.outline.copy(alpha = 0.2f),
+                                    ),
+                            )
+                            ActionRow(
+                                icon = Icons.Outlined.DataObject,
+                                title = "管理模型 / 服务商",
+                                detail = "改接口地址、密钥与模型池",
+                                onClick = {
+                                    expanded = false
+                                    onManageModels()
+                                },
+                            )
                         }
                     }
                 }
@@ -386,29 +825,92 @@ private fun FoldSection(
                 modifier = Modifier.size(20.dp),
             )
         }
-        // ## 展开/收起必须有过渡（2026-10-24 修）
+        // ## 展开/收起：保留动画，但**从底边向上展开**（2026-10-25）
         //
-        // 旧写法是 `if (expanded) { Column(...) }`：点击后整个分区内容
-        // **在一帧内**被塞进布局或抽走，观感是「面板闪了一下」。
+        // 用户要求「瞬时动画太屎了还是用我们的好」，所以保留现在的过渡，
+        // 只修抖动与速度。
         //
-        // 换成 `FoldableContent`：高度 `expandVertically` + 透明度 `fadeIn`
-        // 同时过渡，时长取 `PraxisMotion.Expansion`（上游 Operit 原值，
-        // 退出比进入快）。函数内部用 `AnimatedVisibility`，所以这里
-        // **必须常驻调用**、只翻 `visible` —— 包一层 `if` 就又没退场动画了。
+        // ## 抖动的真因：展开方向与卡片对齐方向相反
+        //
+        // 卡片是 `BottomEnd` 定位的 —— 底边固定、高度向上增长。
+        // 而上一版 `FoldableContent` 用 `expandFrom = Top`：内容按顶边向下长。
+        // 展开的那 200ms 里两个运动同时进行且方向相反：
+        //
+        //   卡片：底边不动，顶边持续上移（整体向上长）
+        //   内容：顶边不动，底边持续下移（相对卡片向下长）
+        //
+        // 叠加结果就是内容在展开期间不断上下弹 —— 用户看到的「一抖一抖」。
+        //
+        // 改成 `expandFromBottom = true` 后两者同向（都向上长），抖动消失。
+        // 时长也一并缩短（见 `PraxisMotion.Expansion` 的注释：400/300 → 220/150）。
         FoldableContent(
             visible = expanded,
-            // 展开区底色浅一档（上游是 surface.copy(alpha=0.5f)）：
-            // 让「哪些行属于这个分区」在视觉上成立，否则分区之间只靠一条细线。
-            //
-            // 底色挂在 `FoldableContent` 的 Column 上而不是内层：
-            // 这样底色跟着高度一起长出来，不会先出现一整块空白再填内容。
+            // 贴底面板：从底边向上展开。
+            expandFromBottom = true,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.5f))
-                .padding(bottom = 4.dp),
+                // 展开区底色浅一档（上游是 surface.copy(alpha = 0.5f)）：
+                // 让「哪些行属于这个分区」在视觉上成立，否则分区之间只靠一条细线。
+                .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .padding(start = 8.dp, end = 8.dp, bottom = 4.dp),
         ) {
             content()
         }
+}
+}
+
+/**
+ * 一行开关：右侧是 Switch，不是状态文字。
+ *
+ * ## 与 [ActionRow] 的区别
+ *
+ * `ActionRow` 是「点了会去做某事」——它是**动作**。
+ * `SwitchRow` 是「这一项现在是开还是关」——它是**状态**。
+ * 混用会让用户点开关时以为要跳页。
+ *
+ * ## 为什么整行可点
+ *
+ * 只让 Switch 自身可点，手指要精确落在右侧那一小块。材料设计中
+ * 行式开关的标准做法是整行可切换，命中区更大。
+ */
+@Composable
+private fun SwitchRow(
+    title: String,
+    detail: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = MiuixTheme.colorScheme.onSurface,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = detail,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = 11.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        // onCheckedChange = null 表示「由父容器接管点击」，
+        // 避免一次点击触发两遍。
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+        )
     }
 }
 

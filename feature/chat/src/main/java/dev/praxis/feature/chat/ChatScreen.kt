@@ -18,6 +18,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -206,6 +216,24 @@ fun ChatScreen(
      * null 表示不渲染图片按钮（预览/未接线），与其它可选回调同一纪律。
      */
     onRequestPickImage: (() -> Unit)? = null,
+    /** 选文件（附件面板的「文件」格）。null = 上层没接。 */
+    onPickFile: (() -> Unit)? = null,
+    /** 附件面板是否展开。 */
+    attachmentPanelOpen: Boolean = false,
+    /** 切换附件面板；null = 不显示加号按钮。 */
+    onOpenAttachmentPanel: (() -> Unit)? = null,
+    /** 插入位置（结果为文本，写进输入框）。null = 不提供。 */
+    onAttachLocation: (() -> Unit)? = null,
+    /** 插入当前通知（结果为文本）。null = 不提供。 */
+    onAttachNotifications: (() -> Unit)? = null,
+    /** 插入最近记忆（文本）。null = 不提供。 */
+    /** 拍照（系统相机）。null = 不提供。 */
+    /** 屏幕内容（截当前这屏）。null = 不提供。 */
+    onCaptureScreen: (() -> Unit)? = null,
+    onTakePhoto: (() -> Unit)? = null,
+    onAttachMemory: (() -> Unit)? = null,
+    /** 插入已安装应用列表（文本）。null = 不提供。 */
+    onAttachPackages: (() -> Unit)? = null,
     /** 移除第 index 张待发图片。 */
     onRemoveAttachment: ((Int) -> Unit)? = null,
     /** 队列操作（可空：不传则不显示队列面板）。 */
@@ -264,6 +292,23 @@ fun ChatScreen(
      * 直接传下来最省事，也不用为了一个字符串打破上面那条纪律。
      */
     modelName: String = "",
+    /** 模型池（模型胶囊的就地选择列表）。空表示没配置过。 */
+    models: List<String> = emptyList(),
+    /** 当前生效的模型下标。 */
+    activeModelIndex: Int = 0,
+    /** 选第 index 个模型；null 表示不支持就地切换。 */
+    onSelectModelIndex: ((Int) -> Unit)? = null,
+    /** 是否自动保存记忆（记忆分区的开关）。 */
+    autoMemoryEnabled: Boolean = true,
+    onToggleAutoMemory: ((Boolean) -> Unit)? = null,
+    /** 已加载的技能名（插件分区数据源）。空则整个分区不显示。 */
+    skillNames: List<String> = emptyList(),
+    disabledSkills: Set<String> = emptySet(),
+    onToggleSkill: ((String, Boolean) -> Unit)? = null,
+    /** 全部工具名（底栏工具组的就地开关数据源）。 */
+    toolNames: List<String> = emptyList(),
+    disabledTools: Set<String> = emptySet(),
+    onToggleTool: ((String, Boolean) -> Unit)? = null,
     /**
      * 切换思考强度。null 表示不提供切换（该下拉项不渲染）。
      *
@@ -314,6 +359,9 @@ fun ChatScreen(
     /** 是否关闭流式输出（底栏「行为」分区，1:1 对齐 Operit `disableStreamOutput`）。 */
     disableStreamOutput: Boolean = false,
     /** 切换流式输出。null 表示不提供（此时「行为」分区不渲染）。 */
+    /** 是否自动朗读（null = 设备无 TTS）。 */
+    autoReadReplies: Boolean? = null,
+    onToggleAutoReadReplies: ((Boolean) -> Unit)? = null,
     onToggleDisableStreamOutput: ((Boolean) -> Unit)? = null,
     /**
      * 对话显示风格。
@@ -1072,6 +1120,17 @@ fun ChatScreen(
             // 额外同步（上游为此写了 `translationY = -inputBarTranslationYPx`）。
             // 排进流里这两件事都不需要处理。
             modelName = modelName,
+            models = models,
+            activeModelIndex = activeModelIndex,
+            onSelectModelIndex = onSelectModelIndex,
+            autoMemoryEnabled = autoMemoryEnabled,
+            onToggleAutoMemory = onToggleAutoMemory,
+            skillNames = skillNames,
+            disabledSkills = disabledSkills,
+            onToggleSkill = onToggleSkill,
+            toolNames = toolNames,
+            disabledTools = disabledTools,
+            onToggleTool = onToggleTool,
             // 优先用外部下发的当前档位（随 DataStore 回流即时更新）；
             // 没下发则回落到 state（预览环境）。
             thinkingEffort = currentThinkingEffort ?: state.thinkingEffort,
@@ -1082,9 +1141,20 @@ fun ChatScreen(
             onOpenToolSettings = onOpenToolSettings,
             disableStreamOutput = disableStreamOutput,
             onToggleDisableStreamOutput = onToggleDisableStreamOutput,
+            autoReadReplies = autoReadReplies,
+            onToggleAutoReadReplies = onToggleAutoReadReplies,
             // 图片入口与移除：直接透传。ChatScreen 不自己实现选图
             // （见 `onRequestPickImage` 的 KDoc）。
             onPickImage = onRequestPickImage,
+            onPickFile = onPickFile,
+            attachmentPanelOpen = attachmentPanelOpen,
+            onOpenAttachmentPanel = onOpenAttachmentPanel,
+            onAttachLocation = onAttachLocation,
+            onAttachNotifications = onAttachNotifications,
+            onCaptureScreen = onCaptureScreen,
+            onTakePhoto = onTakePhoto,
+            onAttachMemory = onAttachMemory,
+            onAttachPackages = onAttachPackages,
             onRemoveAttachment = onRemoveAttachment,
         )
 
@@ -1216,6 +1286,21 @@ private fun ChatInputBar(
     onNoticeConsumed: (() -> Unit)? = null,
     /** 当前模型名（显示在设置条上）。 */
     modelName: String = "",
+    /** 模型池（模型胶囊的就地选择列表）。空表示没配置过。 */
+    models: List<String> = emptyList(),
+    /** 当前生效的模型下标。 */
+    activeModelIndex: Int = 0,
+    /** 选第 index 个模型；null 表示不支持就地切换。 */
+    onSelectModelIndex: ((Int) -> Unit)? = null,
+    autoMemoryEnabled: Boolean = true,
+    onToggleAutoMemory: ((Boolean) -> Unit)? = null,
+    skillNames: List<String> = emptyList(),
+    disabledSkills: Set<String> = emptySet(),
+    onToggleSkill: ((String, Boolean) -> Unit)? = null,
+    /** 全部工具名（底栏工具组的就地开关数据源）。 */
+    toolNames: List<String> = emptyList(),
+    disabledTools: Set<String> = emptySet(),
+    onToggleTool: ((String, Boolean) -> Unit)? = null,
     /** 当前思考强度（设置条上的胶囊）。 */
     thinkingEffort: ThinkingEffort = ThinkingEffort.None,
     /** 切换思考强度；null 表示不渲染该下拉。 */
@@ -1231,6 +1316,9 @@ private fun ChatInputBar(
     /** 是否关闭流式输出（Tune 菜单「行为」分区）。 */
     disableStreamOutput: Boolean = false,
     /** 切换流式输出；null 表示不渲染「行为」分区。 */
+    /** 是否自动朗读（null = 设备无 TTS）。 */
+    autoReadReplies: Boolean? = null,
+    onToggleAutoReadReplies: ((Boolean) -> Unit)? = null,
     onToggleDisableStreamOutput: ((Boolean) -> Unit)? = null,
     /**
      * 点击「选图片」。
@@ -1245,6 +1333,24 @@ private fun ChatInputBar(
      * null 表示不渲染图片按钮（预览/未接线的调用点），与其它可选回调同一纪律。
      */
     onPickImage: (() -> Unit)? = null,
+    /** 选文件（附件面板的「文件」格）。null = 上层没接。 */
+    onPickFile: (() -> Unit)? = null,
+    /** 附件面板是否展开（由上层持有，便于点外部关闭）。 */
+    attachmentPanelOpen: Boolean = false,
+    /** 切换附件面板；null = 不显示加号按钮。 */
+    onOpenAttachmentPanel: (() -> Unit)? = null,
+    /** 插入位置（结果为文本，写进输入框）。null = 不提供。 */
+    onAttachLocation: (() -> Unit)? = null,
+    /** 插入当前通知（结果为文本）。null = 不提供。 */
+    onAttachNotifications: (() -> Unit)? = null,
+    /** 插入最近记忆（文本）。null = 不提供。 */
+    /** 拍照（系统相机）。null = 不提供。 */
+    /** 屏幕内容（截当前这屏）。null = 不提供。 */
+    onCaptureScreen: (() -> Unit)? = null,
+    onTakePhoto: (() -> Unit)? = null,
+    onAttachMemory: (() -> Unit)? = null,
+    /** 插入已安装应用列表（文本）。null = 不提供。 */
+    onAttachPackages: (() -> Unit)? = null,
     /** 移除第 index 张待发图片。 */
     onRemoveAttachment: ((Int) -> Unit)? = null,
 ) {
@@ -1524,31 +1630,6 @@ private fun ChatInputBar(
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // ── 选图片（1:1 对齐 Operit 输入区的图片入口）──
-                //
-                // ## 为什么放在输入框**左侧**
-                //
-                // Operit 的图片入口在输入区左侧（与「加号」同类），语义是
-                // 「给这次输入附加东西」，与输入框是并列关系；放在右侧会与
-                // 发送键抢位（两个都圆、都以 primary 着色，容易误点）。
-                if (onPickImage != null) {
-                    IconButton(
-                        onClick = onPickImage,
-                        // 与发送键同高（48dp）。只写 size 会被 miuix 的
-                        // `defaultMinSize(40.dp)` 撑成 40，这里显式给 48 —— 
-                        // 否则两个按钮底边不齐（输入框是 Bottom 对齐，差 8dp 很明显）。
-                        minWidth = 48.dp,
-                        minHeight = 48.dp,
-                        modifier = Modifier.size(48.dp),
-                    ) {
-                        Icon(
-                            imageVector = MiuixIcons.Regular.Album,
-                            contentDescription = "添加图片",
-                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
-                }
                 // 输入框：miuix TextField，不是 BasicTextField。
                 //
                 // 上一版用裸 BasicTextField + 自己画的 Surface 背景。换成 miuix
@@ -1578,47 +1659,152 @@ private fun ChatInputBar(
                     // 默认值恰好与 label 同字号，所以直接省掉这个参数。
                 )
 
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // 底栏功能行 —— 1:1 对齐 Operit `AgentChatInputSection.kt:883`
+            // ═══════════════════════════════════════════════════════════
+            //
+            // ## 上一轮我找错了组件
+            //
+            // 我一直对着 `ClassicChatSettingsBar.kt` 改 —— 那是 classic 输入样式
+            // 的组件，只有一个孤零零的齿轮，**不是**用户圈的那一条。
+            //
+            // 真正的那一条来自 `AgentChatInputSection.kt:883` 的 Row：
+            //
+            // ```
+            // [模型胶囊 weight(1f)] [Tune 34dp] [Add 36dp] [发送 36dp]
+            // ```
+            //
+            // 它在输入框**下方**，与输入框隔 `Spacer(8.dp)`（见第 881 行）。
+            //
+            // ## 数值逐项照搬上游
+            //
+            // | 项 | 上游 | 说明 |
+            // |---|---|---|
+            // | 胶囊圆角 | 12dp | 与输入框同族 |
+            // | 胶囊描边 | 1dp, outline alpha 0.2 | 极淡，底栏要轻 |
+            // | 胶囊最大宽 | 220dp | 防长模型名把后面按钮挤出去 |
+            // | 箭头 | 18dp | 展开时翻上/下（Praxis 跳设置页，无展开态） |
+            // | Tune 容器 | 34dp / 图标 20dp | 展开时 tint 变 primary |
+            // | Add 容器 | 36dp / 图标 24dp | 展开时 tint 变 primary |
+            // | 间距 | Tune 前 6dp、Add 前 8dp、发送前 6dp | |
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // ── 模型胶囊（撑满剩余空间）──────────────────
+                if (models.isNotEmpty() || onOpenModelSettings != null) {
+                    ModelPill(
+                        modelName = modelName,
+                        models = models,
+                        activeIndex = activeModelIndex,
+                        onClickModel = { index: Int -> onSelectModelIndex?.invoke(index) },
+                        onManageModels = { onOpenModelSettings?.invoke() },
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+
+                // ── 附件面板（加号点开）────────────────────
+                //
+                // 放在底栏 Row **之前**，所以它展开时把底栏往下推、
+                // 自己从底边向上长 —— 与 Operit 的位置一致
+                // （AttachmentSelector.kt 里面板挂在输入区上方）。
+                AttachmentPanel(
+                    visible = attachmentPanelOpen,
+                    onPickImage = onPickImage,
+                    onPickFile = onPickFile,
+                    onAttachLocation = onAttachLocation,
+                    onAttachNotifications = onAttachNotifications,
+                    onCaptureScreen = onCaptureScreen,
+                    onTakePhoto = onTakePhoto,
+                    onAttachMemory = onAttachMemory,
+                    onAttachPackages = onAttachPackages,
+                )
+
+                // ── Tune（齿轮）──────────────────────────────
+                if (onOpenModelSettings != null ||
+                    onPickThinkingEffort != null ||
+                    onToggleDisableStreamOutput != null ||
+                    (toolTier != null && onSetToolTier != null)
+                ) {
+                    ChatSettingsBar(
+                        modelName = modelName,
+                        thinkingEffort = thinkingEffort,
+                        onPickThinkingEffort = onPickThinkingEffort,
+                        onOpenModelSettings = onOpenModelSettings,
+                        toolTier = toolTier,
+                        onSetToolTier = onSetToolTier,
+                        onOpenToolSettings = onOpenToolSettings,
+                        disableStreamOutput = disableStreamOutput,
+                        onToggleDisableStreamOutput = onToggleDisableStreamOutput,
+                        autoReadReplies = autoReadReplies,
+                        onToggleAutoReadReplies = onToggleAutoReadReplies,
+                        // ── 记忆 / 插件（对齐 Operit 的记忆组与插件组）──
+                        autoMemoryEnabled = autoMemoryEnabled,
+                        onToggleAutoMemory = onToggleAutoMemory,
+                        skillNames = skillNames,
+                        disabledSkills = disabledSkills,
+                        onToggleSkill = onToggleSkill,
+                        toolNames = toolNames,
+                        disabledTools = disabledTools,
+                        onToggleTool = onToggleTool,
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
+
+                // ── 加号（附件）──────────────────────────────
+                //
+                // ## 加号 → 附件面板（2026-10-25，对齐 Operit）
+                //
+                // Operit 的加号（AgentChatInputSection.kt:960-986）点开的是
+                // `AttachmentSelectorPanel`（AttachmentSelector.kt:88），里面有
+                // 8 项：图片 / 拍照 / 记忆 / 文件 / 屏幕内容 / 通知 / 位置 / 智能包。
+                // 面板从**底边向上**展开（AnimatedVisibility + expandVertically，
+                // expandFrom = Bottom，200ms）。
+                //
+                // 之前这里是相册图标直接跳选图 —— 因为只有图片一条通路。
+                // 现在改成加号 + 面板，面板里能用的项真实可用，不能用的项
+                // 显示为禁用态（见 `AttachmentPanel` 的 `enabled` 参数）。
+                if (onOpenAttachmentPanel != null) {
+                    IconButton(
+                        onClick = onOpenAttachmentPanel,
+                        minWidth = 36.dp,
+                        minHeight = 36.dp,
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .size(36.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "添加附件",
+                            tint = if (attachmentPanelOpen) {
+                                MiuixTheme.colorScheme.primary
+                            } else {
+                                MiuixTheme.colorScheme.onSurfaceVariantSummary
+                            },
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // ── 发送 / 停止 ──────────────────────────────
                 SendAction(
                     state = state,
                     onSend = onSend,
                     onCancel = onCancel,
                 )
             }
-
-            // ── 设置条（1:1 对齐 Operit `ClassicChatSettingsBar`）──────
-            //
-            // ## 为什么在输入行之下
-            //
-            // 上游 `ClassicChatSettingsBar` 是 `.align(Alignment.BottomEnd)`
-            // 贴在输入区右下角，视觉位置在输入行之下。这里排进同一个 Column
-            // 的末尾，视觉一致且不需要额外同步键盘位移。
-            //
-            // ## 为什么三条都为 null 就整条不渲染
-            //
-            // 与 `PendingQueuePanel` 同一纪律：不画「点了没反应」的控件。
-            // 预览环境（Storybook / @Preview）不传任何回调时，这一条会
-            // 整段消失，而不是留一排灰胶囊。
-            if (onOpenModelSettings != null ||
-                onPickThinkingEffort != null ||
-                onToggleDisableStreamOutput != null ||
-                (toolTier != null && onSetToolTier != null)
-            ) {
-                ChatSettingsBar(
-                    modelName = modelName,
-                    thinkingEffort = thinkingEffort,
-                    onPickThinkingEffort = onPickThinkingEffort,
-                    onOpenModelSettings = onOpenModelSettings,
-                    toolTier = toolTier,
-                    onSetToolTier = onSetToolTier,
-                    onOpenToolSettings = onOpenToolSettings,
-                    disableStreamOutput = disableStreamOutput,
-                    onToggleDisableStreamOutput = onToggleDisableStreamOutput,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
         }
     }
 }
+
 
 /**
  * 预览条上的一行摘要（对齐上游 `ClassicChatInputSection` 的 reply 预览）。

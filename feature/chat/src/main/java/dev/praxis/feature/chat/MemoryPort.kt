@@ -32,6 +32,21 @@ interface MemoryPort {
      */
     suspend fun remember(content: String)
 
+    /**
+     * 取最近写入的 [limit] 条记忆正文（新的在前）。
+     *
+     * ## 与 [recall] 的区别
+     *
+     * `recall` 是「跟这句话相关的」，需要查询词；这个方法是「最近记了什么」，
+     * 不需要查询词。用途是把记忆作为**附件**插进输入框（附件面板的「记忆」格）
+     * —— 用户想说「按我记的来」，得先看到记了什么。
+     *
+     * ## 默认实现返回空
+     *
+     * 接口新增方法带默认实现，避免破坏已有实现与测试里的匿名对象。
+     */
+    suspend fun recent(limit: Int = RECENT_LIMIT): List<String> = emptyList()
+
     companion object {
         /**
          * 注入上下文的最大条数。
@@ -39,6 +54,9 @@ interface MemoryPort {
          * 5 条：再多会挤占对话历史与工具描述的预算。
          * 记忆是**补充**，不是主体；一条 800 字的记忆已经能占满半屏上下文。
          */
+        /** 附件面板「记忆」格一次最多带几条（多了会把输入框塞满）。 */
+        const val RECENT_LIMIT = 20
+
         const val DEFAULT_LIMIT = 5
     }
 }

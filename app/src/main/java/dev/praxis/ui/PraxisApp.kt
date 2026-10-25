@@ -121,6 +121,10 @@ fun PraxisApp(
     val toolContext: dev.praxis.core.tool.ToolContext = org.koin.compose.koinInject()
     val permissionState: dev.praxis.core.tool.ToolPermissionState = org.koin.compose.koinInject()
     val chatPersistence: dev.praxis.feature.chat.ChatPersistence = org.koin.compose.koinInject()
+    // `ChatPersistence` 只暴露「按会话读消息 / 写消息」，**没有**列会话列表
+    // （那是 `ChatRepository` 的 `observeSessions()`）。
+    // 恢复默认会话需要「最近更新的是哪个」，所以这里额外取一次仓储。
+    val chatRepository: dev.praxis.data.ChatRepository = org.koin.compose.koinInject()
     val memoryPort: dev.praxis.feature.chat.MemoryPort = org.koin.compose.koinInject()
 
     // 角色系统。取的是仓储本身：`activePrompt()` 每轮现取，
@@ -239,9 +243,69 @@ fun PraxisApp(
     androidx.compose.runtime.LaunchedEffect(Unit) { skillRegistry.reload() }
 
     // ── 会话与聊天 VM ────────────────────────────────────────
-    var sessionId by rememberSaveable { mutableStateOf("main") }
+    //
+    // ## 会话 id 必须落盘（2026-10-25 修：「重启后不是我退出前的会话」）
+    //
+    // 原来是 `rememberSaveable { mutableStateOf("main") }`。
+    // `rememberSaveable` 只活在**进程内**（含配置变更）：Activity 重建能保住，
+    // 但进程一死（用户划掉、系统回收、崩溃重启）就回到硬编码的 `"main"`。
+    //
+    // 这不只是「显示错会话」，它有两个真实后果：
+    //
+    //  1. 界面显示 `main`，而用户刚才在别的会话里 —— 他会以为记录丢了；
+    //  2. 更糟：**下一条消息被写进 `main`**，把原本连续的上下文劈成两半，
+    //     而且全程无报错，用户无从察觉。
+    //
+    // 所以初值改为「先恢复上次的会话 id」：占位空串 → `LaunchedEffect`
+    // 读到真实值再设进去。初始不用 `"main"` 是因为那样会先拿 `main`
+    // 建一次 `viewModel(key = "main")` 并读一遍历史 —— 白读库且闪一下内容。
+    var sessionId by rememberSaveable { mutableStateOf("") }
+
+    // 恢复上次会话：只跑一次，否则用户主动切会话后会被它拽回去。
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (sessionId.isNotEmpty()) return@LaunchedEffect
+        val saved = runCatching { settingsRepository.lastChatSessionId.first() }
+            .getOrDefault("")
+        sessionId = if (saved.isNotEmpty()) {
+            saved
+        } else {
+            // 从没记录过：取「最近更新的那个会话」，而不是硬编码 "main"。
+            //
+            // 硬编码的风险很具体：`main` 可能已被用户删掉。那时
+            // `viewModel` 会拿一个不存在的 id 建 VM，界面是空白聊天页
+            // 且发消息无反应（写库时外键失败）。
+            runCatching {
+                chatRepository.observeSessions().first()
+                    .maxByOrNull { it.updatedAt }?.id
+            }.getOrNull().orEmpty().ifEmpty { "main" }
+        }
+    }
+
+    // 切会话时写回。挂在 sessionId 的副作用上而不是切会话的点击回调里：
+    // 点击回调只覆盖「用户主动切」，而恢复与新建会话这两条路也要记录。
+    androidx.compose.runtime.LaunchedEffect(sessionId) {
+        if (sessionId.isNotEmpty()) {
+            runCatching { settingsRepository.setLastChatSessionId(sessionId) }
+        }
+    }
     val currentTier by permissionState.tier.collectAsStateWithLifecycle()
     val disabledTools by permissionState.disabledTools.collectAsStateWithLifecycle()
+
+    // ── 工具禁用列表的**持久化恢复**（2026-10-25）
+    //
+    // ## 这是修一个真实缺陷，不是新功能
+    //
+    // `ToolPermissionState` 是内存态：用户在设置页关掉一个工具，
+    // 进程一死就全忘了 —— 重启后那些工具又出现在模型的可见列表里。
+    // 关掉工具是**长期意图**，不写盘等于没关。
+    //
+    // 读一次即可（`LaunchedEffect(Unit)`），之后由用户的每次切换
+    // 反向写盘（见下面的 onToolToggle）。不订阅 Flow 是因为：
+    // permissionState 是权威源，跟着它走会形成回写循环。
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val saved = settingsRepository.disabledTools.first()
+        saved.forEach { name -> permissionState.setToolEnabled(name, false) }
+    }
 
     // key = sessionId：换会话必须拿到新 ViewModel，否则气泡还是上一个会话的。
     val chatViewModel: dev.praxis.feature.chat.ChatViewModel =
@@ -517,6 +581,21 @@ fun PraxisApp(
                         ChatTab(
                             viewModel = targetViewModel,
                             settingsRepository = settingsRepository,
+                            skillRegistry = skillRegistry,
+                            // 底栏工具组：可用工具名 + 当前禁用集 + 切换回调。
+                            toolNames = toolRegistry.names().toList(),
+                            disabledTools = disabledTools,
+                            onToggleTool = { n, e ->
+                                permissionState.setToolEnabled(n, e)
+                                coroutineScope.launch {
+                                    val next = if (e) {
+                                        permissionState.disabledTools.value - n
+                                    } else {
+                                        permissionState.disabledTools.value + n
+                                    }
+                                    settingsRepository.setDisabledTools(next)
+                                }
+                            },
                             modelSettings = modelSettings,
                             // 会话身份：滚动状态 / item key / 密钥掩码都按它区分。
                             // 旧实现没传，于是三个东西共用上一会话的值（见该参数 KDoc）。
@@ -603,7 +682,18 @@ fun PraxisApp(
                 currentTier = currentTier,
                 isToolEnabled = { name -> name !in disabledTools },
                 onTierChange = { permissionState.setTier(it) },
-                onToolToggle = { n, e -> permissionState.setToolEnabled(n, e) },
+                onToolToggle = { n, e ->
+                    // 先改运行态（立即影响下一批调用），再写盘（长期生效）。
+                    permissionState.setToolEnabled(n, e)
+                    coroutineScope.launch {
+                        val next = if (e) {
+                            permissionState.disabledTools.value - n
+                        } else {
+                            permissionState.disabledTools.value + n
+                        }
+                        settingsRepository.setDisabledTools(next)
+                    }
+                },
                 capabilities = capabilities,
                 onRequestCapability = { capability ->
                     val launched = capabilityRequester.request(

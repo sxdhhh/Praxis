@@ -275,6 +275,80 @@ class SettingsRepository(
     suspend fun setChatDisplayStyle(style: String) = put(KEY_CHAT_DISPLAY_STYLE, style)
 
     /**
+     * 上次停留的会话 id。空串表示「从未记录过」。
+     *
+     * 调用方拿到空串时应该自己去挑一个默认会话（比如最近更新的那个），
+     * 而不是硬编码 `"main"` —— 硬编码会在「main 已被删除」时给出一个
+     * 不存在的会话，用户看到空聊天页且无法发送。
+     */
+    val lastChatSessionId: Flow<String> =
+        dataStore.data.map { it[KEY_LAST_CHAT_SESSION] ?: "" }
+
+    /** 记录当前会话（切会话时调用）。 */
+    suspend fun setLastChatSessionId(sessionId: String) = put(KEY_LAST_CHAT_SESSION, sessionId)
+
+    /** 是否自动保存记忆。默认开启（与 Operit 的默认一致）。 */
+    val autoMemoryEnabled: Flow<Boolean> =
+        dataStore.data.map { it[KEY_AUTO_MEMORY] ?: true }
+
+    suspend fun setAutoMemoryEnabled(enabled: Boolean) = put(KEY_AUTO_MEMORY, enabled)
+
+    /**
+     * 被**关掉**的技能名集合（插件组的持久化底座）。
+     *
+     * ## 为什么存「关掉的」而不是「开着的」
+     *
+     * 技能是扫盘出来的（`SkillRegistry.reload()`），用户随时可能丢一个新
+     * skill 进目录。存「开着的」集合，新技能默认是关的 —— 用户会觉得
+     * 「我明明放进去了怎么不生效」。存「关掉的」，新技能默认为开。
+     *
+     * 存逗号分隔串而不是序列化 Set：技能名按约定不含逗号，串最简单可靠。
+     */
+    val disabledSkills: Flow<Set<String>> =
+        dataStore.data.map { prefs ->
+            prefs[KEY_DISABLED_SKILLS]
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                ?: emptySet()
+        }
+
+    /** 记录禁用的技能集合（空集合等价于「全部启用」）。 */
+    suspend fun setDisabledSkills(names: Set<String>) =
+        put(KEY_DISABLED_SKILLS, names.filter { it.isNotBlank() }.joinToString(","))
+
+    /**
+     * 用户禁用的**单个工具**名集合（对齐 Operit 工具组的 slot 粒度开关）。
+     *
+     * ## 与权限档位是独立维度
+     *
+     * 档位是「能力上限」（STANDARD/DEBUGGER/ROOT），禁用列表是
+     * 「用户就是不想让这个工具跑」。两者都要满足，工具才发给模型
+     * —— 见 `ToolRegistry.descriptorsFor(snapshot)`。
+     *
+     * ## 为什么必须持久化
+     *
+     * `ToolPermissionState` 是内存态（进程重启即丢）。用户关掉一个工具
+     * 是长期意图，不写盘等于「重启就复活」，这比没有开关更糟。
+     */
+    val disabledTools: Flow<Set<String>> =
+        dataStore.data.map { prefs ->
+            prefs[KEY_DISABLED_TOOLS]
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                ?: emptySet()
+        }
+
+    /** 记录禁用的工具名集合。 */
+    suspend fun setDisabledTools(names: Set<String>) =
+        put(KEY_DISABLED_TOOLS, names.filter { it.isNotBlank() }.joinToString(","))
+
+
+
+    /**
      * 终端设置（第 12 项缺陷：终端齿轮要有自己的目的地）。
      *
      * 读盘后立刻 [TerminalSettings.sanitized]：DataStore 里的值可能来自
@@ -537,6 +611,19 @@ class SettingsRepository(
     suspend fun setDisableStreamOutput(disabled: Boolean) =
         put(KEY_DISABLE_STREAM_OUTPUT, disabled)
 
+    /**
+     * 是否自动朗读助手回复（1:1 对齐 Operit 的 isAutoReadEnabled）。
+     *
+     * 默认关闭：朗读会占音频焦点、打断用户正在听的音乐，
+     * 默认开等于应用一启动就抢扬声器。
+     */
+    val autoReadReplies: Flow<Boolean> =
+        dataStore.data.map { prefs -> prefs[KEY_AUTO_READ_REPLIES] ?: false }
+
+    /** 切换自动朗读。 */
+    suspend fun setAutoReadReplies(enabled: Boolean) =
+        put(KEY_AUTO_READ_REPLIES, enabled)
+
     private suspend fun <T> put(key: Preferences.Key<T>, value: T) {
         dataStore.edit { it[key] = value }
     }
@@ -648,6 +735,45 @@ private val KEY_LINUX_SHARED_TMP = booleanPreferencesKey("linux_shared_tmp")
 private val KEY_VIRTUAL_KEYBOARD_LABELS = stringPreferencesKey("virtual_keyboard_labels")
 
 /**
+ * 上次停留的会话 id。
+ *
+ * ## 为什么需要它（2026-10-25 修：「重启后不是我退出前的会话」）
+ *
+ * 会话 id 原来只存在 `rememberSaveable`（`PraxisApp.kt:242`），
+ * 那是**进程内**状态：只要进程死了（用户划掉、系统回收、崩溃重启），
+ * 就会被重置回硬编码的 `"main"`。
+ *
+ * 后果不是「丢了一个会话」而是「看起来所有会话都乱了」：用户明明在
+ * `chat-1758…` 里继续聊，重启后回到了 `main`，于是产生两个具体问题：
+ *
+ *  1. 看到的是另一个会话的内容 —— 用户会以为自己的消息丢了；
+ *  2. 新消息被写进 `main` 而不是原会话 —— 上下文被劈成两半，
+ *     而且没有任何报错能让用户意识到发生了这件事。
+ *
+ * 所以它必须落盘。放在 DataStore 而不是 Room：它是一条 UI 偏好
+ * （「上次看的是哪个」），不是会话内容；Room 那边删会话时不该有
+ * 一条孤立的偏好行被外键牵连。
+ *
+ * ## 为什么存 id 而不是「第几个」
+ *
+ * 会话会新增、删除、排序变化。下标一变就指错会话，而 id 不会。
+ */
+private val KEY_LAST_CHAT_SESSION = stringPreferencesKey("last_chat_session_id")
+
+/**
+ * 是否自动保存记忆（对话设置 →「记忆」分区的开关）。
+ *
+ * ## 为什么放在 DataStore 而不是 ViewModel 内部状态
+ *
+ * 这个开关的语义是「从今以后不再自动记」。若只在内存里，重启就恢复默认，
+ * 用户会以为开关坏了 —— 而它是隐私相关的设置（不想让自己的对话被存下来），
+ * 悄悄失效比没有这个开关更糟。
+ */
+private val KEY_AUTO_MEMORY = booleanPreferencesKey("auto_memory_enabled")
+private val KEY_DISABLED_SKILLS = stringPreferencesKey("disabled_skills")
+private val KEY_DISABLED_TOOLS = stringPreferencesKey("disabled_tools")
+
+/**
  * 键帽标签之间的分隔符。
  *
  * 用 SOH（`\u0001`）而不是逗号/竖线/分号：终端用户会打出这些字符
@@ -690,6 +816,7 @@ private val KEY_PERMISSION_LEVEL = stringPreferencesKey("permission_level")
  * 缺省 false 与「不写就是默认行为」天然一致，少一处可能写错的地方。
  */
 private val KEY_DISABLE_STREAM_OUTPUT = booleanPreferencesKey("disable_stream_output")
+private val KEY_AUTO_READ_REPLIES = booleanPreferencesKey("auto_read_replies")
 
 /**
  * 把存储里的字符串还原成权限级别；认不出就返回 `null`。

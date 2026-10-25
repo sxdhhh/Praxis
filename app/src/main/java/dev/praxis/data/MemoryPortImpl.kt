@@ -47,4 +47,21 @@ class MemoryPortImpl(
     override suspend fun remember(content: String) {
         runCatching { pipeline.write(content) }
     }
+
+    /**
+     * 取最近写入的记忆（新的在前）。
+     *
+     * ## 为什么按 createdAt 排序而不是靠 store 的返回顺序
+     *
+     * `store.all()` 的顺序由 DAO 的 ORDER BY 决定（当前是 id 升序）。
+     * 依赖它等于把「最近」这件事交给另一个模块的实现细节 —— 
+     * 谁改一句 `ORDER BY`，这里就悄悄变成返回最旧的。显式排序更稳。
+     */
+    override suspend fun recent(limit: Int): List<String> =
+        runCatching {
+            store.all()
+                .sortedByDescending { it.createdAt }
+                .take(limit)
+                .map { it.content },
+        }.getOrDefault(emptyList())
 }

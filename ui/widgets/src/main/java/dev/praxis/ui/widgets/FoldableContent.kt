@@ -68,8 +68,32 @@ import dev.praxis.ui.theme.PraxisMotion
 fun FoldableContent(
     visible: Boolean,
     modifier: Modifier = Modifier,
+    /**
+     * 展开方向：true 从**底边**向上长，false（默认）从**顶边**向下长。
+     *
+     * ## 为什么需要这个开关（2026-10-25，修「面板一抖一抖」）
+     *
+     * 折叠面板贴在屏幕**底部**时不摇从顶边展开：卡片是被 `BottomEnd`
+     * 定位的，它的**底边固定**、高度向上增长。若内容仍按 `Top` 方向
+     * 展开（先占位再从上面长出），就会出现两个相反的运动叠加：
+     *
+     *  - 卡片整体在向上长（贴底对齐的结果）；
+     *  - 内容在向下长（`expandFrom = Top` 的结果）。
+     *
+     * 两者一叠加，内容在展开期间看起来在不断「上下弹」，也就是用户
+     * 反复提到的抖动。改成 `Bottom` 后两者同向，抖动消失。
+     *
+     * 对贴顶的面板（如聊天气泡里的折叠）保持默认 `Top` 才是对的 ——
+     * 所以做成参数而不是全局改。
+     */
+    expandFromBottom: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val from = if (expandFromBottom) {
+        androidx.compose.ui.Alignment.Bottom
+    } else {
+        androidx.compose.ui.Alignment.Top
+    }
     AnimatedVisibility(
         visible = visible,
         enter = expandVertically(
@@ -83,7 +107,7 @@ fun FoldableContent(
             // 面板从**上边缘**往下长，而不是从中心向两头长。
             // 后者在「点第 1 个分区、下方还有 4 个分区」时会把它下方的内容
             // 往上顶一下再往下推，观感是整块抖了一下。
-            expandFrom = androidx.compose.ui.Alignment.Top,
+            expandFrom = from,
         ) + fadeIn(
             animationSpec = tween(
                 durationMillis = PraxisMotion.Expansion.FadeIn,
@@ -95,7 +119,7 @@ fun FoldableContent(
                 durationMillis = PraxisMotion.Expansion.Shrink,
                 easing = PraxisMotion.Curves.Accelerate,
             ),
-            shrinkTowards = androidx.compose.ui.Alignment.Top,
+            shrinkTowards = from,
         ) + fadeOut(
             animationSpec = tween(
                 durationMillis = PraxisMotion.Expansion.FadeOut,

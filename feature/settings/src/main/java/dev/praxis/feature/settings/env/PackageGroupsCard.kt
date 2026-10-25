@@ -22,6 +22,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.CheckboxPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.widgets.FoldableContent
 
 /**
  * 软件包组卡（对齐 Operit `SetupScreen` 的分类卡）。
@@ -194,7 +195,15 @@ private fun PackageGroupRow(
         },
     )
 
-    if (expanded) {
+    // ## 展开必须有动画（2026-10-25）
+    //
+    // 旧写法是 `if (expanded) { Column(...) }`：点击后子项在**一帧内**
+    // 被塞进布局，观感是「闪了一下」。这里改用 `FoldableContent`
+    // （项目统一折叠容器，内部是 `AnimatedVisibility`）。
+    //
+    // 必须**常驻调用**、只翻 `visible` —— 包一层 `if (expanded)` 就
+    // 又变成瞬时挂载，退场动画来不及播。
+    FoldableContent(visible = expanded) {
         Column(Modifier.padding(start = 8.dp)) {
             CheckboxPreference(
                 title = "安装这一组",
