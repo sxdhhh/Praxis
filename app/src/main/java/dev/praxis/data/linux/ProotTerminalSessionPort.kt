@@ -108,7 +108,7 @@ class ProotTerminalSessionPort(
     private val CR_MARKER = "\u0000PRAXIS_CR\u0000"
 
     /** 无行边界时最长积多少字符就先进一版，避免长时间无输出。 */
-    private const val PARTIAL_FLUSH_CHARS = 2048
+    private val partialFlushChars = 2048
 
     private val live = ConcurrentHashMap<String, Live>()
     private val counter = AtomicInteger(1)
@@ -540,7 +540,7 @@ class ProotTerminalSessionPort(
                 // 缓冲里可能一个行边界都没有（比如一整块进度条文字），
                 // 此时先进一版，避免用户长时间看不到东西；
                 // 行号不丢：`line` 继续累积，下一次遇到边界时一起交。
-                if (line.length >= PARTIAL_FLUSH_CHARS) {
+                if (line.length >= partialFlushChars) {
                     tap.offer(line.toString())
                     line.setLength(0)
                 }

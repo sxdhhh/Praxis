@@ -694,7 +694,7 @@ fun ChatTab(
         onSelectModelIndex = { index ->
             // 只写盘：`modelSettings` 是全局 DataStore 流，写完会回流到
             // 这里重新组合，不需要额外改本地状态。
-            settingsScope.launch { settingsRepository.setModelIndex(index) },
+            settingsScope.launch { settingsRepository.setModelIndex(index) }
         },
         // ── 已选图片可删 ────────────────────────────────
         //
