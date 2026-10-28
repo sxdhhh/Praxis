@@ -408,6 +408,56 @@ class ProotTerminalSessionPort(
         return pty.resize(rows, cols)
     }
 
+    /**
+     * 订阅原始输出字节流。
+     *
+     * ## 实现方式
+     *
+     * [ScreenTap] 的 `addRawListener` 是回调式，这里用 `callbackFlow` 桥成
+     * Flow，并在 `awaitClose` 里注销 —— 协程取消（页面离开）时一定能摘掉
+     * 监听，否则泵线程会一直往一个已死的 Channel 里写。
+     *
+     * `trySend` 而不是 `send`：泵线程是普通 `Thread`，不能挂起。Channel
+     * 满了（下游太慢）就丢字节 —— 丢字节比卡住泵线程好，而且真实场景里
+     * 只有 `yes` 这种无限输出能把它填满。
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    override fun outputFlow(sessionId: String): kotlinx.coroutines.flow.Flow<ByteArray> {
+        val item = live[sessionId] ?: return kotlinx.coroutines.flow.emptyFlow()
+        return kotlinx.coroutines.flow.callbackFlow {
+            val remove = item.output.addRawListener { bytes ->
+                // 缓冲 64 块，足够跨越一次重组；满了丢最旧的无从做起，
+                // 所以直接丢当前块（`trySend` 返回失败）。
+                trySend(bytes)
+            }
+            kotlinx.coroutines.channels.awaitClose { remove() }
+        }
+    }
+
+    /**
+     * 逐键发送：把字节原样写进 PTY master（或管道 stdin）。
+     *
+     * 与 `sendInput` 的差别见接口 KDoc。这里共用 `writer`（它包着 PTY 的
+     * stdin 或管道的 outputStream），所以两种模式都能用。
+     */
+    override fun writeBytes(sessionId: String, bytes: ByteArray): Boolean {
+        val item = live[sessionId] ?: return false
+        if (item.info.closed) return false
+        if (bytes.isEmpty()) return true
+        return runCatching {
+            // ## 为什么先 flush 旧内容再写
+            //
+            // 用户可能刚用 sendInput 写过半条命令（没换行）。PTY 不会因为
+            // 「没 flush」就丢数据，但 `writer` 是带缓冲的 OutputStreamWriter，
+            // 不 flush 的话这一批字节可能停留到下一次写才真的下发 ——
+            // 表现为「按了键，两百毫秒后才动」。
+            item.writer.flush()
+            item.writer.write(String(bytes, Charsets.UTF_8))
+            item.writer.flush()
+            true
+        }.getOrDefault(false)
+    }
+
     override fun screen(sessionId: String, maxLines: Int): String? {
         val item = live[sessionId] ?: return null
         return item.output.snapshot(maxLines)
@@ -520,6 +570,13 @@ class ProotTerminalSessionPort(
             while (true) {
                 val count = input.read(buffer)
                 if (count <= 0) break
+                // ## 先把原始字节推给终端页（2026-10-29）
+                //
+                // 必须在「拆行」之前推：拆行过程会丢掉 `\r` 的语义、
+                // 也会把 ANSI 转义混进文本行，而渲染层要的是未经解释的字节。
+                // 拷贝一份而不是直接交 buffer：buffer 下一轮会被覆写，
+                // 而监听者可能异步持有它。
+                tap.emitRaw(buffer.copyOf(count))
                 var i = 0
                 while (i < count) {
                     val b = buffer[i].toInt() and 0xFF
@@ -669,6 +726,37 @@ private class ScreenTap {
      * （保留最新的，因为它们才可能包含哨兵）。
      */
     private val pending = ArrayDeque<String>()
+
+    /**
+     * 原始字节监听者（终端页订阅用）。
+     *
+     * ## 为什么它和 pending 是两条路
+     *
+     * pending 是给哨兵协议用的「行」队列，已经被 CR 拆开、被 trim 过，
+     * 适合「判断命令跑完没」。而终端页需要**未经解释的原始字节**：
+     * ANSI 转义要原样送到 AnsiScanner，CR 要保留语义（回行首重写），
+     * 这两件都以「字节」为前提。
+     *
+     * ## 为什么要 runCatching 包起来
+     *
+     * 监听者是 UI 侧的回调，它抛异常不能反过来杀掉泵线程 —— 泵线程一死，
+     * 整个会话就废了，而用户只是碰到了渲染层的一个 bug。
+     */
+    private val rawListeners =
+        java.util.concurrent.CopyOnWriteArrayList<(ByteArray) -> Unit>()
+
+    /** 注册原始字节监听。返回取消句柄。 */
+    fun addRawListener(listener: (ByteArray) -> Unit): () -> Unit {
+        rawListeners.add(listener)
+        return { rawListeners.remove(listener) }
+    }
+
+    /** 泵线程把原始字节推给监听者。 */
+    fun emitRaw(bytes: ByteArray) {
+        if (bytes.isEmpty() || rawListeners.isEmpty()) return
+        rawListeners.forEach { listener -> runCatching { listener(bytes) } }
+    }
+
 
     fun offer(line: String) {
         synchronized(lock) {

@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +36,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
@@ -48,6 +51,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.praxis.core.terminal.CellStyle
@@ -143,6 +147,29 @@ fun TerminalScreen(
      * 没接线时观感与行为都完整，不会出现「空键盘」。
      */
     keyLayout: TerminalKeyLayout = DefaultTerminalKeyLayout,
+    /**
+     * 窗口尺寸变化（行列数）。
+     *
+     * ## 为什么由 UI 算而不是 ViewModel 自己取
+     *
+     * 行列数取决于「输出区实际占多少像素」与「一个字多宽」——
+     * 这两件事只有排版层知道（字号可调、有没有虚拟键盘、底栏占位多少）。
+     * ViewModel 拿 `LocalConfiguration.screenHeightDp` 算出来的会是整个屏幕，
+     * 而不是终端可视区，`top` 依然会错位。
+     *
+     * 不接线时（默认空实现）行为不变：管道模式没有窗口概念。
+     */
+    onResize: (rows: Int, cols: Int) -> Unit = { _, _ -> },
+    /**
+     * 逐键原始字节（真终端模式）。
+     *
+     * 返回 true 表示已经由 PTY 消费（此时调用方**不应**再把它当作
+     * 「编辑输入框」处理）。返回 false 走原来的本地编辑逻辑。
+     *
+     * 现阶段只用于 `Ctrl+C` 这类「不经过输入框」的键；普通字符仍由
+     * `BasicTextField` 收（中文、系统 IME 才能正常工作）。
+     */
+    onRawKey: (ByteArray) -> Boolean = { false },
 ) {
     val topInset = LocalTopBarInset.current
     val scrollLimit = LocalScrollBottomLimit.current
@@ -344,11 +371,39 @@ fun TerminalScreen(
             onAdd = onAddTab,
         )
 
+        // ## 真实行列数：量输出区，不猜屏幕（2026-10-29）
+        //
+        // PTY 的窗口尺寸必须是「用户真正看得见的那块区域」：
+        //  - 用 `LocalConfiguration.screenHeightDp` 会把状态栏、标签条、
+        //    操作条、输入条、虚拟键盘、底栏全算进去 → 多出十几行，
+        //    `top` / `vim` 在底部画到屏幕外；
+        //  - 用固定 24×80 会在折叠屏、分屏、旋转后全错。
+        //
+        // 所以量 `LazyColumn` 自己的像素尺寸，再按字体度量换算：
+        // 行高 = 字号 × 1.46（与 [TerminalTypography.lineStyle] 同一口径），
+        // 字宽 = 字号 × 0.6（等宽字体的 advance 近似值，Res 实测 0.6 偏大一点点，
+        // 宁可少算一列也不要多算 —— 多算会让 `ls` 多栏排版后被截断）。
+        val density = LocalDensity.current
+        var measured by remember { mutableStateOf(IntSize.Zero) }
+        LaunchedEffect(measured, fontSizeSp) {
+            if (measured.width <= 0 || measured.height <= 0) return@LaunchedEffect
+            val lineHeightPx = with(density) {
+                (TerminalTypography.lineStyle(fontSizeSp).lineHeight.value * density.density)
+            }
+            val charWidthPx = with(density) {
+                (TerminalTypography.lineStyle(fontSizeSp).fontSize.value * density.density * 0.6f)
+            }
+            if (lineHeightPx <= 0f || charWidthPx <= 0f) return@LaunchedEffect
+            val rows = (measured.height / lineHeightPx).toInt().coerceIn(4, 400)
+            val cols = (measured.width / charWidthPx).toInt().coerceIn(20, 300)
+            onResize(rows, cols)
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .onSizeChanged { measured = it }
                 .background(TerminalPalette.defaultBackground(MiuixTheme.colorScheme.surfaceContainer)),
             contentPadding = PaddingValues(
                 start = 12.dp,
@@ -453,7 +508,29 @@ fun TerminalScreen(
                 modifiers = modifiers,
                 onToggleCtrl = { modifiers = modifiers.toggleCtrl() },
                 onToggleAlt = { modifiers = modifiers.toggleAlt() },
-                onKey = { keyId ->
+                onKey = key@{ keyId ->
+                    // ## 真终端优先：TAB / ESC 必须发给 shell（2026-10-29）
+                    //
+                    // 这两个键在管道模式下被本地模拟成「插两个空格」与「清空输入」，
+                    // 因为它们没有后端可发。接上 PTY 之后它们有真正的语义：
+                    //
+                    //  - TAB → 0x09，让 shell 自己补全路径 / 命令；
+                    //  - ESC → 0x1B，让 `vim` 退出插入模式、让 `less` 关掉提示。
+                    //
+                    // 本地模拟若还在，用户按 TAB 会得到两个空格而**看不到补全**，
+                    // 按 ESC 会把自己刚打的半条命令清掉 —— 真终端里这两件事都是错的。
+                    //
+                    // 只在 `onRawKey` 返回 true 时吃掉；管道模式它恒定 false，
+                    // 行为与改动前完全一致。
+                    val raw: ByteArray? = when (keyId) {
+                        TerminalKeyId.Tab -> byteArrayOf(0x09)
+                        TerminalKeyId.Escape -> byteArrayOf(0x1B)
+                        else -> null
+                    }
+                    if (raw != null && onRawKey(raw)) {
+                        inputFocusRequester.requestFocus()
+                        return@key
+                    }
                     // ## 按键 → 编辑态的完整链路
                     //
                     // 用 `TerminalKeyInput` 承接光标/历史游标/修饰符，
