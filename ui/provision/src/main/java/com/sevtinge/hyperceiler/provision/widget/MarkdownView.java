@@ -24,7 +24,7 @@ import android.text.style.LeadingMarginSpan;
 import android.text.style.StyleSpan;
 import android.util.AttributeSet;
 import android.view.View;
-import android.widget.TextView;
+import androidx.appcompat.widget.AppCompatTextView;
 
 import androidx.annotation.NonNull;
 
@@ -44,7 +44,22 @@ import java.util.regex.Pattern;
 
 import fan.internal.utils.AttributeResolver;
 
-public class MarkdownView extends TextView {
+/**
+ * 把 Markdown 文本渲染成带样式的 TextView。
+ *
+ * ## 为什么继承 `AppCompatTextView` 而不是 `TextView`（2026-10-29）
+ *
+ * lint 的 `AppCompatCustomView` 规则报的：自定义 View 直接继承平台
+ * `TextView` 会在 AppCompat 主题下丢掉兼容层 —— 具体是
+ * `TextViewCompat` 那条路径上的文本缩放、`textAllCaps` 与
+ * tint 行为在旧系统上不一致。
+ *
+ * 本项目已经 `implementation("androidx.appcompat:appcompat:1.7.1")`
+ * （provision 的 Activity 继承链本来就需要它），所以换基类不引入新依赖。
+ * `AppCompatTextView extends TextView`，原有 `setText` / `Paint` 用法
+ * 全部不变。
+ */
+public class MarkdownView extends AppCompatTextView {
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private OnMarkdownLoadListener loadListener;
