@@ -60,6 +60,13 @@ dependencies {
     api("fan.miuix:smooth:1.0.13.0")
     api("fan.miuix:stretchablewidget:1.0.13.0")
     api("fan.miuix:viewpager2:1.0.13.0")
+    // `haptic` 是 `folme` 的 pom 依赖（震动反馈，Folme 触感动画要用）。
+    //
+    // 上一轮漏了它没被发现，因为本机 ~/.gradle 里已有缓存；
+    // CI 是干净环境，第一次跑就报：
+    //   Could not find fan.miuix:haptic:1.0.13.0
+    // 教训：**依赖闭包必须用「pom 声明的全集」去比，不能凭调用关系推**。
+    api("fan.miuix:haptic:1.0.13.0")
 
     // ## 为什么还要单独挂两个 jar
     //
