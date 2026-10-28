@@ -341,4 +341,54 @@ interface TerminalSessionPort {
      * @return 是否真的应用了（会话不存在、已关闭、或降级为管道时 false）
      */
     fun resize(sessionId: String, rows: Int, cols: Int): Boolean = false
+
+    /**
+     * 订阅会话的**原始输出流**。
+     *
+     * ## 为什么端口需要这个（2026-10-29）
+     *
+     * 终端页要让用户看到「敲一个键，屏幕就变」。而现有能力全是
+     * 「请求-响应」式的：[execute] 跑一条命令等结果、[screen] 拿当前快照。
+     * 两者都不能表达「在命令跑的**过程中**持续出字」—— 而交互式程序
+     * （vim / top / apt 的进度条）恰恰全靠这个。
+     *
+     * 用 [screen] 轮询是个诱人的歪路，试过就知道不行：
+     *
+     *  - 轮询间隔 100ms 的话，`top` 每秒刷 1 次还行，但 `vim` 里一次
+     *    光标移动要等 100ms 才看见，手感像坏掉的键；
+     *  - 间隔 16ms 的话等于每帧跨线程拷 2000 行字符串，中低端机直接掉帧；
+     *  - 而且轮询会把「回车重写同一行」（进度条）压成「新起一行」，
+     *    因为快照里根本没有回车的语义。
+     *
+     * 所以给一条字节流：实现方把 PTY master fd 读到的**原始字节**（含
+     * ANSI 转义与回车符）原样推出，渲染层用 `AnsiScanner` + `TerminalBuffer`
+     * 自己解释。这与「终端是什么」的经典分层一致：内核给字节，应用画格子。
+     *
+     * ## 多订阅者
+     *
+     * 返回的 Flow 是**冷流**（每个收集者独立），实现在 `share` 之外不需要
+     * 额外处理 —— 但同一会话只该有一个渲染者，多开会得到两份相同输出。
+     *
+     * ## 默认实现
+     *
+     * 返回空流。`core:linux` 是纯 JVM 模块，管道降级实现没有字节流语义；
+     * 这也是给单测里那些只关心 [execute] 的假实现留的退路。
+     */
+    fun outputFlow(sessionId: String): kotlinx.coroutines.flow.Flow<ByteArray> =
+        kotlinx.coroutines.flow.emptyFlow()
+
+    /**
+     * 向会话写入**原始字节**（逐键发送用）。
+     *
+     * 与 [sendInput] 的区别：
+     *
+     *  - [sendInput] 收的是 `String` + 枚举控制键，适合「模型发一条命令」；
+     *  - 本方法收 `ByteArray`，适合「用户敲了一个键」—— 键可以是 UTF-8
+     *    多字节（中文）、可以是 `ESC [ A` 这种三字节序列、也可以是
+     *    单个 `0x03`（Ctrl+C）。用 String 中转会在「半个 UTF-8 字符」
+     *    与「控制字节」这两处出问题。
+     *
+     * @return 是否写入成功（会话不存在 / 已关闭时 false）
+     */
+    fun writeBytes(sessionId: String, bytes: ByteArray): Boolean = false
 }

@@ -155,4 +155,45 @@ class WiringGuardTest {
             hits.isEmpty(),
         )
     }
+
+    /**
+     * 真终端接线：终端页必须拿到 `ptyPort`，且 `addTab` 要触发开会话。
+     *
+     * ## 这条护栏防的是什么
+     *
+     * 第 4 批之前的状态：`ProotTerminalSessionPort` 完整具备 forkpty、
+     * `sendInput`、`resize`、屏幕快照，但在 `AppModule` 里只接给了 AI 的
+     * 6 个工具，**终端页一条都没用**。于是用户看到的是一个「假终端」——
+     * 每条命令起一个新进程，`cd` 不生效、`vim` 打不开、Ctrl+C 只能杀进程。
+     *
+     * 这种缺陷编译期、lint 期、运行时都不会报错：页面照常显示、命令照常
+     * 执行，只是「不像终端」。所以用源码断言把它钉住：
+     *
+     *  - `PraxisApp` 构造 VM 时传了 `ptyPort`；
+     *  - `TerminalViewModel.addTab` 里调了 `startPtySession`；
+     *  - `submit` 里有把命令写进 PTY 的分支（否则命令还是走 runner）。
+     */
+    @Test
+    fun terminalScreen_isWiredToRealPty() {
+        val app = read("app/src/main/java/dev/praxis/ui/PraxisApp.kt")
+        assertTrue(
+            "PraxisApp 没有把 ptyPort 传给 TerminalViewModel，终端页会退回假终端",
+            app.contains("ptyPort = terminalPtyPort"),
+        )
+        assertTrue(
+            "PraxisApp 没有给 TerminalScreen 接 onRawKey（TAB/ESC 无法直达 shell）",
+            app.contains("onRawKey = terminalViewModel::writeKey"),
+        )
+        val vm = read(
+            "feature/terminal/src/main/java/dev/praxis/feature/terminal/TerminalViewModel.kt",
+        )
+        assertTrue(
+            "addTab 没有启动 PTY 会话，新开的 tab 会是空壳",
+            vm.contains("startPtySession(tab)"),
+        )
+        assertTrue(
+            "submit 里没有 PTY 分支，命令仍然走一次性 runner（cd 不生效）",
+            vm.contains("ptyPort?.write(ptyId"),
+        )
+    }
 }

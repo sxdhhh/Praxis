@@ -249,6 +249,29 @@ val appModule = module {
     // 两处必须操作**同一份** rootfs 与会话表，否则「AI 装的用户在设置页看不到」。
     single { dev.praxis.data.linux.ProotEnvPort(androidContext()) }
 
+    // ## 终端会话端口：必须 single（2026-10-29）
+    //
+    // 有两个消费者：
+    //  - AI 的 6 个会话工具（create/execute/input/screen/close）；
+    //  - 终端页（用户直接敲键盘）。
+    //
+    // 若各建一份，`live` 这张会话表就有两份：AI 在 `t1` 里装包，用户在终端页
+    // 敲 `ls` 却在另一个空 shell —— 两边的 `cd`、环境变量、后台进程全部
+    // 互不可见。共用同一个实例才是「同一个容器」。
+    single<dev.praxis.core.linux.TerminalSessionPort> {
+        dev.praxis.data.linux.ProotTerminalSessionPort(
+            context = androidContext(),
+            envPort = get<dev.praxis.data.linux.ProotEnvPort>(),
+        )
+    }
+
+    /** 终端页用的端口形状（字节流 + 逐键 + 尺寸），包装上面同一个实例。 */
+    single<dev.praxis.feature.terminal.PtySessionPort> {
+        dev.praxis.data.linux.ProotPtySessionAdapter(
+            delegate = get<dev.praxis.core.linux.TerminalSessionPort>(),
+        )
+    }
+
     // 工具层：文件工具挂到应用私有目录下，沙箱边界由 FileTools 负责。
     single {
         val root = java.io.File(androidContext().filesDir, "workspace")
@@ -289,10 +312,8 @@ val appModule = module {
                 // `LinuxEnvPort` 在 Koin 里没有单独绑定（设置页那边是直接 new
                 // `ProotEnvPort` 的）。这里用同一个 `ProotEnvPort` single，
                 // 保证「AI 装好的环境设置页能看到」——两份实例会得到两份 rootfs 视图。
-                val sessionPort = dev.praxis.data.linux.ProotTerminalSessionPort(
-                    context = androidContext(),
-                    envPort = get<dev.praxis.data.linux.ProotEnvPort>(),
-                )
+                // 取上面的 single，不要自己 new：两份实例 = 两张会话表（见上）。
+                val sessionPort = get<dev.praxis.core.linux.TerminalSessionPort>()
                 registerAll(
                     dev.praxis.core.linux.CreateTerminalSessionTool(sessionPort),
                     dev.praxis.core.linux.ExecuteInTerminalSessionTool(sessionPort),

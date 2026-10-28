@@ -9,6 +9,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -112,7 +115,31 @@ class TerminalViewModel(
      * 不落盘时行为与改动前完全一致。
      */
     private val snapshotPort: TerminalSnapshotPort? = null,
+    /**
+     * 真终端端口。null / [NoPtySessionPort] 时退回「一次一条命令」模式。
+     *
+     * ## 为什么用可空 + 默认值而不是必填
+     *
+     * 现有单测全部只构造 `TerminalViewModel(runner = 假Runner)`。
+     * 强制传一个假 Pty 会让那 30 多条用例全改一遍，而那些用例与真终端
+     * 毫无关系。可空 + 默认值的好处是：不传时行为与改动前**完全一致**。
+     */
+    private val ptyPort: PtySessionPort? = null,
 ) : ViewModel() {
+
+    /** 该会话对应的 PTY 会话 id（管道模式为 null）。 */
+    /**
+     * tab id → PTY 会话 id。
+     *
+     * 用 `ConcurrentHashMap`：写发生在 `viewModelScope`（主线程）与
+     * `catch` / 快照恢复（可能在 IO 恢复点），读发生在 UI 点击与泵线程，
+     * 普通 `mutableMapOf` 在跨线程读写时可能拋 `ConcurrentModificationException`。
+     */
+    private val ptySessionIds = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** 当前是否走真终端（端口存在且已成功开会话）。 */
+    val isRealTerminal: Boolean get() = ptyPort != null && ptyPort !== NoPtySessionPort
+
 
     /** 一个会话槽。`title` 可重命名，`session` 持有屏幕与缓冲。 */
     private class Tab(
@@ -300,6 +327,19 @@ class TerminalViewModel(
             // 夹到合法范围：存档里 activeIndex 可能越界（用户删过会话）。
             activeIndex = snapshot.activeIndex.coerceIn(0, tabList.lastIndex)
             publish()
+            // ## 恢复出来的每个会话也要开 PTY（2026-10-29）
+            //
+            // 不补这一步：`init` 里 `addTab()` 给 t1 开了 PTY，随后快照把
+            // 整个 tabList **替换**掉 —— t1 那个 PTY 的 sessionId 还挂在
+            // `ptySessionIds` 里，但它对应的 tab 已经不存在了（孤儿 shell），
+            // 而恢复出来的 t1..tN 全部没有 PTY，于是用户看到「有历史，但敲命令没反应」。
+            //
+            // 先把孤儿清掉，再给每个恢复的会话开一个新的。
+            // 先把 init 里 addTab 开出来的 PTY 关掉（它对应的 tab 已被替换），
+            // 否则那个 shell 会一直挂着（proot + sh 常驻）。
+            ptySessionIds.values.forEach { sid -> runCatching { ptyPort?.close(sid) } }
+            ptySessionIds.clear()
+            restored.forEach { startPtySession(it) }
         }
     }
 
@@ -378,6 +418,9 @@ class TerminalViewModel(
         tabList += tab
         activeIndex = tabList.lastIndex
         publish()
+        // 真终端模式下给这个会话开一个 PTY（幂等，已在则不发）。
+        // 放在 publish 之后：PTY 开会话是 suspend 的，不能让 UI 等它。
+        startPtySession(tab)
     }
 
     /**
@@ -391,6 +434,8 @@ class TerminalViewModel(
         val idx = tabList.indexOfFirst { it.id == id }
         if (idx < 0) return
         tabList.removeAt(idx)
+        // 关掉对应的 PTY 会话，否则 shell 进程会一直挂着直到进程退出。
+        ptySessionIds.remove(id)?.let { sessionId -> runCatching { ptyPort?.close(sessionId) } }
         activeIndex = activeIndex.coerceAtMost(tabList.lastIndex)
         publish()
     }
@@ -430,10 +475,137 @@ class TerminalViewModel(
      * 会以为输入被吞掉而反复敲。先回显、后执行，屏幕上的顺序
      * 也正好是「命令在前、输出在后」，与真实终端一致。
      */
+    // ── 真终端模式（2026-10-29）─────────────────────────────
+
+    /**
+     * 为指定 tab 建立 PTY 会话并开始订阅输出。
+     *
+     * ## 为什么要「先建立、再订阅」而不是订阅里懒建立
+     *
+     * 订阅是冷流：`collect` 那一刻才真正执行 `callbackFlow` 体。若把
+     * `open()` 也塞进去，每次重组（重进页面）都会重新执行一遍
+     * `callbackFlow`，虽然 `open` 幂等不会多开会话，但每次都会多一个
+     * 监听者 —— 而 `awaitClose` 只在协程取消时才摘，重组不取消协程，
+     * 于是监听者会累加，同一条输出被渲染 N 次（表现为重复字符）。
+     *
+     * 所以：`open` 由这里显式调一次（按 tab id 幂等），订阅只负责搬运字节。
+     */
+    private fun startPtySession(tab: Tab) {
+        val port = ptyPort ?: return
+        if (ptySessionIds.containsKey(tab.id)) return
+        viewModelScope.launch {
+            // ## 初始尺寸用 24×80，不是 DEFAULT_ROWS(200)
+            //
+            // `DEFAULT_ROWS` 是**屏幕缓冲行数**（回滚 + 可视），给 PTY 会告诉
+            // 内核「这个终端有 200 行高」—— `top` 会画 200 行、`less` 只翻
+            // 200 行一屏。PTY 要的是可视行数，24 是终端界的默认值。
+            // 真正精确的值由 UI 在 `onResize` 里量出来后覆盖。
+            val sessionId = port.open(tab.title, INITIAL_PTY_ROWS, DEFAULT_COLUMNS)
+            if (sessionId == null) {
+                // 开会话失败：保持管道模式。不弹错误，因为管道也能用，
+                // 只是没有交互能力 —— 而用户可能只是没装 Linux 环境。
+                return@launch
+            }
+            ptySessionIds[tab.id] = sessionId
+            // 回填一次屏幕快照：接上已有会话时历史不该空白。
+            port.screen(sessionId)?.let { snapshot ->
+                if (snapshot.isNotBlank()) {
+                    tab.session.feed(snapshot.replace("\n", "\r\n") + "\r\n")
+                    publish()
+                }
+            }
+            port.outputFlow(sessionId)
+                .onEach { bytes ->
+                    // ## 为什么在 IO 线程直接 feed
+                    //
+                    // `TerminalSession.feed` 是纯同步纯函数（切 ANSI + 写格子），
+                    // 几万字节也就毫秒级。转发到主线程再 feed 反而会攒帧、
+                    // 让输出成块跳。publish 里用 StateFlow，线程安全。
+                    withContext(ioDispatcher) {
+                        tab.session.feed(String(bytes, Charsets.UTF_8))
+                    }
+                    publish()
+                }
+                .catch { throwable ->
+                    // 流结束（会话被关）不该让整个 ViewModel scope 挂掉。
+                    // 把原因写进屏幕：真终端断开时用户最需要知道「为什么没反应」。
+                    val why = throwable.message ?: throwable::class.simpleName ?: "未知原因"
+                    runCatching { tab.session.feed("\r\n[会话已结束：" + why + "]\r\n") }
+                    // 会话已死：从映射里摘掉，后续 submit 回到管道模式而不是
+                    // 往一个已关闭的 writer 里写（那只会得到一串失败）。
+                    ptySessionIds.remove(tab.id)
+                    publish()
+                }
+                .launchIn(viewModelScope)
+        }
+    }
+
+    /**
+     * 逐键发送（真终端模式）。
+     *
+     * @return false 表示当前不是真终端模式（调用方应回退到整条提交）
+     */
+    fun writeKey(bytes: ByteArray): Boolean {
+        val port = ptyPort ?: return false
+        val tab = tabList.getOrNull(activeIndex) ?: return false
+        val sessionId = ptySessionIds[tab.id] ?: return false
+        return port.write(sessionId, bytes)
+    }
+
+    /** 改窗口尺寸（键盘弹出 / 旋转 / 分屏）。 */
+    fun resize(rows: Int, cols: Int) {
+        val port = ptyPort ?: return
+        val tab = tabList.getOrNull(activeIndex) ?: return
+        val sessionId = ptySessionIds[tab.id] ?: return
+        port.resize(sessionId, rows, cols)
+    }
+
+    /**
+     * 当前会话的行列数（供 UI 计算要 resize 到多少）。
+     *
+     * 返回 null 表示非真终端。
+     */
+    fun currentPtySession(): String? =
+        tabList.getOrNull(activeIndex)?.let { ptySessionIds[it.id] }
+
     fun submit(rawCommand: String) {
         val tab = tabList.getOrNull(activeIndex) ?: return
         val command = rawCommand.trim()
         if (command.isEmpty()) return
+
+        // ## 真终端分支（2026-10-29）
+        //
+        // 有 PTY 会话时，命令必须交给**那个 shell**，而不是交给 runner 另起
+        // 一个进程。两者的差别不是实现细节，而是用户体验的全部：
+        //
+        //  - `cd /root` 之后 `ls`，runner 模式下每条命令都是新进程，目录回到
+        //    `/`（用户看到「cd 没生效」）；
+        //  - `export FOO=1` 同理，下一条命令读不到；
+        //  - `vim a.txt` 在 runner 模式下只能把输出当纯文本倒进屏幕，
+        //    既不能编辑也不能退出。
+        //
+        // 也**不做本地回显**（不 feed `$ cmd`）：PTY 里的 shell 自己会
+        // echo 输入。两边都写就会看到命令出现两次。这是从管道模式切过来
+        // 最容易犯的错。
+        val ptyId = ptySessionIds[tab.id]
+        if (ptyId != null) {
+            // 历史三条规则与管道分支完全一致（连续重复不重复记）。
+            if (tab.history.lastOrNull() != command) {
+                tab.history += command
+                if (tab.history.size > HISTORY_LIMIT) tab.history.removeAt(0)
+            }
+            tab.input = ""
+            publish()
+            // 回车用 `\r`（PTY 行规程的预期），不是 `\n`：
+            // 发 `\n` 时有的 shell 不执行，只是换行。
+            val bytes = (command + "\r").toByteArray(Charsets.UTF_8)
+            if (ptyPort?.write(ptyId, bytes) != true) {
+                tab.session.feed("[写入终端失败：会话可能已结束]" + CRLF)
+                publish()
+            }
+            return
+        }
+
 
         // ① 回显：无论是否要排队，都立刻写进缓冲。
         tab.session.feed("$ " + command + CRLF)
@@ -544,14 +716,27 @@ class TerminalViewModel(
      * 不补的话用户看不到任何反馈，会以为按钮没生效而反复点。
      */
     fun cancel() {
+        val tab = tabList.getOrNull(activeIndex)
+        // ## 真终端：Ctrl+C 是发给 shell 的字节，不是杀进程（2026-10-29）
+        //
+        // PTY 模式下 `running` 永远是 false（命令不经过 runner），旧写法会
+        // 直接 feed `^C` 然后返回 —— 屏幕上出现一个 `^C`，而 shell 里那条
+        // `ping` / `apt` **根本不会停**。这里必须真的发 0x03。
+        val ptyId = tab?.let { ptySessionIds[it.id] }
+        if (ptyId != null) {
+            ptyPort?.write(ptyId, byteArrayOf(0x03))
+            // 本地不补 `^C`：PTY 的 echo 会自己回显 `^C`。这里再写就成了两个。
+            publish()
+            return
+        }
         if (!running) {
-            // 没有在跑的命令：仍然回一个 `^C`，与真实终端行为一致（中断空提示符）。
-            tabList.getOrNull(activeIndex)?.session?.feed("^C" + CRLF)
+            // 管道模式且没有在跑的命令：回一个 `^C`，与真实终端行为一致。
+            tab?.session?.feed("^C" + CRLF)
             publish()
             return
         }
         runner.cancel()
-        tabList.getOrNull(activeIndex)?.session?.feed("^C" + CRLF)
+        tab?.session?.feed("^C" + CRLF)
         publish()
     }
 
@@ -650,6 +835,14 @@ class TerminalViewModel(
 
         /** 默认行数。超过后进滚动历史。 */
         const val DEFAULT_ROWS = 200
+
+        /**
+         * PTY 的初始可视行数。
+         *
+         * 与 [DEFAULT_ROWS] 是两件事：那个是屏幕缓冲（含回滚）的总行数，
+         * 这个是窗口高度。UI 量出真实尺寸后会 `resize` 覆盖它。
+         */
+        const val INITIAL_PTY_ROWS = 24
 
         /**
          * 字符画（standard figlet 风格，6 行 × 39 列）。

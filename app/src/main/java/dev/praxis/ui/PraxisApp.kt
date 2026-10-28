@@ -173,6 +173,19 @@ fun PraxisApp(
      */
     val terminalSnapshotPort: dev.praxis.feature.terminal.TerminalSnapshotPort =
         org.koin.compose.koinInject()
+    /**
+     * 真终端端口。
+     *
+     * 由 `:app` 的 `AppModule` 注册（`ProotPtySessionAdapter` 包着与 AI 工具
+     * 共用的那个 `ProotTerminalSessionPort`）。取到 null 时终端页仍是管道
+     * 模式 —— 与改动前行为一致，不会因为容器没装好就崩。
+     *
+     * 注意用**非空**类型：`AppModule` 里无条件注册了这个 single（适配器本身
+     * 不持有资源，开会话失败只会让 `open` 返回 null）。若写成可空类型，
+     * Koin 找不到定义时会在组合期抛异常，而这里根本没有「不注册」的路径。
+     */
+    val terminalPtyPort: dev.praxis.feature.terminal.PtySessionPort =
+        org.koin.compose.koinInject()
 
     // 系统授权检测：需 Activity 上下文（查权限 / 跳系统设置页），只在这一层取。
     val capabilityDetector: dev.praxis.core.data.permission.CapabilityDetector =
@@ -438,6 +451,8 @@ fun PraxisApp(
                 showBanner = terminalSettings.showBanner,
                 // 会话快照：杀进程后恢复屏幕内容与命令历史。
                 snapshotPort = terminalSnapshotPort,
+                // 真终端：有容器就走 forkpty，`cd` / `vim` / Ctrl+C 才成立。
+                ptyPort = terminalPtyPort,
             )
         }
     val terminalState by terminalViewModel.state.collectAsStateWithLifecycle()
@@ -680,6 +695,11 @@ fun PraxisApp(
                         keyLayout = dev.praxis.feature.terminal.keyboard.terminalKeyLayoutOf(
                             keyboardLabels,
                         ),
+                        // 真终端：输出区实测尺寸 → PTY 窗口（viu/top 排版才对）。
+                        onResize = terminalViewModel::resize,
+                        // 真终端：TAB / ESC 直接发字节（补全、退出插入模式）。
+                        // 非真终端时 `writeKey` 返回 false，UI 回退到本地模拟。
+                        onRawKey = terminalViewModel::writeKey,
                     )
                 },
                 memoryTab = {
