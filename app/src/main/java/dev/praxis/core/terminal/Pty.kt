@@ -247,11 +247,37 @@ private class NoopProcess(private val childPid: Int) : Process() {
     @Volatile
     private var exitValue: Int = 0
 
-    override fun getOutputStream(): OutputStream = OutputStream.nullOutputStream()
+    // ## 为什么不用 `OutputStream.nullOutputStream()`（2026-10-29）
+    //
+    // 那个方法（以及 `InputStream.nullInputStream()`）是 **API 33** 才进
+    // Android 的 —— 它在 JDK 11 里存在，但 Android 的 libcore 到 33 才同步。
+    // 本模块 minSdk = 28，lint 因此报 NewApi 并且真机在 12 及以下会
+    // `NoSuchMethodError`（方法解析在调用点，try/catch 拦不住）。
+    //
+    // 自己写三个空实现：行为完全等价（丢弃写入、立即 EOF），零 API 限制。
+    override fun getOutputStream(): OutputStream = NullSink
 
-    override fun getInputStream(): InputStream = InputStream.nullInputStream()
+    override fun getInputStream(): InputStream = EmptySource
 
-    override fun getErrorStream(): InputStream = InputStream.nullInputStream()
+    override fun getErrorStream(): InputStream = EmptySource
+
+    /** 吞掉一切写入。`write` 声明了 `IOException`，实现里不能抛，所以直接返回。 */
+    private object NullSink : OutputStream() {
+        override fun write(b: Int) = Unit
+
+        override fun write(b: ByteArray, off: Int, len: Int) = Unit
+
+        override fun write(b: ByteArray) = Unit
+    }
+
+    /** 永远 EOF 的空输入流（`read` 返回 -1）。 */
+    private object EmptySource : InputStream() {
+        override fun read(): Int = -1
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int = -1
+
+        override fun available(): Int = 0
+    }
 
     override fun waitFor(): Int {
         if (!finished) {
