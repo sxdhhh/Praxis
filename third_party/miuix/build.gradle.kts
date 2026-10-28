@@ -68,21 +68,19 @@ dependencies {
     // 教训：**依赖闭包必须用「pom 声明的全集」去比，不能凭调用关系推**。
     api("fan.miuix:haptic:1.0.13.0")
 
-    // ## 为什么还要单独挂两个 jar
+    // ## 关于 animation / recyclerview 的 libs/*.jar
     //
-    // `fan.miuix:animation` 与 `fan.miuix:recyclerview` 这两个 AAR 采用
-    // **fat-aar 打包**：真正的类在 `libs/*.jar` 里，`classes.jar` 是空壳
-    // （animation 的 classes.jar 只有 22 字节）。
+    // `fan.miuix:animation` 与 `fan.miuix:recyclerview` 是 fat-aar：
+    // 真正的类在 AAR 内部的 `libs/*.jar` 里（animation 385 个类、
+    // recyclerview 65 个类），`classes.jar` 只装各自的少量类。
     //
-    // AGP 只把 AAR 的 `classes.jar` 放进编译类路径，`libs/` 目录里的 jar
-    // **不会自动参与编译** —— 它们是给「从源码构建该 AAR 时的本地依赖」
-    // 用的。实测：provision 里 `import fan.animation.Folme` 等 9 个符号
-    // 在 23 个 AAR 的 `classes.jar` 中全部找不到，但 100% 在
-    // `animation/libs/miuix-animation.jar`（385 个类）里。
+    // **不要额外用 `api(files(...))` 去挂这两个 jar。**
     //
-    // 所以把这两个 jar 抽到 `third_party/jars/` 并用 `api(files(...))` 挂载。
-    // 用 `api` 而非 `implementation`：`provision` 会直接 import
-    // `fan.animation.*`，属于「直接使用」，必须透传。
-    api(files("${rootProject.projectDir}/third_party/jars/animation-miuix-animation.jar"))
-    api(files("${rootProject.projectDir}/third_party/jars/recyclerview-miuix-core.jar"))
+    // 我第一版这么做过，结果 CI 报：
+    //   Duplicate class fan.animation.Folme found in
+    //     animation-1.0.13.0.aar  and  animation-miuix-animation.jar
+    // 因为 AGP 本来就会把 AAR 内的 `libs/*.jar` 一并放进编译与运行时
+    // 类路径（这也是 fat-aar 能工作的前提）。手动再挂一次就是两份。
+    //
+    // 结论：声明 AAR 坐标即可，`libs/` 里的东西由 AGP 自动带入。
 }
