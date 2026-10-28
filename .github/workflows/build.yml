@@ -31,6 +31,76 @@ on:
       - '.github/workflows/build.yml'
 
 jobs:
+  # 与 `build` 并行：单元测试 + lint。
+  #
+  # ## 为什么必须存在（2026-10-29）
+  #
+  # `build` 只跑 `assembleDebug`。Kotlin 报错能拦住，但**测试一行不跑**。
+  # 后果很具体：`WiringGuardTest`（接线护栏）写完后 CI 依旧绿 ——
+  # 因为 `app/src/test` 根本没被编译进任何 task。护栏不跑等于没有。
+  #
+  # 同理 lint：`abortOnError = true` 已经配好了，但从没在 CI 里执行过。
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 仓库有 `terminal` submodule；缺了它 `:terminal` 会报
+          # 「No variants exist」。
+          submodules: true
+          fetch-depth: 1
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Tune Gradle for CI
+        run: |
+          mkdir -p ~/.gradle
+          cat > ~/.gradle/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          org.gradle.max-workers=4
+          kotlin.compiler.execution.strategy=daemon
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          EOF
+
+      - name: Prepare SDK
+        run: |
+          chmod +x gradlew
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+      # 单元测试：纯 JVM，不需要模拟器。
+      #
+      # `--continue` 保留：一个模块用例挂掉不该遮住其它模块的失败，
+      # 一次 push 就能看到全部问题。
+      - name: Unit tests
+        run: |
+          ./gradlew testDebugUnitTest             --no-daemon             --stacktrace             --continue             --console=plain
+
+      # lint：`abortOnError = true` 已在 app 与 library 插件里配好。
+      - name: Lint
+        run: |
+          ./gradlew lintDebug             --no-daemon             --stacktrace             --console=plain
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/**
+            **/build/reports/lint-results*.*
+          retention-days: 5
+          if-no-files-found: ignore
+
   build:
     # ubuntu-latest 自带 JDK 17，但本项目要 21（PraxisBuildConfig.JDK_VERSION），
     # 所以显式用 setup-java 装 21，不依赖 runner 预装。
@@ -132,8 +202,11 @@ jobs:
           EOF
           cat ~/.gradle/gradle.properties
 
-      # 只跑 lint 与编译，不跑测试：本仓库没有 instrumentation 测试，
-      # 单元测试需要额外配置（见各模块 build.gradle.kts 的 testImplementation）。
+      # 本 job 只负责「能打包」：assembleDebug。
+      #
+      # 单元测试与 lint 在并行的 `verify` job 里跑（2026-10-29 加）。
+      # 为什么不放在同一个 job 里串行：这两件事互不依赖，合在一起会让
+      # 反馈时间变成两者之和；分开后任一方变红都能先看到。
       - name: Build
         run: |
           ./gradlew ${{ inputs.task || 'assembleDebug' }} \
