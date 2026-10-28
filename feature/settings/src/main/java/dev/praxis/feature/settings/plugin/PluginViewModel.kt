@@ -198,7 +198,7 @@ class PluginViewModel(
                 runCatching { repository.install(sourcePath = path) }
             }
             result.onSuccess { plugin ->
-                _state.update { it.copy(installingId = null, message = "已安装：${plugin.title}") }
+                _state.update { state -> state.copy(installingId = null, message = "已安装：${plugin.title}") }
                 reloadInstalled()
             }.onFailure { error ->
                 _state.update {
