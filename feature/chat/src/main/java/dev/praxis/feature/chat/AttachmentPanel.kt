@@ -1,20 +1,17 @@
 package dev.praxis.feature.chat
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -26,6 +23,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.ScreenshotMonitor
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -33,6 +31,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -99,91 +101,149 @@ fun AttachmentPanel(
     onTakePhoto: (() -> Unit)? = null,
     onAttachMemory: (() -> Unit)? = null,
     onAttachPackages: (() -> Unit)? = null,
+    /**
+     * 点面板外关闭。
+     *
+     * ## 为什么改造为浮层后必须有它（2026-10-29）
+     *
+     * 旧实现是 `AnimatedVisibility` **内联**在输入区上方（展开时把底栏
+     * 往下推）。它有自己的可见性开关，不需要「点外部关闭」—— 用户点
+     * 加号或任意格子就消失了。
+     *
+     * 改成 `Popup` 浮层后，它盖在内容之上，必须有一条“点空白处关闭”的
+     * 退路，否则用户只能再点一次加号（而那时加号可能已被遮住）。
+     *
+     * null = 不提供（预览），此时浮层不接收外部点击，只能靠加号关闭。
+     */
+    onDismiss: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    AnimatedVisibility(
-        visible = visible,
-        // 从底边向上展开（上游 AttachmentSelector.kt:144 同一写法）。
-        enter = expandVertically(
-            animationSpec = tween(durationMillis = 200),
-            expandFrom = Alignment.Bottom,
-        ) + fadeIn(animationSpec = tween(durationMillis = 200)),
-        exit = shrinkVertically(
-            animationSpec = tween(durationMillis = 160),
-            shrinkTowards = Alignment.Bottom,
-        ) + fadeOut(animationSpec = tween(durationMillis = 160)),
-        modifier = modifier,
-    ) {
-        val cells = listOf(
-            AttachmentCell(Icons.Default.Image, "图片", onPickImage != null) {
-                onPickImage?.invoke()
-            },
-            AttachmentCell(
-                Icons.Default.PhotoCamera,
-                "拍照",
-                onTakePhoto != null,
-            ) { onTakePhoto?.invoke() },
-            AttachmentCell(
-                Icons.Default.Memory,
-                "记忆",
-                onAttachMemory != null,
-            ) { onAttachMemory?.invoke() },
-            AttachmentCell(Icons.Default.Description, "文件", onPickFile != null) {
-                onPickFile?.invoke()
-            },
-            AttachmentCell(
-                Icons.Default.ScreenshotMonitor,
-                "屏幕",
-                onCaptureScreen != null,
-            ) { onCaptureScreen?.invoke() },
-            AttachmentCell(
-                Icons.Default.Notifications,
-                "通知",
-                onAttachNotifications != null,
-            ) { onAttachNotifications?.invoke() },
-            AttachmentCell(
-                Icons.Default.LocationOn,
-                "位置",
-                onAttachLocation != null,
-            ) { onAttachLocation?.invoke() },
-            AttachmentCell(
-                Icons.Default.AutoAwesome,
-                "智能包",
-                onAttachPackages != null,
-            ) { onAttachPackages?.invoke() },
-        )
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MiuixTheme.colorScheme.surface)
-                .padding(horizontal = 8.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+    // ## 为什么改成浮层（2026-10-29）
+    //
+    // 旧实现是 `AnimatedVisibility` **内联**在输入区上方：展开时把底栏
+    // 往下推、自己从底边向上长。它跟 Tune 的形态不一致 —— Tune 是
+    // `Popup` 浮层（`ChatSettingsBar:661-685`），盖在内容之上、不挤布局。
+    //
+    // 同一个底栏里两个按钮，一个推布局一个浮起来，观感是错位的：
+    // 点加号整页往上跳一下，点齿轮只是浮出一张卡。现在统一为浮层。
+    //
+    // ## 容器写法与 Tune 逐字一致
+    //
+    // `Popup(TopStart)` + 满屏 `Box`（自己接点击）+ `Card` 贴 `BottomEnd`。
+    // 满屏 Box 是关键：Popup 的内容尺寸若随内容变化，窗口会每帧重排
+    // （那正是 2026-10-25 修过的「一抖一抖」）。满屏固定尺寸就没这问题。
+    if (visible) {
+        Popup(
+            alignment = Alignment.TopStart,
+            onDismissRequest = { onDismiss?.invoke() },
+            properties = PopupProperties(
+                focusable = true,
+                dismissOnBackPress = true,
+                // 满屏 Box 已铺满，outside 区域不存在；开着它会让
+                // 「点格子内部」也被判成 outside 而误关。
+                dismissOnClickOutside = false,
+            ),
         ) {
-            // 4 列 grid。用 chunked + Row 而不是 LazyVerticalGrid：
-            // 8 个固定格子不需要懒加载，Lazy 反而引入一个额外的滚动容器
-            // （在可折叠面板里嵌可滚动容器会有嵌套滚动冲突）。
-            cells.chunked(4).forEach { rowCells ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onDismiss?.invoke() },
+                    ),
+                contentAlignment = Alignment.BottomEnd,
+            ) {
+                Card(
+                    modifier = Modifier
+                        // bottom = 44dp：与 Tune 的卡片同一抬起量（让出底栏高度）。
+                        .padding(bottom = 44.dp, end = 12.dp)
+                        .widthIn(max = 420.dp)
+                        .fillMaxWidth()
+                        // 卡片自己吃掉点击，否则点格子会被外层 Box 的 onClick 关掉。
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                        ),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MiuixTheme.colorScheme.surface,
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                 ) {
-                    rowCells.forEach { cell ->
-                        AttachmentCellView(
-                            cell = cell,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    // 不足 4 个时补空位，保持列对齐。
-                    repeat(4 - rowCells.size) {
-                        Box(modifier = Modifier.weight(1f))
+                    val cells = listOf(
+                        AttachmentCell(Icons.Default.Image, "图片", onPickImage != null) {
+                            onPickImage?.invoke()
+                        },
+                        AttachmentCell(
+                            Icons.Default.PhotoCamera,
+                            "拍照",
+                            onTakePhoto != null,
+                        ) { onTakePhoto?.invoke() },
+                        AttachmentCell(
+                            Icons.Default.Memory,
+                            "记忆",
+                            onAttachMemory != null,
+                        ) { onAttachMemory?.invoke() },
+                        AttachmentCell(Icons.Default.Description, "文件", onPickFile != null) {
+                            onPickFile?.invoke()
+                        },
+                        AttachmentCell(
+                            Icons.Default.ScreenshotMonitor,
+                            "屏幕",
+                            onCaptureScreen != null,
+                        ) { onCaptureScreen?.invoke() },
+                        AttachmentCell(
+                            Icons.Default.Notifications,
+                            "通知",
+                            onAttachNotifications != null,
+                        ) { onAttachNotifications?.invoke() },
+                        AttachmentCell(
+                            Icons.Default.LocationOn,
+                            "位置",
+                            onAttachLocation != null,
+                        ) { onAttachLocation?.invoke() },
+                        AttachmentCell(
+                            Icons.Default.AutoAwesome,
+                            "智能包",
+                            onAttachPackages != null,
+                        ) { onAttachPackages?.invoke() },
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MiuixTheme.colorScheme.surface)
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        // 4 列 grid。用 chunked + Row 而不是 LazyVerticalGrid：
+                        // 8 个固定格子不需要懒加载，Lazy 反而引入一个额外的滚动容器
+                        // （在可折叠面板里嵌可滚动容器会有嵌套滚动冲突）。
+                        cells.chunked(4).forEach { rowCells ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                            ) {
+                                rowCells.forEach { cell ->
+                                    AttachmentCellView(
+                                        cell = cell,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                // 不足 4 个时补空位，保持列对齐。
+                                repeat(4 - rowCells.size) {
+                                    Box(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
 }
-
 @Composable
 private fun AttachmentCellView(
     cell: AttachmentCell,

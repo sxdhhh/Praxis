@@ -37,6 +37,18 @@ fun MemoryRoute(
     activeSpaceId: String = MemoryItem.DEFAULT_SPACE_ID,
     /** 切换空间；null = 不提供切换（预览/单测）。 */
     onSelectSpace: ((String) -> Unit)? = null,
+    /**
+     * 用户显式创建过的空间名（来自 SettingsRepository.memorySpaces）。
+     *
+     * ## 为什么不在这里自己读 DataStore
+     *
+     * feature 层的既有约定：不碰 DataStore，依赖从 `:app` 注入。
+     * 而且当前空间（[activeSpaceId]）也来自上层 —— 两个值必须同源，
+     * 否则「选择器高亮项」与「实际查询的空间」会分家。
+     */
+    spaces: List<String> = emptyList(),
+    /** 新建空间；null = 不显示新建入口。 */
+    onCreateSpace: ((String) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
 
@@ -62,6 +74,8 @@ fun MemoryRoute(
         activeSpaceId = activeSpaceId,
         spaceCounts = spaceCounts,
         onSelectSpace = onSelectSpace,
+        spaces = spaces,
+        onCreateSpace = onCreateSpace,
         onDelete = { id ->
             scope.launch {
                 runCatching { store.delete(id) }

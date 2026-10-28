@@ -550,6 +550,74 @@ class SettingsRepository(
     val activeMemorySpace: Flow<String> =
         dataStore.data.map { prefs -> prefs[KEY_ACTIVE_MEMORY_SPACE] ?: "" }
 
+
+    /**
+     * 用户显式创建过的记忆空间名字（按创建顺序，已去重）。
+     *
+     * ## 为什么不从记忆表反推（2026-10-29 修）
+     *
+     * 旧实现的空间列表来自 `store.all(null).groupingBy { it.spaceId }` ——
+     * 也就是「有记忆的空间」才会出现在选择器里。这造成一个死锁：
+     * 想建一个叫「工作」的空间，得先在里面存一条记忆；但那需要先切到
+     * 「工作」；而「工作」还不在列表里，切不过去。
+     *
+     * 所以空间名要独立存一份：创建动作自己就是一个来源，与内容无关。
+     * 记住的只是**名字**，条数仍然实算（删完记忆后「工作 · 0」是对的，
+     * 不该因为没内容就消失）。
+     */
+    val memorySpaces: Flow<List<String>> =
+        dataStore.data.map { prefs ->
+            prefs[KEY_MEMORY_SPACES]
+                ?.split(LABEL_SEPARATOR)
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.distinct()
+                ?: emptyList()
+        }
+
+    /**
+     * 新建一个记忆空间。
+     *
+     * 空串与纯空白忽略：空串是默认空间的 id，不能被「创建」。
+     * 重名也直接忽略（`distinct`），不报错 —— 用户重复点一次不该弹错。
+     */
+    suspend fun addMemorySpace(name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        dataStore.edit { prefs ->
+            val current = prefs[KEY_MEMORY_SPACES]
+                ?.split(LABEL_SEPARATOR)
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                .orEmpty()
+            if (trimmed in current) return@edit
+            prefs[KEY_MEMORY_SPACES] = (current + trimmed).joinToString(LABEL_SEPARATOR)
+        }
+    }
+
+    /**
+     * 删除一个记忆空间的**名字**。
+     *
+     * 不删该空间下的记忆：空间只是标签，记忆是数据。
+     * 名字删掉后记忆仍在库里（`spaceId` 不变），若用户重新创建同名空间
+     * 会重新看到它们 —— 这比「删名字就等于删数据」安全。
+     * 想清空数据请在记忆列表里逐条删。
+     */
+    suspend fun removeMemorySpace(name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        dataStore.edit { prefs ->
+            val current = prefs[KEY_MEMORY_SPACES]
+                ?.split(LABEL_SEPARATOR)
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                .orEmpty()
+            prefs[KEY_MEMORY_SPACES] = current
+                .filter { it != trimmed }
+                .joinToString(LABEL_SEPARATOR)
+        }
+    }
+
     /** 切换记忆空间。 */
     suspend fun setActiveMemorySpace(spaceId: String) =
         put(KEY_ACTIVE_MEMORY_SPACE, spaceId.trim())
@@ -713,6 +781,7 @@ private val KEY_PERMISSION_LEVEL = stringPreferencesKey("permission_level")
 private val KEY_DISABLE_STREAM_OUTPUT = booleanPreferencesKey("disable_stream_output")
 private val KEY_AUTO_READ_REPLIES = booleanPreferencesKey("auto_read_replies")
 private val KEY_ACTIVE_MEMORY_SPACE = stringPreferencesKey("active_memory_space")
+private val KEY_MEMORY_SPACES = stringPreferencesKey("memory_spaces")
 
 /**
  * 把存储里的字符串还原成权限级别；认不出就返回 `null`。

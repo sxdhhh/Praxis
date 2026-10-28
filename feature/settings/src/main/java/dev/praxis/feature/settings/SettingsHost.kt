@@ -92,6 +92,10 @@ fun SettingsHost(
     activeMemorySpaceId: String = "",
     /** 切换记忆空间。缺省 null 时不渲染选择器（测试/预览路径）。 */
     onSelectMemorySpace: ((String) -> Unit)? = null,
+    /** 用户显式创建过的空间名（来自 SettingsRepository.memorySpaces）。 */
+    memorySpaces: List<String> = emptyList(),
+    /** 新建记忆空间；null = 不显示「+ 新建空间」。 */
+    onCreateMemorySpace: ((String) -> Unit)? = null,
     /** 工作流引擎。由 :app 注入。 */
     workflowEngine: dev.praxis.core.workflow.WorkflowEngine,
     /**
@@ -180,6 +184,8 @@ fun SettingsHost(
             memoryStore = memoryStore,
             activeMemorySpaceId = activeMemorySpaceId,
             onSelectMemorySpace = onSelectMemorySpace,
+            memorySpaces = memorySpaces,
+            onCreateMemorySpace = onCreateMemorySpace,
             workflowEngine = workflowEngine,
             linuxEnvPort = linuxEnvPort,
             terminalSettings = terminalSettings,
@@ -215,6 +221,10 @@ private fun SettingsPageBody(
     memoryStore: dev.praxis.core.memory.MemoryStore,
     activeMemorySpaceId: String = "",
     onSelectMemorySpace: ((String) -> Unit)? = null,
+    /** 用户显式创建过的空间名（来自 SettingsRepository.memorySpaces）。 */
+    memorySpaces: List<String> = emptyList(),
+    /** 新建记忆空间；null = 不显示「+ 新建空间」。 */
+    onCreateMemorySpace: ((String) -> Unit)? = null,
     workflowEngine: dev.praxis.core.workflow.WorkflowEngine,
     /**
      * 角色卡仓储。
@@ -335,6 +345,8 @@ private fun SettingsPageBody(
             modifier = modifier,
             activeSpaceId = activeMemorySpaceId,
             onSelectSpace = onSelectMemorySpace,
+            spaces = memorySpaces,
+            onCreateSpace = onCreateMemorySpace,
         )
         PraxisRoute.SettingsWorkflow -> WorkflowRoute(workflowEngine, modifier)
         // 语音：功能已主动放弃，给明确原因而不是假装能用（见 SettingsUnfinished）。

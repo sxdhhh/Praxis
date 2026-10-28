@@ -129,6 +129,19 @@ internal fun ChatSettingsBar(
     onPickThinkingEffort: ((ThinkingEffort) -> Unit)?,
     onOpenModelSettings: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    /**
+     * 模型池（`ModelSettings.modelList`）。
+     *
+     * 空列表时「模型」分区里只留「管理模型」入口，不画一个空列表 ——
+     * 与全仓「不假设按钮」的纪律一致。
+     */
+    models: List<String> = emptyList(),
+    /** 当前选中的下标（`ModelSettings.modelIndex`）。 */
+    activeModelIndex: Int = 0,
+    /** 就地切换模型；null = 不提供（预览/单测）。 */
+    onSelectModel: ((Int) -> Unit)? = null,
+    /** 进模型设置页。「管理模型」那一行用它。 */
+    onManageModels: (() -> Unit)? = null,
     toolTier: PermissionTier? = null,
     onSetToolTier: ((PermissionTier) -> Unit)? = null,
     onOpenToolSettings: (() -> Unit)? = null,
@@ -324,14 +337,42 @@ internal fun ChatSettingsBar(
                                 showTopDivider = false,
                                 onExpandedChange = { showModelSection = it },
                             ) {
-                                if (onOpenModelSettings != null) {
+                                // ## 就地选模型，不再跳页（2026-10-29）
+                                //
+                                // 旧实现只有一个 ActionRow：点一下 `showMenu = false`
+                                // 然后 `onOpenModelSettings()` —— 直接离开聊天页。
+                                // 但模型池就在本地（`ModelSettings.model` 是逗号分隔的
+                                // 列表），切一个模型完全不需要跳页，跳走反而打断了对话。
+                                //
+                                // 现在改成内联列表：每一行一个模型，当前项打勾，
+                                // 点一下立即生效且**不关面板**（用户可能想连着比几个）。
+                                //
+                                // 没有模型池时才退回「去设置里配」那一行。
+                                if (models.isNotEmpty() && onSelectModel != null) {
+                                    models.forEachIndexed { index, name ->
+                                        ChoiceRow(
+                                            label = name,
+                                            selected = index == activeModelIndex,
+                                            onClick = { onSelectModel(index) },
+                                        )
+                                    }
+                                }
+                                if (onManageModels != null || onOpenModelSettings != null) {
                                     ActionRow(
                                         icon = Icons.Outlined.DataObject,
-                                        title = "选择模型 / 服务商",
-                                        detail = modelName.ifBlank { "尚未配置模型" },
+                                        title = if (models.isEmpty()) {
+                                            "去配置模型 / 服务商"
+                                        } else {
+                                            "管理模型 / 服务商"
+                                        },
+                                        detail = if (models.isEmpty()) {
+                                            "还没有可用模型"
+                                        } else {
+                                            "改接口地址、密钥与模型池"
+                                        },
                                         onClick = {
                                             showMenu = false
-                                            onOpenModelSettings()
+                                            (onManageModels ?: onOpenModelSettings)?.invoke()
                                         },
                                     )
                                 }

@@ -1711,11 +1711,21 @@ private fun ChatInputBar(
 
                 // ── 附件面板（加号点开）────────────────────
                 //
-                // 放在底栏 Row **之前**，所以它展开时把底栏往下推、
-                // 自己从底边向上长 —— 与 Operit 的位置一致
-                // （AttachmentSelector.kt 里面板挂在输入区上方）。
+                // ## 2026-10-29：从内联展开改为 Popup 浮层
+                //
+                // 旧实现是 `AnimatedVisibility` 内联在底栏之前，展开时把底栏
+                // 往下推。同一个底栏里，齿轮（Tune）浮起一张卡、加号却推布局，
+                // 两条路径观感不一致。现在 `AttachmentPanel` 内部改成
+                // `Popup(TopStart)` + 满屏 `Box` + `Card` 贴 `BottomEnd`，
+                // 与 Tune 逐字同构——所以这里的物理位置不再重要，保留在原处。
+                //
+                // `onDismiss` 必须是**关闭**而不是 toggle：点空白处时面板已经是
+                // 展开态，toggle 会先关再被同一次点击重开。这里包一层
+                // `if (attachmentPanelOpen)`，避免面板已关时点击又把面板「关」一次
+                // （状态无变化，无害，但语义更干净）。
                 AttachmentPanel(
                     visible = attachmentPanelOpen,
+                    onDismiss = { if (attachmentPanelOpen) onOpenAttachmentPanel?.invoke() },
                     onPickImage = onPickImage,
                     onPickFile = onPickFile,
                     onAttachLocation = onAttachLocation,
@@ -1753,6 +1763,11 @@ private fun ChatInputBar(
                         toolNames = toolNames,
                         disabledTools = disabledTools,
                         onToggleTool = onToggleTool,
+                        // ── 模型池（就地切换，不再跳页）──
+                        models = models,
+                        activeModelIndex = activeModelIndex,
+                        onSelectModel = onSelectModelIndex,
+                        onManageModels = onOpenModelSettings,
                         modifier = Modifier.padding(start = 6.dp),
                     )
                 }

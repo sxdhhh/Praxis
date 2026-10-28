@@ -137,6 +137,10 @@ fun PraxisApp(
         initial = "",
     )
 
+    // 用户显式创建过的空间名。与 activeMemorySpaceId 同源（都在 SettingsRepository），
+    // 这样「记忆页列出的空间」和「对话页实际查询的空间」不会分家。
+    val memorySpaces by settingsRepository.memorySpaces.collectAsState(initial = emptyList())
+
     // 启动与切空间后，把持久化的空间同步给端口。
     //
     // 不做这一步的后果：重启后记忆页显示「工作」（读的是磁盘），
@@ -681,6 +685,16 @@ fun PraxisApp(
                                 memoryPort.setActiveSpace(id)
                             }
                         },
+                        spaces = memorySpaces,
+                        onCreateSpace = { name ->
+                            // 建完立刻切过去：用户的意图是「我要在这个新空间里用」，
+                            // 而不是「建一个空壳留在列表里」。
+                            coroutineScope.launch {
+                                settingsRepository.addMemorySpace(name)
+                                settingsRepository.setActiveMemorySpace(name)
+                                memoryPort.setActiveSpace(name)
+                            }
+                        },
                     )
                 },
                 settingsTab = { SettingsHomeScreen() },
@@ -740,6 +754,14 @@ fun PraxisApp(
                     coroutineScope.launch {
                         settingsRepository.setActiveMemorySpace(id)
                         memoryPort.setActiveSpace(id)
+                    }
+                },
+                memorySpaces = memorySpaces,
+                onCreateMemorySpace = { name ->
+                    coroutineScope.launch {
+                        settingsRepository.addMemorySpace(name)
+                        settingsRepository.setActiveMemorySpace(name)
+                        memoryPort.setActiveSpace(name)
                     }
                 },
                 workflowEngine = workflowEngine,
