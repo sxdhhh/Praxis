@@ -84,7 +84,18 @@ internal fun Modifier.bgEffectDraw(
  * 所以手写成普通 class + 只比数据字段的 equals。lambda 的语义由外层保证：
  * 它们读的是 State，同一个 State 对象身份不变，内容变化由 draw 阶段的
  * 快照观察触发重绘 —— 不依赖 lambda 身份。
+ *
+ * ## 为什么 Element 也要标 `@RequiresApi(33)`（2026-10-29）
+ *
+ * 它的 `create()` 会 new 出 [BgEffectNode]，而后者因为要调
+ * `BgEffectPainter` 的着色器方法被标了 33。lint 把「new 一个必须 33 的类型」
+ * 也算成 NewApi 调用，于是 `create(): BgEffectNode` 那一行报错。
+ *
+ * 标在类上而不是单个方法上：`update()` 里同样在读写 Node，
+ * 整个类属于同一条「只在 33+ 可用」的链。责任点由 `bgEffectDraw` 承担，
+ * 它已有版本守卫。
  */
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
 private class BgEffectElement(
     val painter: BgEffectPainter,
     val preset: BgEffectConfig.Config,
