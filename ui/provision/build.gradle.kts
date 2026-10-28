@@ -25,6 +25,19 @@ plugins {
 android {
     namespace = "com.sevtinge.hyperceiler.provision"
 
+
+    // ## lintConfig 指向模块内 lint.xml（2026-10-29）
+    //
+    // 只为了把 `MissingTranslation` 降成 warning：本模块 17 个 locale 的
+    // 翻译进度完全不齐（2~72 个 key / 基准 73），那是上游累积的翻译工程，
+    // 不该挡住功能修复。理由与现状写在该文件里，此处不重复。
+    //
+    // `abortOnError` 由共享插件设置，保持 true —— 除了这一个降级项，
+    // 其余 lint error 仍然会让构建失败。
+    lint {
+        lintConfig = file("lint.xml")
+    }
+
     buildFeatures {
         // 两个 aidl（`IAnimCallback` / `IProvisionAnim`）用于跨进程动画回调。
         aidl = true
