@@ -13,6 +13,7 @@ import dev.praxis.core.linux.TerminalSessionCommand
 import dev.praxis.core.linux.TerminalSessionInfo
 import dev.praxis.core.linux.TerminalSessionPort
 import dev.praxis.feature.settings.env.LinuxEnvPort
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -430,7 +431,7 @@ class ProotTerminalSessionPort(
                 // 所以直接丢当前块（`trySend` 返回失败）。
                 trySend(bytes)
             }
-            kotlinx.coroutines.channels.awaitClose { remove() }
+            awaitClose { remove() }
         }
     }
 
