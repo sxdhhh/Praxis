@@ -69,6 +69,20 @@ dependencies {
     // 是 miuix 魔改版。若再从 Maven 拉官方 `androidx.preference`，
     // 会出现同名类冲突（两个 jar 都含 `androidx.preference.Preference`），
     // D8 会报 duplicate class。所以走 AAR 自带的那份。
+    // androidx.appcompat —— provision 的 Activity 继承链要用到。
+    //
+    // ProvisionBaseActivity extends AppCompatActivity（见 fan/provision），
+    // 而 AppCompatActivity / AppCompatDialog / Toolbar 只在官方
+    // androidx.appcompat 里。
+    //
+    // fan.miuix:appcompat 那个 AAR 名字很像，但它是 HyperCeiler 自己的
+    // fan.appcompat 包，只顺带打包了 37 个 androidx 同名类（ActionBar 那批），
+    // 根本没有 AppCompatActivity。那 37 个已从 AAR 剔除（否则 D8 报
+    // Duplicate class），缺的必须由官方库补上。
+    //
+    // 版本 1.7.1 与本项目传递进来的版本一致（来源 koin-android 与 splashscreen）。
+    implementation("androidx.appcompat:appcompat:1.7.1")
+
     implementation(libs.androidx.fragment)
     implementation(libs.androidx.recyclerview)
     implementation(libs.androidx.activity)
