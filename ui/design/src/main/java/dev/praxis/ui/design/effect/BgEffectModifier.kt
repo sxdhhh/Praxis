@@ -150,6 +150,20 @@ private class BgEffectElement(
     }
 }
 
+/**
+ * 真正画背景的节点。
+ *
+ * ## 为什么这里也必须标 `@RequiresApi(33)`（2026-10-29）
+ *
+ * 它调用的 `BgEffectPainter.updateResolution` 等成员所在的类是
+ * `@RequiresApi(TIRAMISU)`，但 lint 的注解**不跨类传播** ——
+ * 只看这个类内部就找不到任何版本守卫，于是把每一处 painter 调用都
+ * 报成 `NewApi: Call requires API level 33`。
+ *
+ * 加上注解后 lint 会把「谁在用这个 Node」当作责任点：
+ * `bgEffectDraw` 入口已经标了 `@RequiresApi(33)`，调用链上游有 33 判断。
+ */
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
 private class BgEffectNode(
     private var painter: BgEffectPainter,
     private var preset: BgEffectConfig.Config,
