@@ -163,7 +163,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            val repository: SettingsRepository = koinInject()
+            // 用全限定名而不是 import：与本项目其余调用点一致
+            // （PraxisApp.kt 里所有 koinInject 都是这么写的）。
+            // 裸 koinInject() 需要额外 import，之前本机能编过只是
+            // 因为缓存里有旧产物；干净环境直接报 Unresolved reference。
+            val repository: SettingsRepository = org.koin.compose.koinInject()
             // ## 浮层返回键要用 Activity 自带的 dispatcher（2026-10-24 重写）
             //
             // 以前这里是 `rememberNavigationEventDispatcherOwner(parent = null)`，
