@@ -179,12 +179,25 @@ class PluginViewModel(
             // 而且一个包几十 MB，堆着很快就占满。
             target.delete()
 
-            installed.onSuccess { plugin ->
-                _state.update { state -> state.copy(installingId = null, message = "已安装：${plugin.title}") }
+            // ## 为什么不用 `onSuccess { plugin -> }`
+            //
+            // `Result.onSuccess` 是 `inline fun <T> Result<T>.onSuccess(action: (T) -> Unit)`，
+            // 参数类型是 T。但 `installed` 的类型来自 `withContext { runCatching { ... } }`，
+            // 推断出来的是 `Result<InstalledPlugin>` 且 T 被擦成 `Result` —— 于是
+            // `plugin` 被当成 `Result<InstalledPlugin>` 本身，`plugin.title` 报
+            // 「Unresolved reference on receiver of type Result<InstalledPlugin>」。
+            //
+            // 用 `getOrNull()` + 显式判空，类型干净、也更好读。
+            val installedPlugin = installed.getOrNull()
+            if (installedPlugin != null) {
+                _state.update { state ->
+                    state.copy(installingId = null, message = "已安装：${installedPlugin.title}")
+                }
                 reloadInstalled()
-            }.onFailure { error ->
+            } else {
+                val error = installed.exceptionOrNull()
                 _state.update {
-                    it.copy(installingId = null, message = "安装失败：${error.message ?: "未知错误"}")
+                    it.copy(installingId = null, message = "安装失败：${error?.message ?: "未知错误"}")
                 }
             }
         }
@@ -197,12 +210,16 @@ class PluginViewModel(
             val result = withContext(Dispatchers.IO) {
                 runCatching { repository.install(sourcePath = path) }
             }
-            result.onSuccess { plugin ->
-                _state.update { state -> state.copy(installingId = null, message = "已安装：${plugin.title}") }
+            val installedPlugin = result.getOrNull()
+            if (installedPlugin != null) {
+                _state.update { state ->
+                    state.copy(installingId = null, message = "已安装：${installedPlugin.title}")
+                }
                 reloadInstalled()
-            }.onFailure { error ->
+            } else {
+                val error = result.exceptionOrNull()
                 _state.update {
-                    it.copy(installingId = null, message = "安装失败：${error.message ?: "未知错误"}")
+                    it.copy(installingId = null, message = "安装失败：${error?.message ?: "未知错误"}")
                 }
             }
         }
