@@ -142,6 +142,42 @@ interface MarketApi {
 
     /** 上报下载次数（失败不影响安装，服务端统计用）。 */
     suspend fun trackDownload(assetId: String): Result<Unit>
+
+    companion object {
+        /**
+         * 「市场关闭」的空实现。
+         *
+         * ## 为什么放在接口上而不是让每处调用点传 null
+         *
+         * `SettingsHost` 里 `pluginMarket` 是可空参数（DI 没装配时就是 null），
+         * 而 UI 层不该为「市场可能不存在」写一堆判空分支 —— 那会让
+         * 真正的空状态逻辑（`marketEnabled = false` 时显示「市场已关闭」）
+         * 被淹没在 null 检查里。
+         *
+         * 这个实现让「没有市场」变成一个**正常对象**：[isEnabled] 为 false，
+         * 列表返回空页、下载返回失败。UI 照常渲染、照常显示「市场已关闭」。
+         */
+        fun disabled(): MarketApi = DisabledMarket
+    }
+}
+
+/** [MarketApi.disabled] 的单例。无状态，所以可以直接复用。 */
+private object DisabledMarket : MarketApi {
+    override val isEnabled: Boolean = false
+
+    override suspend fun listPage(
+        sort: MarketSort,
+        page: Int,
+        type: String?,
+    ): Result<MarketPage> = Result.success(MarketPage(emptyList(), page, false))
+
+    override suspend fun fetchEntry(marketId: String): Result<MarketEntryDetail> =
+        Result.failure(IllegalStateException("市场未启用"))
+
+    override suspend fun download(asset: MarketAsset, destinationPath: String): Result<Long> =
+        Result.failure(IllegalStateException("市场未启用"))
+
+    override suspend fun trackDownload(assetId: String): Result<Unit> = Result.success(Unit)
 }
 
 /** 一页市场列表。 */
