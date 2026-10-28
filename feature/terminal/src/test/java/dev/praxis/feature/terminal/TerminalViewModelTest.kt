@@ -214,7 +214,18 @@ class TerminalViewModelTest {
         assertTrue("字符画过宽：$widths", widths.single() < TerminalViewModel.DEFAULT_COLUMNS)
     }
 
-    /** 一个会话在跑时，另一个会话提交要被拒绝（底层只有一条 shell 通道）。 */
+    /**
+     * 一个会话在跑时，另一个会话提交要**排队**而不是并发执行。
+     *
+     * ## 语义变更（2026-10-24）
+     *
+     * 旧实现在 `running` 时直接拒绝并提示「上一条命令仍在执行」。
+     * 实测这个取舍更差：用户连着敲 `cd x` / `ls` / `cat y`，后两条被静默丢弃。
+     * 改成串行队列后，断言也从「不应执行」变成「未执行、但在队列里等待」。
+     *
+     * 用 `runCount` 证明**没有并发**，用 `pendingCount` 证明**没有丢弃** ——
+     * 两者缺一都会让「排队」退化成「要么并发乱序、要么静默吞命令」。
+     */
     @Test
     fun `running is global across tabs`() {
         val runner = FakeRunner(delayForever = true)
@@ -223,9 +234,10 @@ class TerminalViewModelTest {
         vm.addTab()
         vm.submit("echo b")
 
-        // 第二次提交不该真的执行。
+        // 底层只有一条 shell 通道：第二条不能同时跑。
         assertEquals(1, runner.runCount)
-        val text = vm.state.value.active.text()
-        assertTrue("应提示上一条仍在执行：\n$text", text.contains("仍在执行"))
+        // 但也不能丢：它在队列里等着。
+        assertEquals(1, vm.pendingCount())
+        assertEquals(1, vm.state.value.pendingCount)
     }
 }

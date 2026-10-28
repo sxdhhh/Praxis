@@ -9,6 +9,9 @@ import dev.praxis.core.workflow.WorkflowNode
 import dev.praxis.feature.settings.tools.riskLabel
 import dev.praxis.feature.settings.tools.tierLabel
 import dev.praxis.feature.settings.tools.toAccessLevel
+import dev.praxis.feature.settings.capability.detailRows
+import dev.praxis.feature.settings.capability.kindLabel
+import dev.praxis.feature.settings.capability.primaryNextId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

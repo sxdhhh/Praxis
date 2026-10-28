@@ -16,9 +16,11 @@ private class FakeStore(
     var inserted = mutableListOf<MemoryItem>()
     var updated = mutableListOf<MemoryItem>()
 
-    override suspend fun all(): List<MemoryItem> {
+    /** 与 `MemoryStore.all(spaceId)` 对齐（2026-10-29）：spaceId 为 null 表示跨空间。 */
+    override suspend fun all(spaceId: String?): List<MemoryItem> {
         if (boom) error("store down")
-        return items
+        if (spaceId == null) return items
+        return items.filter { it.spaceId == spaceId }
     }
 
     override suspend fun insert(item: MemoryItem): Long {
@@ -32,7 +34,11 @@ private class FakeStore(
 
     override suspend fun delete(id: Long) = Unit
 
-    override suspend fun findSimilar(content: String, threshold: Double): MemoryItem? = null
+    override suspend fun findSimilar(
+        content: String,
+        threshold: Double,
+        spaceId: String,
+    ): MemoryItem? = null
 }
 
 private fun item(id: Long, text: String) = MemoryItem(

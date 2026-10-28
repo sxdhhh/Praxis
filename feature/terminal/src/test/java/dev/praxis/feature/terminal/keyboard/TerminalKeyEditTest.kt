@@ -47,7 +47,13 @@ class TerminalKeyEditTest {
 
     @Test
     fun `Tab 插入两个空格`() {
-        val result = applyTerminalKey(TerminalKeyId.Tab, TerminalKeyInput(text = "a"), emptyList())
+        // cursor 必须显式给：`TerminalKeyInput` 的默认 cursor 是 0（行首），
+        // 不给就会插到开头变成「  a」。真实 UI 永远传 `text.length`（光标在末尾）。
+        val result = applyTerminalKey(
+            TerminalKeyId.Tab,
+            TerminalKeyInput(text = "a", cursor = 1),
+            emptyList(),
+        )
 
         assertEquals("a  ", result.text)
         assertEquals(3, result.cursor)

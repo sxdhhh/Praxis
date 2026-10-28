@@ -73,6 +73,16 @@ class LinuxEnvViewModelTest {
 
         override fun isInstalled(env: LinuxEnvironment): Boolean = installed
 
+        /** 权限校正：测试里视作「没什么要修的」，直接成功。 */
+        override suspend fun repairPermissions(env: LinuxEnvironment): Boolean = true
+
+        /** 重置环境：记录一次并清掉 installed 标记。 */
+        override suspend fun resetEnvironment(env: LinuxEnvironment): Boolean {
+            calls += "reset"
+            installed = false
+            return true
+        }
+
         override suspend fun install(
             env: LinuxEnvironment,
             onLine: (String) -> Unit,
