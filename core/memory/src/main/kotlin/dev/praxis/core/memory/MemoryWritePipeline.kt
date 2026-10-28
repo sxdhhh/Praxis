@@ -29,7 +29,11 @@ class MemoryWritePipeline(
      * @return 各阶段结果。注意 [MemoryWriteResult.rejected] 非空**不影响**其他条，
      *   调用方仍应检查 [MemoryWriteResult.inserted] 是否大于 0。
      */
-    suspend fun write(content: String, tags: List<String> = emptyList()): MemoryWriteResult {
+    suspend fun write(
+        content: String,
+        tags: List<String> = emptyList(),
+        spaceId: String = MemoryItem.DEFAULT_SPACE_ID,
+    ): MemoryWriteResult {
         val trimmed = content.trim()
 
         when {
@@ -39,7 +43,7 @@ class MemoryWritePipeline(
             )
         }
 
-        val existing = store.findSimilar(trimmed, SIMILARITY_THRESHOLD)
+        val existing = store.findSimilar(trimmed, SIMILARITY_THRESHOLD, spaceId)
 
         return if (existing != null) {
             // 合并：保留原有 id 与 createdAt，只推进时间与命中数，并合并标签。
@@ -58,6 +62,7 @@ class MemoryWritePipeline(
                     tags = tags.distinct(),
                     createdAt = nowMs(),
                     lastUsedAt = nowMs(),
+                    spaceId = spaceId,
                 ),
             )
             MemoryWriteResult(inserted = 1)

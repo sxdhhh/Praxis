@@ -57,6 +57,8 @@ val appModule = module {
                 // 这次只加两个可空列 + 一个索引，**不需要回填**（NULL 就是
                 // 老消息的正确值，见 `MIGRATION_6_7` 的 KDoc）。
                 PraxisDatabase.MIGRATION_6_7,
+
+                PraxisDatabase.MIGRATION_7_8,
             )
             .build()
     }

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ This file is part of HyperCeiler.
+  ~
+  ~ HyperCeiler is free software: you can redistribute it and/or modify
+  ~ it under the terms of the GNU Affero General Public License as
+  ~ published by the Free Software Foundation, either version 3 of the
+  ~ License.
+  ~
+  ~ This program is distributed in the hope that it will be useful,
+  ~ but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ~ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  ~ GNU Affero General Public License for more details.
+  ~
+  ~ You should have received a copy of the GNU Affero General Public License
+  ~ along with this program.  If not, see <https://www.gnu.org/licenses/>.
+  ~
+  ~ Copyright (C) 2023-2026 HyperCeiler Contributions
+  -->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/provision_list_item_height"
+    android:background="@drawable/provision_list_item_background"
+    android:layoutDirection="locale"
+    android:paddingStart="@dimen/miuix_theme_content_padding_horizontal_common"
+    android:paddingEnd="@dimen/miuix_theme_content_padding_horizontal_common"
+    android:textAlignment="viewStart">
+
+    <!-- [Praxis] 三项调整，为「标题 + 说明」两行文案让位：
+         1. layout_width: wrap_content -> match_parent，再靠 marginEnd 给右侧
+            radio 图标留位。否则长标题会把图标挤出屏幕（wrap_content 不换行，
+            而是无限右扩）。
+         2. 加 maxLines / ellipsize：说明文字可能较长，限制两行并尾部省略，
+            避免单个条目撑高整个列表把「下一步」按钮顶出屏幕。
+         3. 加 lineSpacingExtra：两行文字（标题与说明）之间需要一点呼吸，
+            默认行距会让它们粘在一起，读起来像一句话。
+
+         这三项只影响本控件；Basic 页与 Terms 页也用 PermissionItemView，
+         但它们的文案是单行，match_parent + marginEnd 对它们无副作用
+         （单行不换行，视觉与 wrap_content 一致）。 -->
+    <TextView
+        android:id="@+id/item_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentStart="true"
+        android:layout_centerVertical="true"
+        android:layout_marginEnd="48dp"
+        android:maxLines="3"
+        android:ellipsize="end"
+        android:lineSpacingExtra="2dp"
+        android:clickable="false"
+        android:focusable="false"
+        android:textAppearance="@style/TextAppearance.PreferenceList" />
+
+    <ImageView
+        android:id="@+id/item_icon"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentEnd="true"
+        android:layout_centerVertical="true"
+        android:clickable="false"
+        android:focusable="false"
+        android:src="@drawable/provision_picker_btn_radio" />
+</RelativeLayout>

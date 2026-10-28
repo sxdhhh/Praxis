@@ -35,7 +35,7 @@ import dev.praxis.core.data.character.PromptTagEntity
         CharacterCardEntity::class,
         PromptTagEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.CharacterDatabase {
@@ -263,6 +263,49 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_messages_sessionId_variantGroupId` " +
                         "ON `messages` (`sessionId`, `variantGroupId`)",
+                )
+            }
+        }
+
+        /**
+         * v8：记忆加多空间（spaceId）。
+         *
+         * ## 这条迁移是「故意删除」，且是用户明确要求的
+         *
+         * 本项目从 v3 起禁用破坏性迁移（见 AppModule 的注释），
+         * 理由是「记忆被静默清空用户无从得知」。
+         * 但那条规则防的是**意外**丢数据；这里是**故意**丢，且写在
+         * 迁移里、可审计、可回溯。两者性质不同：前者不可控，
+         * 后者是一个明确的产品决定。
+         *
+         * ## 为什么是 DROP + CREATE 而不是 ALTER ADD COLUMN
+         *
+         * 只加一列（默认空串）本来就能保留旧数据，但用户明确要求
+         * 不迁移、直接删。所以这里确实是重建表。
+         *
+         * ## 索引名必须与 `MemoryEntity` 的 `@Index` 逐字一致
+         *
+         * Room 启动时会比对实体声明与实际 schema。差一个字符
+         * 就报「迁移没做对」，启动即崩。
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `memories`")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `memories` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`content` TEXT NOT NULL, " +
+                        "`tags` TEXT NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "`lastUsedAt` INTEGER NOT NULL, " +
+                        "`hitCount` INTEGER NOT NULL, " +
+                        "`spaceId` TEXT NOT NULL DEFAULT '')",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_memories_lastUsedAt` ON `memories` (`lastUsedAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_memories_createdAt` ON `memories` (`createdAt`)")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_memories_spaceId_lastUsedAt` " +
+                        "ON `memories` (`spaceId`, `lastUsedAt`)",
                 )
             }
         }

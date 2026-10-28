@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  Praxis 引导页主图标的非 blur 版本。
+
+  什么时候用它：
+  - StartupFragment.java:160 / 184 —— IS_SUPPORT_WELCOME_ANIM 为假，
+    或 Utils.isBlurEffectEnabled() 为假（低版本 / 用户关了模糊 / ROM 无 blur）
+  - provision_congratulation_layout.xml:64 —— 完成页的 logo
+
+  与 provision_logo_image.xml 的差别只有一个：fillColor。
+
+  前者用 #FFFFFF（给 blur 层做底色叠加），本文件用
+  @color/miuix_appcompat_black（直接可见）。
+
+  形状必须完全一致（同一份 pathData），否则开关模糊切换时 logo 会跳变。
+  这与上游做法一致：上游的 lite 版也只是换颜色，不换形状。
+
+  为什么 lite 版是深色：白色 logo 是给 blur 层做底色用的。没有 blur 层时
+  背景是 provision_logo_image_bg 那张浅色渐变图，白块在上面几乎看不见。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="28.001dp"
+    android:height="28dp"
+    android:viewportWidth="28.001"
+    android:viewportHeight="28">
+
+    <path
+        android:fillColor="@color/miuix_appcompat_black"
+        android:fillType="evenOdd"
+        android:pathData="M15.2,28h-2.4c-4.475,0 -6.721,0 -8.432,-0.872a7.952,7.952 0,0 1,-3.5 -3.5c-0.872,-1.712 -0.872,-3.958 -0.872,-8.432v-2.4c0,-4.475 0,-6.721 0.872,-8.432a7.952,7.952 0,0 1,3.5 -3.5c1.711,-0.872 3.957,-0.872 8.432,-0.872h2.4c4.475,0 6.721,0 8.432,0.872a7.958,7.958 0,0 1,3.5 3.5c0.872,1.711 0.872,3.957 0.872,8.432v2.4c0,4.475 0,6.72 -0.872,8.432a7.958,7.958 0,0 1,-3.5 3.5C21.921,28 19.675,28 15.2,28ZM9.722,8.556h4.667c2.333,0 3.889,1.296 3.889,3.37c0,1.556 -0.778,2.593 -2.074,3.111l2.333,4.407h-2.852l-2.074,-3.889h-1.037v3.889h-2.852zM12.574,10.889v2.593h1.815c0.778,0 1.037,-0.519 1.037,-1.296c0,-0.778 -0.259,-1.296 -1.037,-1.296z" />
+
+</vector>

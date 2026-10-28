@@ -19,7 +19,28 @@ data class MemoryItem(
     val lastUsedAt: Long = 0L,
     /** 被检索命中的次数：命中越多越可能被再次需要。 */
     val hitCount: Int = 0,
-)
+
+    /**
+     * 所属记忆空间。
+     *
+     * ## 为什么是字符串而不是外键
+     *
+     * 空间是用户自己建的（「工作」「副业」），量极小、几乎不改名。
+     * 为它建一张表并加外键，换来的是每次读写都要 join，
+     * 而收益只有「不会出现孤儿 spaceId」一项——那件事用一行校验就够了。
+     *
+     * ## 空串的含义
+     *
+     * 空串 = 「默认空间」。这样旧数据（没有这个列的时代）不需要特殊标记，
+     * 而且不存在「未分类」这种模糊状态。
+     */
+    val spaceId: String = DEFAULT_SPACE_ID,
+) {
+    companion object {
+        /** 默认空间的 id（空串）。 */
+        const val DEFAULT_SPACE_ID = ""
+    }
+}
 
 /**
  * 一次检索请求。
@@ -61,9 +82,30 @@ data class MemoryWriteResult(
 
 /** 记忆存储端口（实现在 :app，走 Room）。 */
 interface MemoryStore {
-    suspend fun all(): List<MemoryItem>
+
+    /**
+     * 读某个空间的全部记忆。
+     *
+     * [spaceId] 为 null 表示「跨空间全部」（用于设置页的总览与清理）。
+     * 默认取默认空间，这样旧调用点（不带参数）行为不变。
+     */
+    suspend fun all(spaceId: String? = MemoryItem.DEFAULT_SPACE_ID): List<MemoryItem>
+
     suspend fun insert(item: MemoryItem): Long
+
     suspend fun update(item: MemoryItem)
+
     suspend fun delete(id: Long)
-    suspend fun findSimilar(content: String, threshold: Double): MemoryItem?
+
+    /**
+     * 在同一空间内找相似记忆（去重合并用）。
+     *
+     * 跨空间不能合并：「工作」里的一条和「副业」里的一条
+     * 内容再像，也是两件事。
+     */
+    suspend fun findSimilar(
+        content: String,
+        threshold: Double,
+        spaceId: String = MemoryItem.DEFAULT_SPACE_ID,
+    ): MemoryItem?
 }

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- [Praxis] 权限页四项检测所需的声明。
+         没有声明就直接调 checkSelfPermission / requestPermissions，
+         会永远返回 DENIED（不报错，静默失败），用户以为是自己没找到开关。
+
+         与 Operit 的 manifest 逐项对齐：
+         - MANAGE_EXTERNAL_STORAGE：API 30+ 的「所有文件访问」，走系统设置页
+         - WRITE_EXTERNAL_STORAGE：API 29 及以下的存储权限（maxSdkVersion=29）
+         - SYSTEM_ALERT_WINDOW：悬浮窗
+         - REQUEST_IGNORE_BATTERY_OPTIMIZATIONS：电池优化豁免
+         - ACCESS_FINE/COARSE_LOCATION：位置
+
+         上游的 GET_INSTALLED_APPS 已删除 —— Praxis 不在引导里申请它，
+         原权限页那项也已去掉。保留一个永不使用的敏感权限声明只会让
+         应用商店审核多问一句，没有收益。 -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <application>
+        <activity
+            android:name=".activity.DefaultActivity"
+            android:exported="true"
+            android:theme="@style/ProvisionTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".activity.PermissionSettingsActivity"
+            android:exported="true"
+            android:theme="@style/ProvisionTheme" />
+
+        <activity
+            android:name=".activity.TermsAndStatementActivity"
+            android:exported="true"
+            android:theme="@style/ProvisionTheme" />
+
+        <activity
+            android:name=".activity.BasicSettingsActivity"
+            android:exported="true"
+            android:theme="@style/ProvisionTheme" />
+
+        <activity
+            android:name=".activity.CongratulationActivity"
+            android:exported="true"
+            android:theme="@style/ProvisionTheme" />
+
+        <service
+            android:name=".service.ProvisionAnimService"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="fan.intent.action.OOBSERVICE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

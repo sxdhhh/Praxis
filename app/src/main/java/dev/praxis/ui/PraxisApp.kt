@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -126,6 +127,23 @@ fun PraxisApp(
     // 恢复默认会话需要「最近更新的是哪个」，所以这里额外取一次仓储。
     val chatRepository: dev.praxis.data.ChatRepository = org.koin.compose.koinInject()
     val memoryPort: dev.praxis.feature.chat.MemoryPort = org.koin.compose.koinInject()
+
+    // 当前记忆空间：唯一真源在 SettingsRepository（持久化）。
+    //
+    // 为什么放在这里而不是 SettingsHost 内部：只有这一层同时握着
+    // repository（写盘）与 memoryPort（运行态），两处各存一份会出现
+    // 「对话用 A、设置页显示 B」。
+    val activeMemorySpaceId by settingsRepository.activeMemorySpace.collectAsState(
+        initial = "",
+    )
+
+    // 启动与切空间后，把持久化的空间同步给端口。
+    //
+    // 不做这一步的后果：重启后记忆页显示「工作」（读的是磁盘），
+    // 但 recall 仍用构造时的空串（默认空间）—— 页面上有 12 条，模型却一条也想不起来。
+    LaunchedEffect(activeMemorySpaceId) {
+        memoryPort.setActiveSpace(activeMemorySpaceId)
+    }
 
     // 角色系统。取的是仓储本身：`activePrompt()` 每轮现取，
     // 这样用户在设置页切卡/改人设后，下一句消息立刻生效。
@@ -652,7 +670,19 @@ fun PraxisApp(
                         ),
                     )
                 },
-                memoryTab = { MemoryRoute(memoryStore) },
+                memoryTab = {
+                    MemoryRoute(
+                        store = memoryStore,
+                        activeSpaceId = activeMemorySpaceId,
+                        onSelectSpace = { id ->
+                            // 双写：写盘（长期生效）+ 写端口（下一句立即生效）。
+                            coroutineScope.launch {
+                                settingsRepository.setActiveMemorySpace(id)
+                                memoryPort.setActiveSpace(id)
+                            }
+                        },
+                    )
+                },
                 settingsTab = { SettingsHomeScreen() },
             )
 
@@ -705,6 +735,13 @@ fun PraxisApp(
                     }
                 },
                 memoryStore = memoryStore,
+                activeMemorySpaceId = activeMemorySpaceId,
+                onSelectMemorySpace = { id ->
+                    coroutineScope.launch {
+                        settingsRepository.setActiveMemorySpace(id)
+                        memoryPort.setActiveSpace(id)
+                    }
+                },
                 workflowEngine = workflowEngine,
                 // `LocalContext.current` 必须在 Composable 里读，不能写在
                 // 参数位置的 lambda 内部 —— 那个 lambda 是 `remember` 的

@@ -27,7 +27,8 @@ class RoomMemoryStore(
     private val dao: MemoryDao,
 ) : MemoryStore {
 
-    override suspend fun all(): List<MemoryItem> = dao.all().map { it.toItem() }
+    override suspend fun all(spaceId: String?): List<MemoryItem> =
+        dao.all(spaceId).map { it.toItem() }
 
     override suspend fun insert(item: MemoryItem): Long =
         dao.insert(item.toEntity())
@@ -40,8 +41,12 @@ class RoomMemoryStore(
         dao.delete(id)
     }
 
-    override suspend fun findSimilar(content: String, threshold: Double): MemoryItem? =
-        dao.all()
+    override suspend fun findSimilar(
+        content: String,
+        threshold: Double,
+        spaceId: String,
+    ): MemoryItem? =
+        dao.all(spaceId)
             .asSequence()
             .map { it.toItem() }
             .firstOrNull { jaccardSimilarity(it.content, content) >= threshold }

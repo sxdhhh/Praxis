@@ -8,9 +8,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.CompositionLocalProvider
@@ -22,19 +19,13 @@ import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
-import dev.praxis.core.data.permission.CapabilityDetector
-import dev.praxis.core.data.permission.CapabilityRequester
 import dev.praxis.core.data.settings.SettingsRepository
 import dev.praxis.core.model.settings.ThemeSettings
 import dev.praxis.ui.PraxisApp
 import dev.praxis.ui.theme.PraxisTheme
-import dev.praxis.ui.design.onboarding.PraxisOnboardingFlow
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import androidx.lifecycle.lifecycleScope
-import org.koin.compose.koinInject
 import timber.log.Timber
 
 /**
@@ -202,18 +193,6 @@ class MainActivity : ComponentActivity() {
                             "ComponentActivity 本应自带，检查是否被某个 override 覆盖掉了",
                     )
 
-            // 本次进程内「刚刚点了开始使用」的标记。
-            //
-            // ## 为什么需要它（而不是只靠 DataStore 回写）
-            //
-            // 写盘是挂起操作，写完要再经 Flow 发射才能反映到 `resolved`。
-            // 中间那段（几十毫秒）里引导页还在显示 —— 用户已经点了「开始使用」
-            // 却仍停在原页，会被读成「点了没反应」。
-            //
-            // 用本地标记让这一帧就切到主界面，写盘在背后完成。
-            // 重启后以盘上的值为准（所以它不能代替写盘）。
-            var onboardingDoneLocal by remember { mutableStateOf(false) }
-
             // ## 主题流为什么多套一层 `map`
 
             // `collectAsStateWithLifecycle(initialValue)` 的类型参数是从 Flow 的
@@ -225,41 +204,10 @@ class MainActivity : ComponentActivity() {
             //
             // 所以先把元素类型**放宽成可空**，再用 `null` 当「未就绪」哨兵。
             //
-            // ## 为什么把「引导状态」也并进这一条流（而不是各采一次）
-            //
-            // 两件事决定**第一帧长什么样**：用哪套颜色、进哪一屏。它们必须
-            // 在**同一帧**里就已知，否则会出现这两种真实会发生的闪：
-            //
-            // ```
-            // 分流写错①：先按 completed=true 建主界面 → 读到 false → 跳引导
-            //           = 启动时主界面闪一下再被引导页盖住
-            // 分流写错②：先按 completed=false 建引导 → 读到 true → 跳主界面
-            //           = 老用户每次启动都闪一下引导页
-            // ```
-            //
-            // 用 `combine` 合并成一条流、只给一个 `null` 初值，
-            // 就保证「拿到值的那一刻，两件事都已经确定」。
-            //
-            // `remember(repository)`：这个 Flow 包装本身不该每次重组新建
-            // （新建会让 `collectAsStateWithLifecycle` 重启收集）。
-            val readyStateFlow = remember(repository) {
-                combine(
-                    repository.themeSettings.map<ThemeSettings, ThemeSettings?> { value -> value },
-                    repository.onboardingCompleted,
-                    repository.acceptedAgreementVersion,
-                ) { theme, onboardingDone, agreementVersion ->
-                    // 任一未就绪都算未就绪。theme 本身不为 null，
-                    // 这里只是保留可空形态以便统一处理。
-                    theme?.let {
-                        ReadyState(
-                            theme = it,
-                            onboardingDone = onboardingDone,
-                            acceptedAgreementVersion = agreementVersion,
-                        )
-                    }
-                }
+            val themeStateFlow = remember(repository) {
+                repository.themeSettings.map<ThemeSettings, ThemeSettings?> { value -> value }
             }
-            val readyState by readyStateFlow.collectAsStateWithLifecycle(
+            val themeOrNull by themeStateFlow.collectAsStateWithLifecycle(
                 initialValue = null,
             )
 
@@ -268,7 +216,7 @@ class MainActivity : ComponentActivity() {
             // 写在组合体里而不是 LaunchedEffect：这里是每帧都执行的位置，
             // 首帧组合完成时 `themeLoaded` 就已经是 true，
             // 比 LaunchedEffect 少一次调度 —— 那一帧之差就是可见的白闪。
-            if (readyState != null) {
+            if (themeOrNull != null) {
                 themeLoaded = true
             }
 
@@ -295,32 +243,13 @@ class MainActivity : ComponentActivity() {
             // 主题差一点色，用户在 splash 撤掉的瞬间就会看到跳变。
             // 什么都不画时，屏幕上留着的正是 splash 那一帧 —— 这个函数
             // 返回后 splash 立刻被撤掉，中间没有可见空档。
-            if (readyState == null && !forceReady) return@setContent
+            if (themeOrNull == null && !forceReady) return@setContent
 
             // 走到这里两种可能：读到真实设置，或超时兜底。
             // 兜底时 `themeLoaded` 也要置上，否则 splash 不会撤。
             themeLoaded = true
-            val resolved = readyState ?: ReadyState(
+            val resolved = themeOrNull ?: ReadyState(
                 theme = ThemeSettings(),
-                // ## 兜底的引导状态为什么是 `true`（已完成）
-                //
-                // 这是本文件唯一一个「宁可少弹也不误弹」的决定。
-                // 读盘失败时无法知道用户是否看过引导：
-                //  - 当成「未完成」→ 老用户被强行塞一遍引导，且他没有任何办法跳过
-                //    之外的操作（引导页是模态的，跳过按钮也在里面）；
-                //  - 当成「已完成」→ 新用户少看一遍说明书，但主界面能正常用，
-                //    而且他随时能在设置里找到对应功能。
-                //
-                // 少一次介绍远好过把老用户挡在门外。
-                onboardingDone = true,
-                // 同理：兜底按「协议已同意」处理。若给 null，协议门禁会拦住
-                // 一个读盘已经出问题的用户 —— 而他此时连「同意」都写不进去，
-                // 会被永久卡在协议屏。这与上面同一个取舍。
-                // 读盘失败的兜底：按「已同意」处理（理由见上）。
-                //
-                // 兜底值用当前协议版本：读盘失败时无法知道用户看过哪个版本，
-                // 按「已同意当前版本」处理，避免把他永久拦在协议屏。
-                acceptedAgreementVersion = AGREEMENT_VERSION,
             )
 
             CompositionLocalProvider(
@@ -335,225 +264,85 @@ class MainActivity : ComponentActivity() {
                 }
 
                 PraxisTheme(settings = resolved.theme) {
-                    // ── 首启引导门禁 ──────────────────────────────────
+                    // ## 引导链闸门
                     //
-                    // ## 为什么放在 PraxisTheme 内部而不是外面
+                    // HyperCeiler 的引导链（`:ui:provision`，131 个文件 /
+                    // 9108 行）是独立 Activity，不是 Composable，没法塞进
+                    // 这个组合体里。所以用「Activity 跳转 + 回来」的方式接：
                     //
-                    // 引导页自己要用 `MiuixTheme.colorScheme` / `textStyles`
-                    // 和 AGSL 流光背景 —— 那些都要求祖先有 `MiuixTheme`。
-                    // 放在外层会拿到默认主题（无莫奈取色），观感与主界面不一致。
+                    // ```
+                    // MainActivity.onCreate
+                    //   ├─ 未引导 → startActivity(DefaultActivity) → finish 自己
+                    //   │            └─ 五步走完（Startup → Permission → Terms
+                    //   │               → Basic → Congratulation）
+                    //   │               └─ setProvisioned(true)
+                    //   │               └─ startActivity(MainActivity)  CLEAR_TASK
+                    //   └─ 已引导 → PraxisApp(...)   ← 正常路径
+                    // ```
                     //
-                    // ## 为什么用 `if` 而不是导航到某个 Route
+                    // ## 为什么放在 `PraxisTheme` 里面而不是 `onCreate` 开头
                     //
-                    // 引导页是**一次性门禁**，不是可来回的页面：
-                    //  - 放进 `NavDisplay` 会让返回键能退回引导页（荒诞）；
-                    //  - 也会让 `MainShellPage` 的底栏在引导阶段就存在（闪烁）。
+                    // 放开头也行，但那样 `PraxisTheme` 会给一个即将被 finish
+                    // 的 Activity 建一整棵主题树，纯属浪费。放在这里，主题已经
+                    // 就绪（不会闪），而且只在这一帧做一次判断。
                     //
-                    // 用 `if` 从结构上保证「引导阶段没有主界面」，
-                    // 退出引导就是真的换成主界面，没有中间态。
-                        // ── 引导阶段 / 主界面：一次真实的转场（用户要求第 3 条）──
-                        //
-                        // ## 为什么不是 `if` 直接替换
-                        //
-                        // 上一版 `onFinish` 里置 `onboardingDoneLocal = true`，这一帧条件翻转、
-                        // 子树整体换掉 —— 用户看到的是**瞬间跳切**：引导页消失、主界面凭空出现。
-                        // 那不像「进入应用」，像「界面崩了一次」。
-                        //
-                        // 原版 HyperCeiler 走 `overridePendingTransition(slide_in_right, slide_out_left)`，
-                        // 两个 Activity 之间有真实转场。Praxis 的引导与主界面在**同一个 Activity** 内，
-                        // 所以转场只能在 Compose 层做。
-                        //
-                        // ## 参数直接取自原版那两个 anim（不是我自己配的）
-                        //
-                        // 原版 `CongratulationFragment.startHome()`：
-                        //
-                        // ```java
-                        // ActivityOptions.makeCustomAnimation(
-                        //     ctx, R.anim.enter_home_anim, R.anim.provision_out_anim)
-                        // ```
-                        //
-                        // 两个文件的真实参数（已逐字拷进 ui:design/res/anim）：
-                        //
-                        // | anim | 内容 |
-                        // |---|---|
-
-                        // | `enter_home_anim` | `scale 1.3→1.0`，619ms；`alpha 0→1`，230ms，startOffset 60 |
-                        // | `provision_out_anim` | `alpha 1→0`，360ms |
-                        //
-                        // 也就是说：**新页从 1.3 倍缩放收回来并淡入，旧页同时淡出**。
-                        // 这是「进入软件」的手感来源 —— 从「贴在脸上的近景」退到正常视距。
-                        //
-                        // Praxis 的引导与主界面在同一个 Activity 内，所以用
-                        // `AnimatedContent` 复刻同一组数值：
-                        //  - 主界面：`scaleIn 1.3 → 1.0`（619ms）+ `fadeIn` 230ms（`delayMillis = 60`）；
-                        //  - 引导页：`fadeOut` 360ms。
-                        //
-                        // 注意 `scaleIn` 的 `initialScale = 1.3f`：Compose 里 scale > 1 是放大，
-                        // 从 1.3 收到 1.0 正好对应原版的 `fromXScale=1.3 → toXScale=1.0`。
-                        AnimatedContent(
-                            targetState = !resolved.onboardingDone && !onboardingDoneLocal,
-                            transitionSpec = {
-                                // 退出（引导页）→ 进入（主界面）。
-                                // 这是唯一会用到的方向：走完引导就进主界面。
-                                if (targetState) {
-                                    // 极端情况：从主界面回到引导（只会发生在开发调试）
-                                    fadeIn(tween(200)) togetherWith fadeOut(tween(200))
-                                } else {
-                                    (
-                                        scaleIn(
-                                            animationSpec = tween(619, easing = FastOutSlowInEasing),
-                                            initialScale = 1.3f,
-                                        ) + fadeIn(
-                                            animationSpec = tween(
-                                                durationMillis = 230,
-                                                delayMillis = 60,
-                                                easing = FastOutSlowInEasing,
-                                            ),
-                                        )
-                                        ) togetherWith fadeOut(
-                                        animationSpec = tween(
-                                            durationMillis = 360,
-                                            easing = FastOutSlowInEasing,
-                                        ),
-                                    )
-                                }
-                            },
-                            label = "onboarding-to-app",
-                        ) { showOnboarding ->
-                            if (showOnboarding) {
-                    // ── 权限检测（引导页要显示真实状态，不是硬编码）──────
-                    //
-                    // 这三项是同一件事的三段：
-                    //  - `detector` 负责**查询**当前状态（快照 Flow）；
-                    //  - `requester` 负责**发起**申请（必要时跳系统设置）；
-                    //  - `launcher` 是运行时权限的系统弹窗入口。
-                    //
-                    // ## 为什么进引导流就 refresh 一次
-                    //
-                    // 不刷的话权限屏会先显示 `CapabilitySnapshot.Unknown`
-                    // （全部 UNSUPPORTED），用户会看到「全部不可用」再闪成真实状态。
-                    // 那是一次可见的错误信息。
-                    val capabilityDetector: CapabilityDetector = koinInject()
-                    val capabilityRequester: CapabilityRequester = koinInject()
-                    val capabilities by
-                        capabilityDetector.snapshot.collectAsStateWithLifecycle(
-                            initialValue = dev.praxis.core.model.permission
-                                .CapabilitySnapshot.Unknown,
-                        )
-                    LaunchedEffect(Unit) { capabilityDetector.refresh() }
-                    // 运行时权限弹窗。回来后必须刷新一次 —— 用户可能刚点了拒绝，
-                    // 界面要立刻反映，而不是等下次进页面。
-                    val permissionLauncher = androidx.activity.compose
-                        .rememberLauncherForActivityResult(
-                            contract = androidx.activity.result.contract
-                                .ActivityResultContracts.RequestMultiplePermissions(),
-                        ) {
-                            onboardingScope.launch { capabilityDetector.refresh() }
-                        }
-
-                            // ── Basic 屏要改的三项设置 ──────────────────────────
-                            //
-                            // 三条都是**真实订阅**（不是占位）：
-                            //  - `themeMode` 与 `PraxisTheme` 读同一份 Flow，所以在 Basic 屏
-                            //    切主题，整页配色立刻变 —— 这是「设置真的生效」的直接证据；
-                            //  - `chatDisplayStyle` 存 `cursor` / `bubble` 字符串
-                            //    （见 `SettingsRepository` 注释：缺省 `cursor`）；
-                            //  - `disableStreamOutput` 是**反向**语义，界面上写「流式输出」。
-                            val themeModeNow by repository.themeSettings
-                                .map { it.mode }
-                                .collectAsStateWithLifecycle(initialValue = resolved.theme.mode)
-                            val chatDisplayStyleNow by repository.chatDisplayStyle
-                                .collectAsStateWithLifecycle(initialValue = "cursor")
-                            val streamDisabledNow by repository.disableStreamOutput
-                                .collectAsStateWithLifecycle(initialValue = false)
-
-                            // 六屏内容全部是 Praxis 的真实文案，见 `ProvisionContent.kt`；
-                            // 视觉与关于页同源，见 `ProvisionGlassScaffold.kt`。
-                            // 每一屏都是原版 HyperCeiler XML 的逐字拷贝，用 AndroidView inflate；
-                            // 版式/尺寸/字体/颜色全部来自 `ui:design/src/main/res`（82 条 dimen、
-                            // 16 色 + 13 夜间色、17 个 drawable、12 个 layout）。
-                            // 每一屏都是原版 HyperCeiler XML 的逐字拷贝，用 AndroidView inflate；
-                            // 版式/尺寸/字体/颜色全部来自 `ui:design/src/main/res`。
-                            PraxisOnboardingFlow(
-                                onFinish = {
-                                    // 写盘是挂起操作；这里不 await 它 —— 界面该立刻切走，
-                                    // 不能让用户等 IO。写失败会导致下次启动又看到引导，
-                                    // 所以失败至少留痕；但不能因此卡住界面。
-                                    //
-                                    // 用 Activity 级 scope：重建时这次写入不该被取消。
-                                    onboardingScope.launch {
-                                        runCatching {
-                                            repository.completeOnboarding()
-                                            // 协议同意与引导完成是同一次「走完流程」。分开写会留下
-                                            // 「引导已完成、协议版本为空」的半截状态，
-                                            // 下次启动会被协议门禁再拦一次。
-                                            repository.acceptAgreement(AGREEMENT_VERSION)
-                                        }.onFailure {
-                                            Timber.tag("Onboarding")
-                                                .w(it, "写入引导完成状态失败，下次启动会再次显示引导")
-                                        }
-                                    }
-                                    // 本地立刻置为已完成：让这一帧就切到主界面。
-                                    onboardingDoneLocal = true
-                                },
-                            )
-                            } else {
-                                PraxisApp(
-                                    settingsRepository = repository,
-                                    versionName = BuildConfig.VERSION_NAME,
-                                    versionCode = BuildConfig.VERSION_CODE,
-                                )
+                    // `LaunchedEffect` 而不是直接调用：`startActivity` 会触发
+                    // 生命周期切换，在组合过程中调用属于「组合期副作用」，
+                    // 会被 Compose 报 warning。
+                    var provisionChecked by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) {
+                        if (!ProvisionGate.isDone(this@MainActivity)) {
+                            if (ProvisionGate.launch(this@MainActivity)) {
+                                // 引导自己会再拉起 MainActivity（CLEAR_TASK），
+                                // 这里把自己收掉，避免两层叠着。
+                                finish()
+                                return@LaunchedEffect
                             }
                         }
+                        // 引导已完成 → 把引导期间暂存的两项「转存」进 SettingsRepository。
+                        //
+                        // ## 为什么要这一步
+                        //
+                        // `:ui:provision` 不依赖 `:core:data`（见 `ProvisionPrefs` 的
+                        // KDoc：那样会让 ui 层反过来依赖数据层，形成越级依赖）。
+                        // 所以引导期间它只能写自己的 SharedPreferences，是**暂存**。
+                        // 真正的唯一真相来源是 `SettingsRepository`（DataStore），
+                        // 由这里在闸门放行前完成转存，之后 Repository 说了算。
+                        //
+                        // 幂等：`ProvisionPrefs.hasPermissionLevel` 为 false 时不写，
+                        // 避免每次冷启动都把用户后来在设置页改的档位覆盖回去。
+                        runCatching {
+                            ProvisionGate.importFromProvision(this@MainActivity, repository)
+                        }
+                        provisionChecked = true
+                    }
+
+                    if (provisionChecked) {
+                        // 引导已完成：进主界面。
+                        //
+                        // 「已引导」时 `LaunchedEffect` 在第一帧就把它置 true，
+                        // 中间不会出现可见空档（同一帧内完成判定与放行）。
+                        PraxisApp(
+                            settingsRepository = repository,
+                            versionName = BuildConfig.VERSION_NAME,
+                            versionCode = BuildConfig.VERSION_CODE,
+                        )
+                    }
                 }
             }
         }
     }
 
-    /**
-     * 写引导完成状态用的作用域。
-     *
-     * ## 为什么不用 composition 里的 `rememberCoroutineScope`
-     *
-     * 那个 scope 的 Job 绑在**当前组合**上：引导页被 `if` 换掉时整棵子树离开组合，
-     * 它的 scope 会被取消 —— 正在写盘的协程直接消失，用户看不到任何错误，
-     * 下次启动却又看到引导。这是「点了没生效」的典型成因。
-     *
-     * 用 Activity 的生命周期作用域（`lifecycleScope`）就能跨过那次重组。
-     * 它同样在 Activity 销毁时取消 —— 那时写盘本来也没必要继续。
-     */
-    private val onboardingScope: CoroutineScope
-        get() = lifecycleScope
 
-    /**
-     * 读盘失败时用的「协议已同意」哨兵值。
-     *
-     * 与 [acceptedAgreementVersion] 的语义对应：`null` = 从未同意，
-     * 非 null = 已同意。空串刻意不用 —— 它与「未设置」在部分
-     * 存储实现里不可区分。
-     */
-    private val AGREEMENT_VERSION = "2026-10-24"
 }
 
 /**
- * 启动时需要的两件事：主题 + 是否已完成引导。
+ * 启动时需要的主题。
  *
- * ## 为什么打包成一个类而不是两个独立状态
- *
- * 它们必须**同时**就绪才有意义（见 `MainActivity` 里的说明）。
- * 分成两个 `by collectAsState` 会有「一个到位、另一个没到位」的中间帧，
- * 那正是启动闪一下的成因。
+ * 保留成包装类而不是直接 `ThemeSettings?`：
+ * `null` 表示「还没读到盘」，与「用户真的选了默认主题」必须能区分，
+ * 否则第一帧只能用默认值建树，就是那一次「闪一下才跟上莫奈」。
  */
 private data class ReadyState(
     val theme: ThemeSettings,
-    val onboardingDone: Boolean,
-    /**
-     * 已同意的协议版本 id；`null` = 从未同意。
-     *
-     * 与 [onboardingDone] **必须分开**：两者比较方式不同
-     * （`>=` vs `==`），合并会让「引导加屏但协议没改」的老用户
-     * 被要求重新同意一份他没变过的协议。详见
-     * `SettingsRepository.acceptedAgreementVersion` 的 KDoc。
-     */
-    val acceptedAgreementVersion: String?,
 )

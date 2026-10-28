@@ -346,8 +346,6 @@ class SettingsRepository(
     suspend fun setDisabledTools(names: Set<String>) =
         put(KEY_DISABLED_TOOLS, names.filter { it.isNotBlank() }.joinToString(","))
 
-
-
     /**
      * 终端设置（第 12 项缺陷：终端齿轮要有自己的目的地）。
      *
@@ -457,87 +455,6 @@ class SettingsRepository(
         )
     }
 
-    /**
-     * 已同意的协议版本 id；`null` 表示从未同意过。
-     *
-     * ## 为什么与 [onboardingCompleted] 分开存（2026-10-23）
-     *
-     * 两者判定的**语义不同**，合并成一个值会做错：
-     *
-     * | 值 | 表达的问题 | 比较方式 |
-     * |---|---|---|
-     * | [onboardingCompleted] | 「讲解走完到第几卷了」 | `>=`（降级装回不重看） |
-     * | [acceptedAgreementVersion] | 「你同意的是哪一份文本」 | `==`（文本变了就要重看） |
-     *
-     * 具体会做错的场景：引导版本升到 2、但协议文本没改。
-     * 若合并成一个值，老用户会被要求**重新同意一份他没变过的协议** ——
-     * 那是纯粹的打扰，而且会让「同意」这个动作贬值。
-     *
-     * 反过来，协议改了但引导没加屏时，只该重看协议、不该重看三步介绍。
-     * 两条独立的流才能各自正确。
-     */
-    val acceptedAgreementVersion: Flow<String?> = dataStore.data.map { prefs ->
-        prefs[KEY_ACCEPTED_AGREEMENT_VERSION]
-    }
-
-    /**
-     * 记录用户同意的协议版本。
-     *
-     * 传 `null` 会清空（仅测试与「重置应用」用得上）。
-     *
-     * ## 为什么 null 走 remove 而不是 put（2026-10-24 构建时修）
-     *
-     * [put] 的签名是 `put<T>(key: Key<T>, value: T)` —— 值必须与 key 的
-     * 泛型参数**同型**。`stringPreferencesKey` 的 key 是 `Key<String>`，
-     * 于是 `put(key, versionId)` 在 `versionId: String?` 时会推断
-     * `T = String?`，与 `Key<String>` 不匹配，直接编译失败：
-     *
-     * ```
-     * Argument type mismatch: actual type is 'String?', but 'String' was expected.
-     * ```
-     *
-     * 语义上也该用 `remove`：Preferences 里「不存在这个 key」本身就是
-     * 「没有同意过任何版本」的规范表达，而 `put(key, null)` 根本不是合法操作。
-     */
-    suspend fun acceptAgreement(versionId: String?) {
-        if (versionId == null) {
-            dataStore.edit { it.remove(KEY_ACCEPTED_AGREEMENT_VERSION) }
-        } else {
-            put(KEY_ACCEPTED_AGREEMENT_VERSION, versionId)
-        }
-    }
-
-    /**
-     * 引导页是否已完成。
-     *
-     * ## 为什么用「版本号 >= 当前版本」而不是一个布尔
-     *
-     * 布尔只能表达「看过 / 没看过」，于是「以后版本加了新的引导步骤」
-     * 这件事无法表达 —— 老用户永远是 `true`，新步骤永远看不到。
-     *
-     * 存版本号之后：改引导内容时把 [ONBOARDING_VERSION] 加一，
-     * 所有人都重新看一遍**新增的那一段**，不需要清数据、不需要迁移。
-     * 这与 Operit 用 `CURRENT_AGREEMENT_VERSION` 判协议是同一个思路。
-     *
-     * 比较用 `>=` 而不是 `==`：用户装过更新版本又降级回来时，
-     * 旧值比当前版本大，此时**不该**再弹一次引导（他已经看过更新的了）。
-     *
-     * ## 为什么缺省是「未完成」
-     *
-     * 键不存在 = 全新安装 = 需要引导。这是唯一合理的缺省：
-     * 反过来（缺省已完成）会让所有新用户看不到引导页。
-     */
-    val onboardingCompleted: Flow<Boolean> = dataStore.data.map { prefs ->
-        (prefs[KEY_ONBOARDING_VERSION] ?: 0) >= ONBOARDING_VERSION
-    }
-
-    /**
-     * 标记引导完成（写入当前 [ONBOARDING_VERSION]）。
-     *
-     * 幂等：重复调用只是把同一个值再写一遍。
-     */
-    suspend fun completeOnboarding() = put(KEY_ONBOARDING_VERSION, ONBOARDING_VERSION)
-
     // ── 权限级别（2026-10-24 引导页两段式改造新增）────────────────
 
     /**
@@ -624,31 +541,23 @@ class SettingsRepository(
     suspend fun setAutoReadReplies(enabled: Boolean) =
         put(KEY_AUTO_READ_REPLIES, enabled)
 
+    /**
+     * 当前活动的记忆空间 id（空串 = 默认空间）。
+     *
+     * 为什么要持久化：切空间是长期意图。存内存的话，杀一次进程就回到「默认」，
+     * 用户下次开口就会发现它又忘了「工作」里记的东西。
+     */
+    val activeMemorySpace: Flow<String> =
+        dataStore.data.map { prefs -> prefs[KEY_ACTIVE_MEMORY_SPACE] ?: "" }
+
+    /** 切换记忆空间。 */
+    suspend fun setActiveMemorySpace(spaceId: String) =
+        put(KEY_ACTIVE_MEMORY_SPACE, spaceId.trim())
+
     private suspend fun <T> put(key: Preferences.Key<T>, value: T) {
-        dataStore.edit { it[key] = value }
+                dataStore.edit { it[key] = value }
     }
 
-    companion object {
-        /**
-         * 当前引导版本。
-         *
-         * ## 什么时候该加一
-         *
-         * 只有「新增一个用户必须看到的步骤」时才加。改文案、调视觉**不要**加 ——
-         * 那会让全部老用户重新走一遍引导，是纯粹的打扰。
-         *
-         * ## 版本历史
-         *
-         * | 版本 | 变更 |
-         * |---|---|
-         * | 1 | 单屏三步介绍（Pager） |
-         * | 2 | 拆成「协议门禁 → 三步介绍 → 权限引导」（2026-10-23） |
-         *
-         * 2 必须让所有人重看：协议是**新的法律依据**，权限页是**新的配置入口**，
-         * 两者都属于「漏掉会有实际后果」的步骤，不是改文案。
-         */
-        const val ONBOARDING_VERSION = 2
-    }
 }
 
 /**
@@ -786,24 +695,10 @@ private val KEY_DISABLED_TOOLS = stringPreferencesKey("disabled_tools")
  */
 private const val LABEL_SEPARATOR = "\u0001"
 
-/** 引导页完成版本（见 [SettingsRepository.onboardingCompleted]）。 */
-private val KEY_ONBOARDING_VERSION = intPreferencesKey("onboarding_version")
+
 
 /**
- * 已同意的协议版本 id（见 [SettingsRepository.acceptedAgreementVersion]）。
- *
- * 用 `stringPreferencesKey` 而不是 int：版本 id 是日期字符串（`"2026-10-23"`），
- * 这样「文本什么时候改的」在数据里也一眼可见。
- */
-private val KEY_ACCEPTED_AGREEMENT_VERSION =
-    stringPreferencesKey("accepted_agreement_version")
-
-/**
- * 用户在引导页选定的权限级别（枚举名，见 [SettingsRepository.permissionLevel]）。
- *
- * 键名带 `permission_` 前缀而不是 `onboarding_`：它虽然在引导页写入，
- * 但运行时（工具权限判定）也要读它，不属于「引导流程的内部状态」。
- * 混进 onboarding_ 组会让人以为它只影响引导页。
+ * 用户选定的权限级别上限（枚举名，见 [SettingsRepository.permissionLevel]）。
  */
 private val KEY_PERMISSION_LEVEL = stringPreferencesKey("permission_level")
 
@@ -817,6 +712,7 @@ private val KEY_PERMISSION_LEVEL = stringPreferencesKey("permission_level")
  */
 private val KEY_DISABLE_STREAM_OUTPUT = booleanPreferencesKey("disable_stream_output")
 private val KEY_AUTO_READ_REPLIES = booleanPreferencesKey("auto_read_replies")
+private val KEY_ACTIVE_MEMORY_SPACE = stringPreferencesKey("active_memory_space")
 
 /**
  * 把存储里的字符串还原成权限级别；认不出就返回 `null`。

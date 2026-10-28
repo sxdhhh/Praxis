@@ -64,6 +64,21 @@ kyantShapes = "1.2.1"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+# HyperCeiler 引导链（`:ui:provision`）直接使用的四个 androidx 库。
+#
+# 版本对齐 `fan.miuix:1.0.13.0` 的 pom 要求（pom 里写死的传递版本）：
+# - `androidx.fragment:fragment` -> 1.8.9（viewpager2 的 pom 要求）
+# - `androidx.recyclerview:recyclerview` -> 1.4.0（recyclerview 的 pom 要求）
+# - `androidx.annotation:annotation` -> 1.9.1（theme 的 pom 要求）
+# 不写死会用本地 BOM 裁决，可能与 AAR 编译期不一致。
+#
+# `androidx.activity` 不单独列版本：Proxis 已在用 activity-compose 1.13.0，
+# 这里跟随同一版本线，避免 activity 与 activity-compose 版本分叉
+# （分叉会导致 `OnBackPressedDispatcher` 的类型在两边不是同一个类）。
+androidx-fragment = { module = "androidx.fragment:fragment", version = "1.8.9" }
+androidx-recyclerview = { module = "androidx.recyclerview:recyclerview", version = "1.4.0" }
+androidx-annotation = { module = "androidx.annotation:annotation", version = "1.9.1" }
+androidx-activity = { module = "androidx.activity:activity", version.ref = "activityCompose" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }

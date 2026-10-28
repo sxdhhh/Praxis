@@ -83,6 +83,15 @@ fun SettingsHost(
     onRequestCapability: (dev.praxis.core.model.permission.PraxisCapability) -> Unit = {},
     /** 记忆存储。由 :app 注入，与 repository 同口径。 */
     memoryStore: dev.praxis.core.memory.MemoryStore,
+    /**
+     * 当前活动记忆空间 id（空串 = 默认空间）。
+     *
+     * 由 :app 从 SettingsRepository 的 Flow 收集后传入：这一层不自己读 DataStore，
+     * 保证「对话页用的空间」与「记忆页显示的空间」始终是同一个值。
+     */
+    activeMemorySpaceId: String = "",
+    /** 切换记忆空间。缺省 null 时不渲染选择器（测试/预览路径）。 */
+    onSelectMemorySpace: ((String) -> Unit)? = null,
     /** 工作流引擎。由 :app 注入。 */
     workflowEngine: dev.praxis.core.workflow.WorkflowEngine,
     /**
@@ -169,6 +178,8 @@ fun SettingsHost(
             capabilities = capabilities,
             onRequestCapability = onRequestCapability,
             memoryStore = memoryStore,
+            activeMemorySpaceId = activeMemorySpaceId,
+            onSelectMemorySpace = onSelectMemorySpace,
             workflowEngine = workflowEngine,
             linuxEnvPort = linuxEnvPort,
             terminalSettings = terminalSettings,
@@ -202,6 +213,8 @@ private fun SettingsPageBody(
     capabilities: dev.praxis.core.model.permission.CapabilitySnapshot,
     onRequestCapability: (dev.praxis.core.model.permission.PraxisCapability) -> Unit,
     memoryStore: dev.praxis.core.memory.MemoryStore,
+    activeMemorySpaceId: String = "",
+    onSelectMemorySpace: ((String) -> Unit)? = null,
     workflowEngine: dev.praxis.core.workflow.WorkflowEngine,
     /**
      * 角色卡仓储。
@@ -317,7 +330,12 @@ private fun SettingsPageBody(
             onSelect = onTierChange,
             modifier = modifier,
         )
-        PraxisRoute.SettingsMemory -> MemoryRoute(memoryStore, modifier)
+        PraxisRoute.SettingsMemory -> MemoryRoute(
+            store = memoryStore,
+            modifier = modifier,
+            activeSpaceId = activeMemorySpaceId,
+            onSelectSpace = onSelectMemorySpace,
+        )
         PraxisRoute.SettingsWorkflow -> WorkflowRoute(workflowEngine, modifier)
         // 语音：功能已主动放弃，给明确原因而不是假装能用（见 SettingsUnfinished）。
         PraxisRoute.SettingsSpeech -> SettingsUnfinished(

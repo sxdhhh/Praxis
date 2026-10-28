@@ -47,6 +47,13 @@ interface MemoryPort {
      */
     suspend fun recent(limit: Int = RECENT_LIMIT): List<String> = emptyList()
 
+    /**
+     * 切换当前记忆空间。
+     * 由 :app 在用户点选择器时调用；不靠反向引用 UI 层的 Flow（那会形成循环依赖）。
+     * 默认空实现是为不破坏测试里的匿名实现。
+     */
+    suspend fun setActiveSpace(spaceId: String) {}
+
     companion object {
         /**
          * 注入上下文的最大条数。

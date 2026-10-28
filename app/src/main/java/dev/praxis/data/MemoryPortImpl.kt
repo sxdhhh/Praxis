@@ -25,11 +25,17 @@ class MemoryPortImpl(
     private val retriever: MemoryRetriever,
     private val pipeline: dev.praxis.core.memory.MemoryWritePipeline,
     private val nowMs: () -> Long = System::currentTimeMillis,
+    /** 当前活动空间。默认空串 = 默认空间。 */
+    private val spaceProvider: () -> String = { dev.praxis.core.memory.MemoryItem.DEFAULT_SPACE_ID },
+
+    /** 当前空间（可改）。由 [setActiveSpace] 写入。 */
+    @Volatile
+    private var activeSpaceValue: String = spaceProvider()
 ) : MemoryPort {
 
     override suspend fun recall(query: String, limit: Int): List<String> =
         runCatching {
-            val candidates = store.all()
+            val candidates = store.all(activeSpace())
             retriever
                 .retrieve(
                     candidates = candidates,
@@ -45,7 +51,7 @@ class MemoryPortImpl(
      * 「因为记忆库满了所以这轮发送失败」）。
      */
     override suspend fun remember(content: String) {
-        runCatching { pipeline.write(content) }
+        runCatching { pipeline.write(content, spaceId = activeSpace()) }
     }
 
     /**
@@ -59,9 +65,27 @@ class MemoryPortImpl(
      */
     override suspend fun recent(limit: Int): List<String> =
         runCatching {
-            store.all()
+            store.all(activeSpace())
                 .sortedByDescending { it.createdAt }
                 .take(limit)
                 .map { it.content },
         }.getOrDefault(emptyList())
+
+    /**
+     * 当前活动空间。
+     *
+     * 从 `spaceProvider` 现取，而不是在构造时快照：用户切空间后
+     * 下一句就要生效，快照会让它一直用旧空间。
+     */
+    private fun activeSpace(): String = activeSpaceValue
+
+    /**
+     * 切换空间。
+     *
+     * 写入后下一次 recall/recent/remember 就用新空间。不做回到默认的降级：
+     * 用户选了一个还没数据的空间，就应该看到它是空的。
+     */
+    override suspend fun setActiveSpace(spaceId: String) {
+        activeSpaceValue = spaceId
+    }
 }

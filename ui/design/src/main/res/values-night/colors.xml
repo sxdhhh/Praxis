@@ -18,25 +18,12 @@
   ~ Copyright (C) 2023-2025 HyperCeiler Contributions
   -->
 <resources>
-    <color name="provision_list_description_color">#80FFFFFF</color>
 
-    <color name="provision_list_item_text_unselected">#FFFFFFFF</color>
 
-    <color name="provision_item_normal_bg_color">#FF1C1C1C</color>
-    <color name="provision_item_pressed_bg_color">#14FFFFFF</color>
-    <color name="provision_item_selected_bg_color">#FF3D7EFF</color>
 
-    <color name="provision_title_text_color">#FFFFFF</color>
-    <color name="provision_subtitle_text_color">#99FFFFFF</color>
 
-    <color name="provision_service_name_color">#FFFFFF</color>
-    <color name="provision_service_desc_color">#80FFFFFF</color>
 
-    <color name="provision_item_policy_text_color">#FF3D7EFF</color>
 
-    <color name="provision_service_agree_color">#FFFFFF</color>
 
-    <color name="provision_button_text_high_color_light">#FF3D7EFF</color>
 <!-- 夜间页面底：原版 windowBackground = miuix_appcompat_black。 -->
-    <color name="provision_page_background">#FF000000</color>
 </resources>

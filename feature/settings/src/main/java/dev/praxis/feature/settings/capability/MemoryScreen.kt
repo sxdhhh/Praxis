@@ -39,6 +39,12 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 fun MemoryScreen(
     items: List<MemoryItem>,
     onDelete: (Long) -> Unit,
+    /** 当前活动空间 id。 */
+    activeSpaceId: String = MemoryItem.DEFAULT_SPACE_ID,
+    /** 各空间及条数（id to count）。 */
+    spaceCounts: List<Pair<String, Int>> = emptyList(),
+    /** 切换空间；null = 不显示选择器。 */
+    onSelectSpace: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     SettingsList(
@@ -49,6 +55,25 @@ fun MemoryScreen(
             SmallTitle("长期记忆")
             Card(modifier = Modifier.padding(horizontal = 12.dp)) {
                 Column(modifier = Modifier.padding(16.dp)) {
+                    // ── 空间选择器 ──
+                    //
+                    // 用 FlowRow 而不是下拉菜单：空间通常就两三个，直接展开比多点一层快。
+                    if (onSelectSpace != null && spaceCounts.isNotEmpty()) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            spaceCounts.forEach { (id, count) ->
+                                val label = if (id == MemoryItem.DEFAULT_SPACE_ID) DEFAULT_SPACE_LABEL else id
+                                TextButton(
+                                    text = label + " · " + count,
+                                    onClick = { onSelectSpace(id) },
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+
                     Text(
                         text = "共 ${items.size} 条",
                         style = MiuixTheme.textStyles.body2,
@@ -147,3 +172,7 @@ fun MemoryScreen(
         }
     }
 }
+
+/** 默认空间的展示名。独立常量而不写死在 if 分支里：同一个名字
+ * 在选择器与空列表两处都要用，写两遍迟早改漏一个。 */
+private const val DEFAULT_SPACE_LABEL = "默认"

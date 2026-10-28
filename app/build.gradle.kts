@@ -276,6 +276,11 @@ dependencies {
     // 用的是 implementation 依赖，所以 :app 也要显式声明。
     implementation(project(":core:linux"))
     implementation(project(":feature:terminal"))
+    // HyperCeiler 引导链。`:app` 只在 `ProvisionGate` 里按类名字符串跳转，
+    // 不 import 它的任何类型 —— 用 `implementation` 就是为了让这个边界
+    // 在编译期也成立：如果哪天有人写了 `import com.sevtinge...`，
+    // 这里会立刻编不过，从而强迫他保持「按类名跳转」的解耦。
+    implementation(project(":ui:provision"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

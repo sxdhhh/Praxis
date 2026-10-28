@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  ~ This file is part of HyperCeiler.
+  ~
+  ~ HyperCeiler is free software: you can redistribute it and/or modify
+  ~ it under the terms of the GNU Affero General Public License as
+  ~ published by the Free Software Foundation, either version 3 of the
+  ~ License.
+  ~
+  ~ This program is distributed in the hope that it will be useful,
+  ~ but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ~ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  ~ GNU Affero General Public License for more details.
+  ~
+  ~ You should have received a copy of the GNU Affero General Public License
+  ~ along with this program.  If not, see <https://www.gnu.org/licenses/>.
+  ~
+  ~ Copyright (C) 2023-2026 HyperCeiler Contributions
+  -->
+<!--
+  [Praxis] 权限页布局：骨架照 HyperCeiler，内容照 Operit。
+
+  骨架（不变）：
+  - ScrollView 根（内容可能超一屏，Operit 自己也是可滚动 pager）
+  - paddingHorizontal = @dimen/miuix_theme_padding_horizontal_common（miuix 统一边距）
+  - 分组标题用 @style/ProvisionListSecondaryTextStyle（与 Basic 页同款）
+  - 列表项用 PermissionItemView（自带 radio 图标 + 选中态颜色）
+
+  内容（换掉）：
+  原 4 项（network / root / installed_apps / lsp）换成 Operit
+  `PermissionGuideViewModel.checkPermissions()` 的四项，顺序一致：
+  存储 → 悬浮窗 → 电池优化 → 位置。
+
+  另新增一段「权限级别」（Operit 的 PERMISSION_LEVEL 步），
+  四项单项选择，复用同一个 PermissionItemView 控件。
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="@dimen/miuix_theme_padding_horizontal_common">
+
+        <TextView
+            style="@style/ProvisionListSecondaryTextStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="@dimen/miuix_theme_content_padding_horizontal_common"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="8dp"
+            android:text="@string/provision_permission_warning_title"
+            android:textSize="13sp" />
+        <com.sevtinge.hyperceiler.provision.widget.PermissionItemView
+            android:id="@+id/perm_storage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <com.sevtinge.hyperceiler.provision.widget.PermissionItemView
+            android:id="@+id/perm_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <com.sevtinge.hyperceiler.provision.widget.PermissionItemView
+            android:id="@+id/perm_battery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <com.sevtinge.hyperceiler.provision.widget.PermissionItemView
+            android:id="@+id/perm_location"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <TextView
+            style="@style/ProvisionListSecondaryTextStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="@dimen/miuix_theme_content_padding_horizontal_common"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="8dp"
+            android:text="@string/provision_permission_level_title"
+            android:textSize="13sp" />
+        <com.sevtinge.hyperceiler.provision.widget.PermissionItemView
+            android:id="@+id/level_standard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp" />
+        <com.sevtinge.hyperceiler.provision.widget.PermissionItemView
+            android:id="@+id/level_accessibility"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <com.sevtinge.hyperceiler.provision.widget.PermissionItemView
+            android:id="@+id/level_debugger"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <com.sevtinge.hyperceiler.provision.widget.PermissionItemView
+            android:id="@+id/level_root"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+    </LinearLayout>
+
+</ScrollView>

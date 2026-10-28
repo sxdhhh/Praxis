@@ -20,7 +20,12 @@ import androidx.room.PrimaryKey
  */
 @Entity(
     tableName = "memories",
-    indices = [Index("lastUsedAt"), Index("createdAt")],
+    indices = [
+        Index("lastUsedAt"),
+        Index("createdAt"),
+        // 多空间后的主要查询路径：先按空间筛再按时间排。
+        Index("spaceId", "lastUsedAt"),
+    ],
 )
 data class MemoryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -30,6 +35,15 @@ data class MemoryEntity(
     val createdAt: Long,
     val lastUsedAt: Long,
     val hitCount: Int = 0,
+
+    /**
+     * 所属空间 id（空串 = 默认空间）。
+     *
+     * 存字符串而不存空间表外键：空间是用户自建的几个名字，
+     * 为它 join 一张表只为了阻止孤儿 id，而那件事一行校验就够。
+     * 索引覆盖 (spaceId, lastUsedAt)：记忆列表与检索都按这两列走。
+     */
+    val spaceId: String = "",
 ) {
     companion object {
         /**
