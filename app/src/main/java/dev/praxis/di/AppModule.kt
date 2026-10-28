@@ -121,7 +121,34 @@ val appModule = module {
     single<dev.praxis.core.plugin.PluginStorage> {
         dev.praxis.data.plugin.FilePluginStorage(androidContext())
     }
-    single { dev.praxis.core.plugin.PluginRepository(get()) }
+
+    //
+    // ## 外部归档工厂在这里注册（2026-10-29）
+    //
+    // `androidContext()` 是 `Scope` 的扩展函数，只能在 `single {}` 的 lambda
+    // 里调（那时 receiver 是 Scope）。放在模块级的 `run { }` 里会编译失败：
+    // 「None of the following candidates is applicable」—— 两个候选都因为
+    // receiver 类型不匹配被排除。
+    //
+    // 挂在 PluginRepository 的工厂里是最自然的位置：`install` 唯一的调用方
+    // 就是它，而工厂只跑一次。
+    single {
+        val ctx = androidContext()
+        dev.praxis.core.plugin.PluginRepository.externalArchiveFactory = { path ->
+            val file = java.io.File(path)
+            if (file.isDirectory) {
+                dev.praxis.data.plugin.DirectoryPluginArchive(file)
+            } else {
+                // zip 不能直接交给 DirectoryPluginArchive（它按文件树读）。
+                //
+                // 这里绝不能用 `installFrom`：那会把包真的装进 packages/<id>/，
+                // 而「预检一个包」的前提就是**不落库**。误用一次会让「用户取消
+                // 安装」也留下一个包。
+                dev.praxis.data.plugin.TempDirZipArchive.unzipInto(ctx.cacheDir, file)
+            }
+        }
+        dev.praxis.core.plugin.PluginRepository(get())
+    }
 
     // 在线市场：默认启用。
     // ## 为什么可以默认开
@@ -138,30 +165,6 @@ val appModule = module {
     // `core:plugin` 是纯 JVM，不能依赖 Android 的文件/SAF 语义，所以它把
     // 「打开一个还没装进来的包」留成工厂钩子。:app 启动时注册一次，
     // 单测里可以换成内存实现。
-    run {
-        val ctx = androidContext()
-        dev.praxis.core.plugin.PluginRepository.externalArchiveFactory = { path ->
-            val file = java.io.File(path)
-            if (file.isDirectory) {
-                dev.praxis.data.plugin.DirectoryPluginArchive(file)
-            } else {
-                // ## zip 不能直接交给 DirectoryPluginArchive
-                //
-                // 它按文件树读，而 zip 是一个文件。所以先解到 cacheDir
-                // 下一个**临时目录**，再按目录读。
-                //
-                // 这里绝不能用 `installFrom`：那个方法会把包真的装进
-                // `packages/<id>/`，而「预检一个包」这个动作的前提就是
-                // **不落库**。误用过一次会让「用户取消安装」也留下一个包。
-                //
-                // 返回值用 `ZipPluginArchive`（读完自己删临时目录）
-                // 而不是 DirectoryPluginArchive：让生命周期跟着 `use {}` 走，
-                // 由调用方 `close()` 触发清理。
-                dev.praxis.data.plugin.TempDirZipArchive.unzipInto(ctx.cacheDir, file)
-            }
-        }
-    }
-
     // 工作流：工具端口由 :app 桥接（core:workflow 不依赖 core:tool）。
     single<dev.praxis.core.workflow.WorkflowToolPort> {
         dev.praxis.data.ToolWorkflowPort(
