@@ -163,31 +163,32 @@ class PluginViewModel(
                 return@launch
             }
 
+            // ## 不要再包一层 runCatching
+            //
+            // `PluginRepository.install` 的签名已经是 `Result<InstalledPlugin>`。
+            // 外面再套一个 `runCatching { }` 得到的是 `Result<Result<InstalledPlugin>>`，
+            // 于是 `getOrNull()` 返回的还是 Result，`title` 自然解析不到 ——
+            // 这正是连续几轮 CI 都报「Unresolved reference 'title' on receiver of
+            // type Result<InstalledPlugin>」的真正原因。
+            //
+            // 它自己用 runCatching 包好了异常，不需要我们再兜。
             val installed = withContext(Dispatchers.IO) {
-                runCatching {
-                    repository.install(
-                        sourcePath = target.absolutePath,
-                        origin = PluginOrigin.Market(
-                            marketId = entry.marketId,
-                            version = entry.version,
-                            installedFrom = asset.downloadUrl,
-                        ),
-                    )
-                }
+                repository.install(
+                    sourcePath = target.absolutePath,
+                    origin = PluginOrigin.Market(
+                        marketId = entry.marketId,
+                        version = entry.version,
+                        installedFrom = asset.downloadUrl,
+                    ),
+                )
             }
             // 装完删掉下载的 zip：留着重装时会被误当成「本地导入」源，
             // 而且一个包几十 MB，堆着很快就占满。
             target.delete()
 
-            // ## 为什么不用 `onSuccess { plugin -> }`
-            //
-            // `Result.onSuccess` 是 `inline fun <T> Result<T>.onSuccess(action: (T) -> Unit)`，
-            // 参数类型是 T。但 `installed` 的类型来自 `withContext { runCatching { ... } }`，
-            // 推断出来的是 `Result<InstalledPlugin>` 且 T 被擦成 `Result` —— 于是
-            // `plugin` 被当成 `Result<InstalledPlugin>` 本身，`plugin.title` 报
-            // 「Unresolved reference on receiver of type Result<InstalledPlugin>」。
-            //
-            // 用 `getOrNull()` + 显式判空，类型干净、也更好读。
+            // 用 `getOrNull()` + 显式判空而不是 `onSuccess { }`：
+            // 上面已把多余的 runCatching 去掉，这里的类型就是干净的
+            // `Result<InstalledPlugin>`；显式判空读起来也比链式回调清楚。
             val installedPlugin = installed.getOrNull()
             if (installedPlugin != null) {
                 _state.update { state ->
@@ -207,8 +208,9 @@ class PluginViewModel(
     fun installFromFile(path: String) {
         scope.launch {
             _state.update { it.copy(installingId = path, message = null) }
+            // 同上：install 已经返回 Result，不要再包 runCatching。
             val result = withContext(Dispatchers.IO) {
-                runCatching { repository.install(sourcePath = path) }
+                repository.install(sourcePath = path)
             }
             val installedPlugin = result.getOrNull()
             if (installedPlugin != null) {
