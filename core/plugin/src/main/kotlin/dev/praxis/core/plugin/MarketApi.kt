@@ -30,7 +30,31 @@ data class MarketEntrySummary(
     val updatedAt: String?,
     /** 分类名（服务端给的展示名）。 */
     val categoryId: String = "",
+    /**
+     * 可下载资产（2026-10-29 加）。
+     *
+     * ## 为什么摘要也要带 assets
+     *
+     * 列表 JSON 的每条本来就带 `assets[]`（含直链 `url`），而
+     * `api.operit.app/market/v2/entries/{id}` 需要 GitHub session（实测 404）。
+     * 也就是说：**不把 assets 放进摘要，就没有可装的下载地址**。
+     *
+     * 原设计把 assets 只放在 `MarketEntryDetail` 上，是假设详情接口可用。
+     * 那个假设不成立，所以把字段上移 —— 摘要比详情更重要，因为它是
+     * 唯一真实可用的数据源。
+     */
+    val assets: List<MarketAsset> = emptyList(),
 ) {
+    /**
+     * 主资产：优先 `.toolpkg`，否则第一个有直链的。
+     *
+     * 与 `MarketEntryDetail.primaryAsset` 同一规则，故意不抽公共函数：
+     * 两处的取舍理由不同（详情是「展示哪个版本」，摘要是「装哪个文件」），
+     * 抽到一起后任何一方想改都要考虑另一方。
+     */
+    val primaryAsset: MarketAsset?
+        get() = assets.firstOrNull { it.fileName.endsWith(".toolpkg", ignoreCase = true) }
+            ?: assets.firstOrNull { it.downloadUrl.isNotBlank() }
     /**
      * 猜测它属于哪类扩展。
      *

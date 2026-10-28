@@ -142,10 +142,18 @@ class PluginViewModel(
         }
         scope.launch {
             _state.update { it.copy(installingId = entry.marketId, message = null) }
-            val downloadDir = File(repository.packagesRoot).parentFile?.let { File(it, "downloads") }
-                ?: File(repository.packagesRoot)
+            // ## 下载目录从哪儿来
+            //
+            // `PluginRepository` 不暴露 `packagesRoot`（那是 `PluginStorage` 的
+            // 属性）。VM 手里只有 repository，所以走「已装包列表里任取一个
+            // 的 installPath 反推父目录」是不可靠的（一个包都没装时就没有）。
+            //
+            // 改成直接问系统临时目录：market 下载物是**一次性中间产物**，
+            // 装完立刻删。放 cacheDir 还有个额外好处 —— 进程被杀留下的
+            // 残包会被系统在磁盘紧张时清掉。
+            val downloadDir = File(System.getProperty("java.io.tmpdir") ?: ".")
             downloadDir.mkdirs()
-            val target = File(downloadDir, "${entry.marketId.replace('/', '_')}.toolpkg")
+            val target = File(downloadDir, "praxis-${entry.marketId.replace('/', '_')}.toolpkg")
 
             val downloaded = market.download(asset, target.absolutePath)
             downloaded.onFailure { error ->
@@ -171,8 +179,8 @@ class PluginViewModel(
             // 而且一个包几十 MB，堆着很快就占满。
             target.delete()
 
-            installed.onSuccess {
-                _state.update { it.copy(installingId = null, message = "已安装：${it.title}") }
+            installed.onSuccess { plugin ->
+                _state.update { state -> state.copy(installingId = null, message = "已安装：${plugin.title}") }
                 reloadInstalled()
             }.onFailure { error ->
                 _state.update {

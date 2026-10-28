@@ -90,6 +90,9 @@ object MarketJsonParser {
                 ?: fields.text("logo").trim().takeIf { it.isNotEmpty() },
             updatedAt = fields.text("updatedAt").trim().takeIf { it.isNotEmpty() },
             categoryId = fields.text("categoryId").trim(),
+            // 列表条目自带 assets（含直链 url），必须解析：
+            // 详情接口需要 GitHub session，摘要里的 assets 是唯一的下载来源。
+            assets = parseAssets(fields),
         )
     }
 
@@ -123,7 +126,28 @@ object MarketJsonParser {
             )
         }
 
-        val assets = entryFields["assets"]?.asList().orEmpty().mapNotNull { value ->
+        val assets = parseAssets(entryFields)
+
+        return MarketEntryDetail(
+            summary = summary,
+            detail = entryFields.text("detail").trim()
+                .ifBlank { entryFields.text("readme").trim() },
+            versions = versions,
+            assets = assets,
+        )
+    }
+
+    /**
+     * 解析 `assets[]`。列表与详情共用。
+     *
+     * ## 为什么抽出来
+     *
+     * 两处都要读同一个结构，而且都必须处理「assetId 缺失但 url 在」这种
+     * 半残条目（老数据里有过）。复制一份的后果是修了一处漏另一处，
+     * 而漏的那侧正好是「有 url 但不显示下载按钮」—— 用户会以为市场坏了。
+     */
+    private fun parseAssets(fields: Map<String, ManifestValue>): List<MarketAsset> =
+        fields["assets"]?.asList().orEmpty().mapNotNull { value ->
             val a = value as? ManifestValue.Mapping ?: return@mapNotNull null
             val assetId = a.entries.text("id").trim().ifBlank { a.entries.text("assetId").trim() }
             val url = a.entries.text("downloadUrl").trim()
@@ -147,15 +171,6 @@ object MarketJsonParser {
                 sha256 = a.entries.text("sha256").trim(),
             )
         }
-
-        return MarketEntryDetail(
-            summary = summary,
-            detail = entryFields.text("detail").trim()
-                .ifBlank { entryFields.text("readme").trim() },
-            versions = versions,
-            assets = assets,
-        )
-    }
 
     // ── 字段容错 ─────────────────────────────────────────────
 
