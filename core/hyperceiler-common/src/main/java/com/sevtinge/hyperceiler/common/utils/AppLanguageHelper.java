@@ -3,9 +3,11 @@ package com.sevtinge.hyperceiler.common.utils;
 import android.app.Activity;
 import android.app.LocaleManager;
 import android.content.Context;
+import android.content.res.Configuration;
+import android.os.Build;
 import android.os.LocaleList;
 import android.text.TextUtils;
-
+import androidx.annotation.RequiresApi;
 import com.sevtinge.hyperceiler.common.R;
 import com.sevtinge.hyperceiler.common.log.AndroidLog;
 
@@ -25,6 +27,24 @@ import java.util.Map;
  *
  * <p>同时把所选索引镜像写入 {@link AppSettingsStore}，仅用于让 Xposed 模块端
  * 通过 PrefsBridge 读取，不参与 UI 进程的语言应用流程。
+ *
+ * <h2>为什么需要两条路径（2026-10-29 修）</h2>
+ *
+ * <p>本项目的 {@code minSdk} 是 28，而 {@link LocaleManager} 是 <b>API 33</b>
+ * 才有的类。原实现直接 {@code context.getSystemService(LocaleManager.class)}，
+ * 在 Android 12 及以下会抛 {@link NoClassDefFoundError}（不是返回 null，
+ * 而是在解析类引用时就炸）—— 而在那些系统上 
+ * {@code setLanguage} 是一条正常的用户操作。
+ *
+ * <p>所以分两条路径：
+ * <ul>
+ *   <li>API 33+：走平台 per-app locale，系统负责持久化与 Activity 重建；</li>
+ *   <li>API 28–32：{@link #wrapContext} 用 {@code createConfigurationContext}
+ *       覆盖 Configuration 的 locale，并在切换时把索引写入
+ *       {@link AppSettingsStore} 作为持久化来源。代价是已打开的
+ *       Activity 需要重建才看得到新语言 —— 这在 {@code applyLanguage}
+ *       里显式调用，而不是靠系统。</li>
+ * </ul>
  */
 public class AppLanguageHelper {
     private static final String TAG = "AppLanguageHelper";
@@ -80,6 +100,26 @@ public class AppLanguageHelper {
         int normalized = normalizeLanguageIndex(index);
         AppSettingsStore.setAppLanguageIndex(context, normalized);
         applySystemLocales(context, localeFromIndex(normalized));
+        // 低版本没有 per-app locale，系统不会自己重建界面。
+        // 不重建的话，用户点完语言选项看到的还是旧语言 —— 会以为「没生效」。
+        if (!isPerAppLocaleSupported()) {
+            recreateIfActivity(context);
+        }
+    }
+
+    /**
+     * 低版本切语言后重建当前 Activity。
+     *
+     * <p>只处理 {@link Activity}：{@code Application} 传进来时不需要（也没用）。
+     * 已经 finishing 的 Activity 不重建 —— 那会把它重新拉起来。
+     */
+    private static void recreateIfActivity(Context context) {
+        if (context instanceof Activity) {
+            Activity activity = (Activity) context;
+            if (!activity.isFinishing()) {
+                activity.recreate();
+            }
+        }
     }
 
     public static void setLanguage(Context context, String language) {
@@ -182,14 +222,57 @@ public class AppLanguageHelper {
     }
 
     /**
-     * attachBaseContext 兼容入口。
+     * attachBaseContext 入口：低版本用 Configuration 覆盖实现语言切换。
      *
      * <p>Android 13+ per-app language 由系统在 Activity 创建前注入 Configuration，
-     * 不再需要我们手工 createConfigurationContext。这里直接返回 base，保留方法仅为
-     * 让既有 attachBaseContext 调用点无需修改即可继续工作。
+     * 不再需要手工 createConfigurationContext —— 那条路直接返回 base。
+     *
+     * <p>Android 12 及以下没有 per-app locale，若不在这里接管，
+     * 用户在设置页选的语言就**完全没效果**（只是写进了一个没人读的索引）。
+     * 所以低版本用 {@link Context#createConfigurationContext} 包一层：
+     * 把 Configuration 的 locale 换成存下来的那个，后续所有
+     * {@code getResources()} 都从这个包装后的 context 取。
+     *
+     * <p>代价：切换语言时需要重建 Activity 才能看到变化 ——
+     * 这在 {@link #applyLanguage} 里显式调用 {@code recreate()}，而不是靠系统。
      */
     public static Context wrapContext(Context base) {
-        return base;
+        if (base == null) {
+            return null;
+        }
+        // 13+ 交给系统，我们不能也不该再包一层（会把系统的 per-app locale 覆盖掉）。
+        if (isPerAppLocaleSupported()) {
+            return base;
+        }
+        Locale target = storedLocale(base);
+        if (target == null) {
+            return base;
+        }
+        Configuration config = new Configuration(base.getResources().getConfiguration());
+        // setLocale 会同时处理 layoutDirection，比手动 setLocales 可靠。
+        config.setLocale(target);
+        return base.createConfigurationContext(config);
+    }
+
+    /**
+     * 读 {@link AppSettingsStore} 里存的语言索引并转成 Locale。
+     *
+     * <p>返回 null 表示「用户从没选过」，调用方应保持系统默认。
+     * 注意这里返回 null 而不是 {@code localeFromIndex(0)}：
+     * 把「没选」当成「选了英文」会让中文用户第一次启动就看到英文界面。
+     */
+    private static Locale storedLocale(Context base) {
+        try {
+            int stored = AppSettingsStore.getAppLanguageIndex(base, -1);
+            if (stored < 0 || stored >= APP_LANGUAGES.length) {
+                return null;
+            }
+            return localeFromIndex(stored);
+        } catch (Throwable t) {
+            // 低版本路径不能因为读设置失败就白屏 —— 回落系统语言。
+            AndroidLog.w(TAG, "storedLocale failed: " + t.getMessage());
+            return null;
+        }
     }
 
     // ============================================================
@@ -371,6 +454,30 @@ public class AppLanguageHelper {
      * @param locale 为 null 表示清除 per-app locale，回到“跟随系统”。
      */
     private static void applySystemLocales(Context context, Locale locale) {
+        // API 32 及以下没有 LocaleManager。这里必须**先判版本再碰类型**：
+        // 一旦字节码解析到 LocaleManager 引用，VM 在旧系统上会直接抛
+        // NoClassDefFoundError（try/catch 都拦不住，因为它在验证阶段就发生）。
+        // 所以低版本分支只写非 LocaleManager 的代码，不回落到「拿不到就返回」。
+        if (!isPerAppLocaleSupported()) {
+            return;
+        }
+        applyPerAppLocale(context, locale);
+    }
+
+    /** 平台是否支持 per-app language（Android 13 / API 33+）。 */
+    public static boolean isPerAppLocaleSupported() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
+    }
+
+    /**
+     * 真正调用平台 API 的那一段。
+     *
+     * <p>单独抽一个方法 + {@link RequiresApi} 是刻意的：调用点先过
+     * {@link #isPerAppLocaleSupported()}，验证器因此不会在旧系统上
+     * 解析本方法的常量池，也就不会触发 NoClassDefFoundError。
+     */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private static void applyPerAppLocale(Context context, Locale locale) {
         LocaleManager manager = getLocaleManager(context);
         if (manager == null) {
             return;
@@ -402,6 +509,15 @@ public class AppLanguageHelper {
     }
 
     private static LocaleList getApplicationLocalesSafe(Context context) {
+        if (!isPerAppLocaleSupported()) {
+            return null;
+        }
+        return getApplicationLocalesApi33(context);
+    }
+
+    /** 同 {@link #applyPerAppLocale}：API 33+ 专属，先过版本判断再调用。 */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private static LocaleList getApplicationLocalesApi33(Context context) {
         LocaleManager manager = getLocaleManager(context);
         if (manager == null) {
             return null;
@@ -414,6 +530,7 @@ public class AppLanguageHelper {
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private static LocaleManager getLocaleManager(Context context) {
         if (context == null) {
             return null;
