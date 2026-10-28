@@ -273,7 +273,7 @@ class MainActivity : ComponentActivity() {
                     runCatching { repository.migrateApiKeyIfNeeded() }
                 }
 
-                PraxisTheme(settings = resolved.theme) {
+                PraxisTheme(settings = resolved) {
                     // ## 引导链闸门
                     //
                     // HyperCeiler 的引导链（`:ui:provision`，131 个文件 /
