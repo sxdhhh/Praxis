@@ -140,6 +140,15 @@ fun SettingsHost(
      * 也就是说：**接线在最外面一层断了**，里面全都好的。
      */
     characterRepository: dev.praxis.core.data.character.CharacterRepository? = null,
+    /**
+     * 插件仓库（已安装包的读写）。
+     *
+     * 与 [characterRepository] 同一纪律：可空，null 时该页显示「未装配」。
+     * 理由见本文件的「依赖一律从 :app 注入」说明。
+     */
+    pluginRepository: dev.praxis.core.plugin.PluginRepository? = null,
+    /** 在线市场；null 表示不提供（隐私模式或未配置）。 */
+    pluginMarket: dev.praxis.core.plugin.MarketApi? = null,
     /** 进入角色卡编辑页（cardId 为 null 表示新建）。 */
     onOpenCharacterEdit: (String?) -> Unit = {},
     /** 编辑完成 / 取消后回到列表。 */
@@ -195,6 +204,8 @@ fun SettingsHost(
             onTerminalReset = onTerminalReset,
             modelCatalogFetcher = modelCatalogFetcher,
             characterRepository = characterRepository,
+            pluginRepository = pluginRepository,
+            pluginMarket = pluginMarket,
             onOpenCharacterEdit = onOpenCharacterEdit,
             onCloseCharacterEdit = onCloseCharacterEdit,
             onOpenPromptTags = onOpenPromptTags,
@@ -236,6 +247,15 @@ private fun SettingsPageBody(
      * 不必因为新增能力而全改一遍。
      */
     characterRepository: dev.praxis.core.data.character.CharacterRepository? = null,
+    /**
+     * 插件仓库（已安装包的读写）。
+     *
+     * 与 [characterRepository] 同一纪律：可空，null 时该页显示「未装配」。
+     * 理由见本文件的「依赖一律从 :app 注入」说明。
+     */
+    pluginRepository: dev.praxis.core.plugin.PluginRepository? = null,
+    /** 在线市场；null 表示不提供（隐私模式或未配置）。 */
+    pluginMarket: dev.praxis.core.plugin.MarketApi? = null,
     /** 进入角色卡编辑页（cardId 为 null 表示新建）。 */
     onOpenCharacterEdit: (String?) -> Unit = {},
     /** 编辑完成/取消后回到列表。 */
@@ -401,11 +421,33 @@ private fun SettingsPageBody(
                 modifier = modifier,
             )
         }
-        PraxisRoute.SettingsPackages -> SettingsUnfinished(
-            title = SettingsEntry.Packages.title,
-            reason = PACKAGES_REASON,
-            modifier = modifier,
-        )
+        PraxisRoute.SettingsPackages -> {
+            // ## 为什么不再显示「暂不开放」（2026-10-29）
+            //
+            // 那条说明当时的依据是「需要沙箱内嵌 JS 运行时，所以要等」。
+            // 但「装包 / 卸包 / 开关 / 浏览市场」这一层**完全不需要 JS 运行时** ——
+            // 它是纯文件与网络操作，`core:plugin` 的 3560 行已经写好并在单测里跑通。
+            // 把能做的和不能做的混在一句话里，结果是能做的那部分永远不开放。
+            //
+            // 现在：这一页只做管理与安装；工具能否被模型调用，取决于运行时加载
+            // （`PluginRuntimeHost`），那部分仍按原计划推进，不在本页承诺。
+            val repo = pluginRepository
+            val market = pluginMarket
+            if (repo == null) {
+                SettingsUnfinished(
+                    title = SettingsEntry.Packages.title,
+                    reason = PACKAGES_REASON,
+                    modifier = modifier,
+                )
+            } else {
+                dev.praxis.feature.settings.plugin.PluginsRoute(
+                    repository = repo,
+                    // 市场为 null 时给一个「关闭」实现，避免 UI 里到处判空。
+                    market = market ?: dev.praxis.core.plugin.MarketApi.disabled(),
+                    modifier = modifier,
+                )
+            }
+        }
         PraxisRoute.SettingsLog -> LogScreen(modifier)
         PraxisRoute.SettingsAbout -> AboutScreen(
             versionName = versionName,

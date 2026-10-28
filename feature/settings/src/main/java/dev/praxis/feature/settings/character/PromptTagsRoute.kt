@@ -51,6 +51,13 @@ fun PromptTagsRoute(
                 runCatching { repository.createOrReuseTag(name, content, tagType = type) }
             }
         },
+        onUpdate = { tag ->
+            scope.launch {
+                // `saveTag` 会补 createdAt（已有则保留）、刷新 updatedAt，
+                // 并按 id upsert —— 所以这里直接传改过的模型即可。
+                runCatching { repository.saveTag(tag) }
+            }
+        },
         onDelete = { tagId ->
             scope.launch {
                 runCatching { repository.deleteTag(tagId) }

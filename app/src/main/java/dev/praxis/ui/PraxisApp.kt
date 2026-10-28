@@ -153,6 +153,14 @@ fun PraxisApp(
     // 这样用户在设置页切卡/改人设后，下一句消息立刻生效。
     val characterRepository: dev.praxis.core.data.character.CharacterRepository =
         org.koin.compose.koinInject()
+
+    // 扩展包：仓库（文件读写）与市场（网络）。两者都由 AppModule 装配。
+    // 分开取而不是打成一个对象：设置页只需要仓库，市场是可选能力，
+    // 混在一起会让「没有网络权限的构建」也被迫构造一个 HTTP 客户端。
+    val pluginRepository: dev.praxis.core.plugin.PluginRepository =
+        org.koin.compose.koinInject()
+    val pluginMarket: dev.praxis.core.plugin.MarketApi =
+        org.koin.compose.koinInject()
     val memoryStore: dev.praxis.core.memory.MemoryStore = org.koin.compose.koinInject()
     val workflowEngine: dev.praxis.core.workflow.WorkflowEngine = org.koin.compose.koinInject()
     val skillRegistry: dev.praxis.core.plugin.SkillRegistry = org.koin.compose.koinInject()
@@ -803,6 +811,8 @@ fun PraxisApp(
                 // 聊天页每轮调 `activePrompt()`，设置页负责改内容。
                 // 若两处各建一个实例，活跃卡 id 会因为各自缓存而不同步。
                 characterRepository = characterRepository,
+                pluginRepository = pluginRepository,
+                pluginMarket = pluginMarket,
                 onOpenCharacterEdit = { cardId ->
                     // 参数化 Route：null 表示新建。
                     navigator.push(PraxisRoute.SettingsCharacterEdit(cardId = cardId))

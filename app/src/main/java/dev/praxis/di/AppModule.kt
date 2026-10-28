@@ -110,6 +110,58 @@ val appModule = module {
     }
     single { dev.praxis.core.plugin.SkillRegistry(get()) }
 
+    // ── 扩展包（工具包）────────────────────────────────────────
+    //
+    // ## 为什么 storage 与 repository 都注册
+    //
+    // `PluginRepository` 只依赖 `PluginStorage` 接口（纯 JVM 可测），而
+    // 真实存储是 Android 文件系统 —— 由 :app 提供实现并注册一次。
+    // 两处都需要：设置页要 repository，插件市场安装完也只需要 repository；
+    // 但外部归档读取需要 storage 的 `packagesRoot` 找下载目录。
+    single<dev.praxis.core.plugin.PluginStorage> {
+        dev.praxis.data.plugin.FilePluginStorage(androidContext())
+    }
+    single { dev.praxis.core.plugin.PluginRepository(get()) }
+
+    // 在线市场：默认启用。
+    // ## 为什么可以默认开
+    //
+    // 它只在用户点开「扩展包」页时才发请求（不乱连），且只访问公开 CDN。
+    // 需要隐私模式的用户可以在后续加开关 —— 但默认关会让这个功能
+    // 装完就是死的，与「不做一个永远转圈的详情页」是同一条取舍。
+    single<dev.praxis.core.plugin.MarketApi> { dev.praxis.data.plugin.PluginMarketApi() }
+
+    // 导入外部归档（.toolpkg / 目录）：`PluginRepository.install` 用它预检。
+    //
+    // ## 为什么在这里注册成全局可变字段
+    //
+    // `core:plugin` 是纯 JVM，不能依赖 Android 的文件/SAF 语义，所以它把
+    // 「打开一个还没装进来的包」留成工厂钩子。:app 启动时注册一次，
+    // 单测里可以换成内存实现。
+    run {
+        val ctx = androidContext()
+        dev.praxis.core.plugin.PluginRepository.externalArchiveFactory = { path ->
+            val file = java.io.File(path)
+            if (file.isDirectory) {
+                dev.praxis.data.plugin.DirectoryPluginArchive(file)
+            } else {
+                // ## zip 不能直接交给 DirectoryPluginArchive
+                //
+                // 它按文件树读，而 zip 是一个文件。所以先解到 cacheDir
+                // 下一个**临时目录**，再按目录读。
+                //
+                // 这里绝不能用 `installFrom`：那个方法会把包真的装进
+                // `packages/<id>/`，而「预检一个包」这个动作的前提就是
+                // **不落库**。误用过一次会让「用户取消安装」也留下一个包。
+                //
+                // 返回值用 `ZipPluginArchive`（读完自己删临时目录）
+                // 而不是 DirectoryPluginArchive：让生命周期跟着 `use {}` 走，
+                // 由调用方 `close()` 触发清理。
+                dev.praxis.data.plugin.TempDirZipArchive.unzipInto(ctx.cacheDir, file)
+            }
+        }
+    }
+
     // 工作流：工具端口由 :app 桥接（core:workflow 不依赖 core:tool）。
     single<dev.praxis.core.workflow.WorkflowToolPort> {
         dev.praxis.data.ToolWorkflowPort(

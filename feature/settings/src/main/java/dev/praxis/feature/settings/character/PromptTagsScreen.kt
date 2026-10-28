@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import dev.praxis.core.model.character.PromptTag
 import dev.praxis.core.model.character.PromptTagType
 import dev.praxis.feature.settings.common.SettingsList
@@ -40,14 +41,21 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 更糟的是**改一处要改 5 处**，用户必然会漏。标签把这段提示词抽成一处，
  * 改一次全部生效。
  *
- * ## 为什么这里只做「新建 + 列表 + 删除」，不做「编辑正文」
+ * ## 编辑正文的「远程副作用」怎么处理（2026-10-29 补）
  *
- * 编辑标签正文会影响所有引用它的角色卡。用户点进去改一句、
- * 结果 5 张卡的人设都变了 —— 这种「远程副作用」必须让用户看得见
- * 有多少卡在用（列表里显示引用数），而不是悄悄改掉。
+ * 很久一版只做「新建 + 列表 + 删除」。理由是编辑正文会影响所有引用它的
+ * 角色卡：用户改一句、5 张卡的人设都变了，而这种副作用看不见。
  *
- * 所以本轮只做最必要的：能建、能看、能删（删时明确告知引用会被清理）。
- * 正文编辑在标签被真正用起来之后再加，并配「影响 N 张卡」的确认。
+ * 结果就是 `CharacterViewModel.updateTag` 零调用 —— 标签只能看不能改，
+ * 打错一个字只能删掉重建（还会连带清掉所有卡的引用）。这比「有副作用的
+ * 编辑」更糟。
+ *
+ * 所以现在补编辑，副作用用**三步可见化**处理，而不是靠禁止编辑：
+ *
+ *  1. 列表每行一直显示「N 张卡在用」，点「编辑」时能看到影响面；
+ *  2. 编辑弹窗里再写一次「修改会立即影响 N 张卡」；
+ *  3. 删除按钮的文案带后果（「删除（并从 N 张卡移除）」），与编辑形成对照 ——
+ *     用户能分清「改」和「删」的代价。
  */
 @Composable
 fun PromptTagsScreen(
@@ -55,11 +63,42 @@ fun PromptTagsScreen(
     /** 每个标签被多少张角色卡引用（key = tag id）。 */
     usageCounts: Map<String, Int>,
     onCreate: (name: String, content: String, type: PromptTagType) -> Unit,
+    /**
+     * 保存对已有标签的修改。
+     *
+     * 与 [onCreate] 分开而不是合成一个「upsert」：两者语义差很多 ——
+     * 新建会**复用内容相同**的旧标签（`createOrReuseTag`），而编辑必须
+     * 落到指定的那一条上。合成一个的话，编辑后内容恰好与另一条相同时
+     * 会被静默合并，用户看到的是「我改的这个没了」。
+     */
+    onUpdate: (PromptTag) -> Unit,
     onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var draftName by remember { mutableStateOf("") }
     var draftContent by remember { mutableStateOf("") }
+
+    // 正在编辑的标签 id。null = 没在编辑。存 id 而不是整个 tag：
+    // 列表在编辑期间可能因外部改动刷新，存整个对象会让弹窗显示过期内容。
+    var editingTagId by remember { mutableStateOf<String?>(null) }
+
+    // ── 编辑弹窗 ──
+    //
+    // 放在 SettingsList 之前渲染（Dialog 走独立 window，位置不影响层级）。
+    // `editingTagId` 换成对象后再交给弹窗：弹窗自己只负责「编辑一份草稿」，
+    // 不查库、不关心列表怎么刷新。
+    val editingTag = editingTagId?.let { id -> tags.firstOrNull { it.id == id } }
+    if (editingTag != null) {
+        EditTagDialog(
+            tag = editingTag,
+            usageCount = usageCounts[editingTag.id] ?: 0,
+            onDismiss = { editingTagId = null },
+            onSave = { updated ->
+                onUpdate(updated)
+                editingTagId = null
+            },
+        )
+    }
 
     SettingsList(
         modifier = modifier.fillMaxSize(),
@@ -152,6 +191,7 @@ fun PromptTagsScreen(
                 TagRow(
                     tag = tag,
                     usageCount = usageCounts[tag.id] ?: 0,
+                    onEdit = { editingTagId = tag.id },
                     onDelete = { onDelete(tag.id) },
                 )
             }
@@ -165,6 +205,7 @@ fun PromptTagsScreen(
 private fun TagRow(
     tag: PromptTag,
     usageCount: Int,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Card(modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
@@ -202,11 +243,105 @@ private fun TagRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
+                // 「编辑」放在「删除」左边：两个按钮都是对同一条标签的破坏性
+                // 操作，把轻的那个放前面，手指先碰到的是可撤销的。
+                TextButton(text = "编辑", onClick = onEdit)
                 TextButton(
                     // 文案带上后果，而不是干巴巴的「删除」。
                     text = if (usageCount > 0) "删除（并从 $usageCount 张卡移除）" else "删除",
                     onClick = onDelete,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 标签编辑弹窗。
+ *
+ * ## 为什么用 Dialog 而不是「把列表某一行变成输入框」
+ *
+ * 行内编辑会让列表在编辑期间高度跳变（多出一个多行输入框），而用户
+ * 正在盯着自己刚点的位置 —— 内容会从手指下面移走。弹一层则完全不改
+ * 列表布局，且「取消」有明确边界（关掉就恢复原样）。
+ *
+ * ## 关掉时丢弃草稿
+ *
+ * `draftName` / `draftContent` 用 `remember(tag.id)` 初始化：换成另一条
+ * 标签会重建状态，不会把上一条的草稿带过来。点「取消」不写回，
+ * 因为用户没点保存 —— 这与「行内编辑自动保存」是相反的取舍，
+ * 对影响多张卡的字段来说，显式保存更安全。
+ */
+@Composable
+private fun EditTagDialog(
+    tag: PromptTag,
+    usageCount: Int,
+    onDismiss: () -> Unit,
+    onSave: (PromptTag) -> Unit,
+) {
+    // key 用 tag.id：切换编辑对象时重建草稿，不残留上一条的内容。
+    var name by remember(tag.id) { mutableStateOf(tag.name) }
+    var content by remember(tag.id) { mutableStateOf(tag.promptContent) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(text = "编辑标签", style = MiuixTheme.textStyles.body1)
+                Spacer(Modifier.height(4.dp))
+
+                // 引用数必须在弹窗里再说一次：用户可能是从列表滚动中段
+                // 点进来的，那一行的「N 张卡在用」已经滚出视野了。
+                Text(
+                    text = if (usageCount > 0) {
+                        "这条标签正被 $usageCount 张角色卡引用。保存后它们的人设会立即变化。"
+                    } else {
+                        "还没有角色卡引用这条标签。"
+                    },
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = if (usageCount > 0) {
+                        MiuixTheme.colorScheme.primary
+                    } else {
+                        MiuixTheme.colorScheme.onSurfaceVariantSummary
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
+
+                TextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "标签名",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = content,
+                    onValueChange = { content = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "提示词内容",
+                    useLabelAsPlaceholder = true,
+                    minLines = 4,
+                    maxLines = 10,
+                )
+                Spacer(Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(text = "取消", onClick = onDismiss)
+                    Spacer(Modifier.padding(horizontal = 4.dp))
+                    TextButton(
+                        text = "保存",
+                        // 空内容禁用：`saveTag` 会把空名兜成「未命名标签」，
+                        // 但空正文的标签挂到卡上等于什么都没加，让它先别存。
+                        enabled = content.isNotBlank(),
+                        onClick = {
+                            onSave(tag.copy(name = name, promptContent = content))
+                        },
+                    )
+                }
             }
         }
     }
