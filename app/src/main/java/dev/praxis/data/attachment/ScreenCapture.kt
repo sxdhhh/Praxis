@@ -197,7 +197,18 @@ class ScreenCaptureService : Service() {
     private fun captureOnce(resultCode: Int, resultData: Intent) {
         val projectionManager =
             getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        val projection: MediaProjection = projectionManager.getMediaProjection(resultCode, resultData)
+        // getMediaProjection 在 API 33+ 的签名是 @Nullable：用户拒绝、
+        // 或 resultData 里的 token 已被消费过，都会返回 null。
+        // 直接当非空用会编不过（Kotlin 的 nullable 检查），
+        // 在 Java 侧则是运行期 NPE —— 两种都不要。
+        val projection: MediaProjection = projectionManager
+            .getMediaProjection(resultCode, resultData)
+            ?: run {
+                // 拿不到就按「抓帧失败」处理：置回结果让等待方醒过来，
+                // 而不是让协程永远挂在那里。
+                ScreenCapture.reset()
+                return
+            }
 
         val metrics = resources.displayMetrics
         val width = metrics.widthPixels

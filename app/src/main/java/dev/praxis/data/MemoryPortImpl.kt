@@ -68,7 +68,7 @@ class MemoryPortImpl(
             store.all(activeSpace())
                 .sortedByDescending { it.createdAt }
                 .take(limit)
-                .map { it.content },
+                .map { it.content }
         }.getOrDefault(emptyList())
 
     /**

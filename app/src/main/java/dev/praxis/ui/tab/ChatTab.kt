@@ -157,6 +157,14 @@ fun ChatTab(
 
     val state by viewModel.state.collectAsStateWithLifecycle()
 
+    // `LocalContext` 要在**所有使用者之前**取一次。
+    //
+    // 这个变量原来定义在下面附件面板那一段（约 296 行），但 TTS 那几行
+    // 在第 161 行就要用 —— 先使用后定义，Kotlin 报
+    //   Function invocation 'context(...)' expected
+    // 因为编译器把 `context` 解析成了别处的同名函数。
+    val context = androidx.compose.ui.platform.LocalContext.current
+
     // ---- 自动朗读（TTS）----
     //
     // ## 为什么用 DisposableEffect 管声命周期
@@ -293,7 +301,6 @@ fun ChatTab(
     // `ActivityResultContracts.GetContent` / `OpenDocument` 由系统提供
     // 选图/选文件界面，零额外依赖、自动处理存储权限（SAF 不需要
     // READ_EXTERNAL_STORAGE）。自建会引入权限申请与适配成本。
-    val context = androidx.compose.ui.platform.LocalContext.current
     val attachmentScope = rememberCoroutineScope()
     var attachmentPanelOpen by remember { mutableStateOf(false) }
 
@@ -399,6 +406,25 @@ fun ChatTab(
     // 它是「缩放到 1024 长边 + JPEG 85 + 控制在 1.2MB 内」的现成实现。
     val pickImageLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+    ) { uri ->
+        // GetContent 的回调给 Uri?：用户返回就是 null，属正常取消。
+        if (uri == null) {
+            attachmentPanelOpen = false
+            return@rememberLauncherForActivityResult
+        }
+        attachmentScope.launch {
+            val image = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                dev.praxis.data.chat.ChatImagePreparer.prepare(context, uri)
+            }
+            if (image != null) {
+                viewModel.addAttachment(image)
+            } else {
+                // prepare 返回 null = 读不出图（格式不支持 / 权限失效）。
+                viewModel.notifyImageUnreadable()
+            }
+            attachmentPanelOpen = false
+        }
+    }
 
     // ---- 拍照（系统相机，零新依赖）----
     //
@@ -506,22 +532,6 @@ fun ChatTab(
             }
             // 超时且没有任何结果：用户可能一直没点确认。不弹错 ——
             // 那是「还没决定」，不是失败。
-            attachmentPanelOpen = false
-        }
-    }
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        attachmentScope.launch {
-            val image = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                dev.praxis.data.chat.ChatImagePreparer.prepare(context, uri)
-            }
-            if (image != null) {
-                viewModel.addAttachment(image)
-            } else {
-                // 读不到不是静默丢弃：ChatScreen 有 4 秒提示机制，
-                // 「点了选图什么都没发生」是最难排查的用户反馈。
-                viewModel.notifyImageUnreadable()
-            }
             attachmentPanelOpen = false
         }
     }
