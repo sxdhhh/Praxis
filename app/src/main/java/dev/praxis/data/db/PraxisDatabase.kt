@@ -299,7 +299,7 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
                         "`createdAt` INTEGER NOT NULL, " +
                         "`lastUsedAt` INTEGER NOT NULL, " +
                         "`hitCount` INTEGER NOT NULL, " +
-                        "`spaceId` TEXT NOT NULL DEFAULT '')",
+                        "`spaceId` TEXT NOT NULL)",
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_memories_lastUsedAt` ON `memories` (`lastUsedAt`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_memories_createdAt` ON `memories` (`createdAt`)")

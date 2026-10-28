@@ -319,4 +319,26 @@ interface TerminalSessionPort {
      * 用于模型「看看现在屏幕上是什么」—— 判断一个交互式程序停在哪一步。
      */
     fun screen(sessionId: String, maxLines: Int = 60): String?
+
+    /**
+     * 调整会话窗口大小（行 × 列）。
+     *
+     * ## 为什么这件事不能省略（2026-10-29）
+     *
+     * PTY 的窗口大小是内核里的一份状态，程序靠 `ioctl(TIOCGWINSZ)` 读它来
+     * 决定画多少行、哪里折行。`forkpty` 只给一次初始值，之后**必须**由
+     * 前端在键盘弹出、旋转、分屏时重新告知 —— 否则 `vim` / `top` / `less`
+     * 会按 60×80 排版，而屏幕上实际只有半屏：表现为底部内容被切、
+     * 换行位置错、`top` 的表头与数据对不上。
+     *
+     * ## 为什么放在端口接口而不是让 UI 直接拿 Pty
+     *
+     * `feature:terminal` 是纯 UI 模块，它不该知道 `Pty`（那是 `:app` 的
+     * JNI 类）。加一个「告诉会话新尺寸」的能力，UI 就能在布局变化时调用，
+     * 而实现方（真 PTY / 管道降级）各自处理：真 PTY 走 ioctl，管道降级
+     * 直接返回 false（管道没有窗口概念）。
+     *
+     * @return 是否真的应用了（会话不存在、已关闭、或降级为管道时 false）
+     */
+    fun resize(sessionId: String, rows: Int, cols: Int): Boolean = false
 }

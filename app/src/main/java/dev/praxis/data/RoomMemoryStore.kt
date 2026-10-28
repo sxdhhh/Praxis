@@ -58,6 +58,13 @@ class RoomMemoryStore(
         createdAt = createdAt,
         lastUsedAt = lastUsedAt,
         hitCount = hitCount,
+        // ## 这一行不能漏
+        //
+        // 实体上存了 spaceId，但映射时不带过来，读出去的 MemoryItem
+        // 就是默认空串。后果不是崩溃，而是「多空间静默失效」：
+        // `MemoryRoute` 用 `groupingBy { it.spaceId }` 反推空间列表，
+        // 永远只能得到一组空串，界面上永远只有一个「默认」空间。
+        spaceId = spaceId,
     )
 
     private fun MemoryItem.toEntity(): MemoryEntity = MemoryEntity(
@@ -67,6 +74,8 @@ class RoomMemoryStore(
         createdAt = createdAt,
         lastUsedAt = lastUsedAt,
         hitCount = hitCount,
+        // 同上：不写这一行，插入的每条记忆都落到默认空间。
+        spaceId = spaceId,
     )
 
     private fun encodeTags(tags: List<String>): String =

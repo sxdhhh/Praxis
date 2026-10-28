@@ -678,6 +678,30 @@ fun ChatTab(
         toolNames = toolNames,
         disabledTools = disabledTools,
         onToggleTool = onToggleTool,
+        // ── 模型选择（ModelPill 弹窗的数据源）──────────────
+        //
+        // ## 为什么这三行必须传（2026-10-29）
+        //
+        // `ModelPill`（ChatSettingsBar.kt:606）在 `models` 为空时显示
+        // 「还没有模型，先去设置里填一个」。而 `ChatScreen` 的这个参数
+        // 有默认值 `emptyList()`，不传就能编译 —— 于是界面上永远
+        // 显那一句，哪怕设置里已经配好模型。
+        //
+        // 数据全在本地：`ModelSettings.model` 是逗号分隔的模型池，
+        // `modelIndex` 是池里选中的下标，`modelList` 是切好的列表。
+        models = modelSettings.modelList,
+        activeModelIndex = modelSettings.modelIndex,
+        onSelectModelIndex = { index ->
+            // 只写盘：`modelSettings` 是全局 DataStore 流，写完会回流到
+            // 这里重新组合，不需要额外改本地状态。
+            settingsScope.launch { settingsRepository.setModelIndex(index) },
+        },
+        // ── 已选图片可删 ────────────────────────────────
+        //
+        // `ChatViewModel.removeAttachment(index)` 一直存在（:768），
+        // `ChatScreen` 内部也已一路转发到输入栏（:1158），但这里不传
+        // 就是 null —— 用户选错图只能全清或直接发出去。
+        onRemoveAttachment = viewModel::removeAttachment,
         // ── 附件面板（加号）────────────────────────────────
         //
         // 四个参数一起传：少任何一个，加号要么不显示（onOpenAttachmentPanel

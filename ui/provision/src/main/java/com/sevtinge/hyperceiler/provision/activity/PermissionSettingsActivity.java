@@ -24,6 +24,7 @@ import androidx.fragment.app.Fragment;
 
 import com.sevtinge.hyperceiler.provision.R;
 import com.sevtinge.hyperceiler.provision.fragment.PermissionSettingsFragment;
+import com.sevtinge.hyperceiler.provision.widget.PermissionWarningSheet;
 
 public class PermissionSettingsActivity extends BaseActivity {
 
@@ -81,12 +82,23 @@ public class PermissionSettingsActivity extends BaseActivity {
     @Override
     public void onNextAminStart() {
         if (!mPermissionsAllGranted()) {
-            new android.app.AlertDialog.Builder(this)
-                    .setTitle(R.string.provision_permission_warning_title)
-                    .setMessage(R.string.provision_permission_warning_desc)
-                    .setPositiveButton(R.string.provision_permission_warning_continue,
-                            (d, w) -> finishStep())
-                    .setNegativeButton(R.string.provision_permission_warning_back, null)
+            // ## 为什么不是 AlertDialog（2026-10-29）
+            //
+            // 原来是 `android.app.AlertDialog.Builder`：在 miuix 引导页里它是
+            // 一块白色方角弹窗，与前后页（圆角、大内边距、同字体、同主题色）
+            // 完全不搭。而这是用户在引导里看到的**第一个**弹窗。
+            //
+            // 换成 miuix 的 BottomSheetModal（与协议页
+            // `TermsAndStatementBottomSheet` 同容器），见 `widget/PermissionWarningSheet`。
+            //
+            // ## 为什么不复用同一个实例
+            //
+            // `BottomSheetModal` 一旦 dismiss 就不能再 show（内部 View 已被移除）。
+            // 缓存实例会让「第二次点下一步」什么也不发生，所以每次都 new。
+            new PermissionWarningSheet(this)
+                    .onContinue(this::finishStep)
+                    // 「去授予」不做事：用户就是不授，停在当前页即可。
+                    .onBack(() -> {})
                     .show();
             return;
         }

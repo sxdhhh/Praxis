@@ -245,6 +245,17 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+
+    // ## 把 `app/schemas` 挂进 androidTest 的 assets（2026-10-29，G2）
+    //
+    // `MigrationTestHelper` 要靠**上一版本导出的 schema JSON** 建出 vN 的库，
+    // 再跑迁移并校验结果与当前实体是否一致。不挂 assets 时它在运行时报
+    // 「找不到 schema 文件」，而那个报错完全指不到「你忘了挂 assets」。
+    //
+    // 这也是本项目第一次能做迁移测试：之前 7 个 schema
+    //（1/2/3/4/5/7.json）一直在导出，但没有任何代码用过它们。
+    // 缺 6.json 不影响 —— 测试从 7 升到 8。
+    sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
 }
 
 // S5：Room 导出 schema 到 app/schemas，供后续版本写迁移与做迁移测试。
@@ -252,9 +263,6 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
-// 注：暂不把 app/schemas 挂到 androidTest 的 assets。
-// 目前没有迁移测试，挂一个尚不存在的目录只有风险没有收益；
-// 等第一个 MigrationTest 落地时再按 Room 官方模板挂上。
 
 dependencies {
     implementation(project(":core:model"))
@@ -283,6 +291,10 @@ dependencies {
     implementation(project(":ui:provision"))
 
     implementation(libs.androidx.core.ktx)
+    // Kali rootfs 是 .tar.xz；Android 的 toybox `-J` 只是转发外部 xz 命令
+    // （实测 `tar -cJf` 报 "exec xz: No such file or directory"，exit=1），
+    // 所以解压必须在 Java 侧完成。
+    implementation(libs.xz)
     implementation(libs.androidx.activity.compose)
     // 浮层返回键链路：`MainActivity` 直接 provide
     // `LocalNavigationEventDispatcherOwner`（miuix 下拉/弹窗的硬依赖）。
@@ -343,4 +355,13 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    // 迁移测试（G2）。
+    //
+    // 为什么必须是 androidTest 而不是 test：`MigrationTestHelper` 要用
+    // 真实 SQLite（androidx.sqlite 的实现），JVM 单测里的 SQLite 是假的，
+    // 校验不到 Room 生成的建表语句与实际 schema 是否一致 ——
+    // 而「不一致」正是启动即崩的成因。
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.room.testing)
 }

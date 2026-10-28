@@ -47,6 +47,22 @@ class PraxisApplication : Application() {
         PraxisLogger.init(this)
         Timber.plant(PraxisTimberTree(resolveCallerTag = BuildConfig.DEBUG))
 
+        // ## 清理上次遗留的拍照临时文件（2026-10-29）
+        //
+        // `CameraCapture.cleanStale` 早就写好了（超过 24h 的删掉），
+        // 但全仓**没有任何调用点** —— 等于没写。后果：用户拍照后没发送就退出，
+        // 那张 jpg 会一直躺在 `cache/praxis_camera/`。系统只在空间不足时
+        // 才回收 cache，正常能存很久，越攒越多。
+        //
+        // 为什么放在 Application.onCreate 而不是「拍照入口顺手清」：
+        // 清的是**历史遗留**，与本次拍照无关。放在这里每次冷启动跑一次，
+        // 不依赖任何调用方记得；且它在 IO 线程、只列一个目录，代价可忽略。
+        appScope.launch {
+            runCatching {
+                dev.praxis.data.attachment.CameraCapture.cleanStale(this@PraxisApplication)
+            }
+        }
+
         // 把 UI 诊断层接到真实日志（2026-10-22）。
         //
         // `UiDiagnostics` 本身不依赖日志库（它在 ui:design，不该知道落盘），

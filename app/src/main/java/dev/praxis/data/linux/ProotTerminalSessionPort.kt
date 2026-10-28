@@ -96,6 +96,20 @@ class ProotTerminalSessionPort(
      */
     private val DEAD_MARKER = "\u0000PRAXIS_SESSION_DEAD\u0000"
 
+    /**
+     * 「回车」标记。
+     *
+     * ## 为什么需要一个单独标记而不是直接传 `"\r"`
+     *
+     * [ScreenTap] 与 `TerminalChunk` 走的是「行」语义，`"\r"` 混在
+     * 文本行里很容易被下游再次 `trim()` 掉。用一个不可能出现在终端输出里的
+     * 私有标记，渲染层才能明确区分「这一行是回车」与「这一行内容里带反斜杠 r」。
+     */
+    private val CR_MARKER = "\u0000PRAXIS_CR\u0000"
+
+    /** 无行边界时最长积多少字符就先进一版，避免长时间无输出。 */
+    private const val PARTIAL_FLUSH_CHARS = 2048
+
     private val live = ConcurrentHashMap<String, Live>()
     private val counter = AtomicInteger(1)
 
@@ -274,11 +288,28 @@ class ProotTerminalSessionPort(
         val timeout = if (command.timeoutSeconds > 0) command.timeoutSeconds else defaultTimeout
 
         // 哨兵里带上「写 cwd」：同一次往返顺手刷新目录，省掉一条额外命令。
+        //
+        // ## 为什么先存 `$?` 再跑 pwd（2026-10-29 修）
+        //
+        // 旧写法是：
+        //
+        // ```
+        // <用户命令> ; pwd > /tmp/.praxis_cwd 2>/dev/null ; echo "SENTINEL:$?"
+        // ```
+        //
+        // `$?` 只记住**紧邻的前一条**命令的退出码，而中间夹了 `pwd > ...`。
+        // 于是哨兵拿到的永远是 `pwd` 的退出码（基本恒为 0）——
+        // 用户跑 `apt install 不存在的包`、`cat 不存在`，界面一律报成功，
+        // 模型也就照着「成功了」继续往下推。
+        //
+        // 修法：命令一结束立刻把 `$?` 落进变量，后面怎么折腾都不影响它。
+        //
+        // Kotlin 字符串里的 `$` 会当模板插值，所以是 `\$?` / `\$__praxis_rc`。
         val script = buildString {
             append(command.command)
-            append(" ; ")
+            append(" ; __praxis_rc=\$? ; ")
             append("pwd > /tmp/.praxis_cwd 2>/dev/null ; ")
-            append("echo \"$SENTINEL:\$?\"")
+            append("echo \"$SENTINEL:\$__praxis_rc\"")
             append("\n")
         }
 
@@ -361,6 +392,20 @@ class ProotTerminalSessionPort(
             item.writer.flush()
             true
         }.getOrDefault(false)
+    }
+
+    /**
+     * 调 `ioctl(TIOCSWINSZ)` 告诉内核新尺寸。
+     *
+     * 只有真 PTY 能调（`pty != null`）。管道降级的会话没有窗口概念，
+     * 返回 false —— 不假装成功，否则 UI 会以为设置生效了。
+     */
+    override fun resize(sessionId: String, rows: Int, cols: Int): Boolean {
+        val item = live[sessionId] ?: return false
+        if (item.info.closed) return false
+        val pty = item.pty ?: return false
+        if (rows <= 0 || cols <= 0) return false
+        return pty.resize(rows, cols)
     }
 
     override fun screen(sessionId: String, maxLines: Int): String? {
@@ -452,12 +497,55 @@ class ProotTerminalSessionPort(
     /** 后台泵：把输出流逐行送进 [ScreenTap]。 */
     private fun pumpStream(input: java.io.InputStream, tap: ScreenTap) {
         runCatching {
-            BufferedReader(InputStreamReader(input)).use { r ->
-                while (true) {
-                    val line = r.readLine() ?: break
-                    tap.offer(line)
+            // ## 为什么不再用 BufferedReader.readLine()（2026-10-29 修）
+            //
+            // 旧实现是 `while (true) { val line = r.readLine() ?: break; tap.offer(line) }`，
+            // 有两个真问题：
+            //
+            // 1. **无换行就不返回**。`readLine()` 必须遇到 `\n` / `\r\n`
+            //    才交出数据，而进度条（`wget` / `apt` / `pip`）、不带换行的
+            //    `printf`、`top` 的首次全屏刷新全都不带换行 —— 这些输出
+            //    会**卡在 BufferedReader 8KB 缓冲区里**，一直到进程结束或
+            //    缓冲满才突然涌出。用户看到的是「命令在跑，屏幕不动」。
+            // 2. **吃掉 `\r`**。`readLine()` 把 `\r` 当行结束符并丢弃，
+            //    而进度条原地刷新正是靠「回到行首再覆盖」（`进度 30%\r进度 40%`）。
+            //    丢掉 `\r` 之后，原本应该覆盖的一行会变成新的一行，
+            //    屏幕上堆出几百行垃圾。
+            //
+            // 现在改成按字节读、`\n` 与 `\r` **都当行边界**，并且两者
+            // 都作为独立行交给 [ScreenTap]（不丢弃）—— 下游的
+            // `TerminalBuffer` 才知道「这一行要回车重写」而不是「新起一行」。
+            val buffer = ByteArray(4096)
+            val line = StringBuilder()
+            while (true) {
+                val count = input.read(buffer)
+                if (count <= 0) break
+                var i = 0
+                while (i < count) {
+                    val b = buffer[i].toInt() and 0xFF
+                    when (b) {
+                        0x0A -> { // LF
+                            tap.offer(line.toString())
+                            line.setLength(0)
+                        }
+                        0x0D -> { // CR：先交出当前内容，再单独交一个空行表示「回车」
+                            tap.offer(line.toString())
+                            line.setLength(0)
+                            tap.offer(CR_MARKER)
+                        }
+                        else -> line.append(b.toChar())
+                    }
+                    i++
+                }
+                // 缓冲里可能一个行边界都没有（比如一整块进度条文字），
+                // 此时先进一版，避免用户长时间看不到东西；
+                // 行号不丢：`line` 继续累积，下一次遇到边界时一起交。
+                if (line.length >= PARTIAL_FLUSH_CHARS) {
+                    tap.offer(line.toString())
+                    line.setLength(0)
                 }
             }
+            if (line.isNotEmpty()) tap.offer(line.toString())
         }
     }
 
@@ -563,7 +651,23 @@ private class ScreenTap {
      */
     private val lock: Any = java.lang.Object()
 
-    /** 待读取的行（哨兵协议消费）。 */
+    /**
+     * 待读取的行（哨兵协议消费）。
+     *
+     * ## 为什么它也必须有上限（2026-10-29 修）
+     *
+     * [lines] 早就限了 [MAX_LINES]，但这个队列**漏了**。两者职责不同：
+     * `lines` 是屏幕快照（永远有读者），`pending` 是给
+     * [readUntilSentinel] 的顺序消费队列。
+     *
+     * 一旦**没有**协程在消费（用户在终端页看输出、模型没在跑命令；
+     * 或命令已超时返回、不再有人 poll），泵线程依旧在无限 `offer`。
+     * `yes` 每秒几十万行，一分钟就能把堆吃光 —— 这是真 OOM，不是泄漏。
+     *
+     * 上限取 [MAX_LINES] 的两倍：正常情况下 `readUntilSentinel` 会立刻
+     * 消费，永远撞不到上限；真撞到时说明没人读，丢掉最旧的才对
+     * （保留最新的，因为它们才可能包含哨兵）。
+     */
     private val pending = ArrayDeque<String>()
 
     fun offer(line: String) {
@@ -571,6 +675,8 @@ private class ScreenTap {
             lines.addLast(line)
             while (lines.size > MAX_LINES) lines.removeFirst()
             pending.addLast(line)
+            // 见 pending 的 KDoc：无消费者时会无限涨。
+            while (pending.size > MAX_LINES * 2) pending.removeFirst()
             (lock as java.lang.Object).notifyAll()
         }
     }

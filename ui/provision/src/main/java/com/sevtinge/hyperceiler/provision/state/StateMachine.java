@@ -11,7 +11,6 @@ import androidx.annotation.Nullable;
 
 import com.sevtinge.hyperceiler.common.log.AndroidLog;
 import com.sevtinge.hyperceiler.provision.R;
-import com.sevtinge.hyperceiler.provision.activity.BasicSettingsActivity;
 import com.sevtinge.hyperceiler.provision.activity.CongratulationActivity;
 import com.sevtinge.hyperceiler.provision.activity.DefaultActivity;
 import com.sevtinge.hyperceiler.provision.activity.PermissionSettingsActivity;
@@ -33,7 +32,6 @@ public class StateMachine {
     private State mCurrentState;
     private State mPermissionState;
     private State mTermsAndStatementState;
-    private State mBasicState;
     private CongratulationState mCompleteState;
 
 
@@ -57,19 +55,17 @@ public class StateMachine {
         mCurrentState = new StartupState();
         mPermissionState = new PermissionState().setTargetClass(PermissionSettingsActivity.class);
         mTermsAndStatementState = new TermsAndStatementState().setTargetClass(TermsAndStatementActivity.class);
-        mBasicState = new BasicState().setTargetClass(BasicSettingsActivity.class);
         mCompleteState = new CongratulationState();
         mCompleteState.setTargetClass(CongratulationActivity.class);
 
         addState(mCurrentState);
         addState(mPermissionState);
         addState(mTermsAndStatementState);
-        addState(mBasicState);
         addState(mCompleteState);
 
-        // [Praxis] 流程顺序对齐 Operit：协议在最前，权限其次。
+        // [Praxis] 流程：Startup -> Terms -> Permission -> Completion。
         //
-        // ## 为什么要改这个顺序
+        // ## 为什么协议在权限之前
         //
         // HyperCeiler 原顺序是 Startup -> Permission -> Terms -> Basic -> Completion，
         // 即「先授权限，再看协议」。Operit 是「先看协议，再授权限」
@@ -79,13 +75,27 @@ public class StateMachine {
         // 两者差别不只是顺序：Operit 的语义是「不签协议，程序连权限检测都不做」。
         // 本项目按用户要求还原 Operit 流程，所以 Terms 提到 Permission 之前。
         //
-        // 注意 `mTermsAndStatementState` 与 `mPermissionState` 的**变量声明顺序
-        // 不变**（仍按权限在前声明），只有 `setNextState` 的链接顺序变了 ——
-        // 这样 restoreState() 的 getStateInfo(String) 分支不受影响。
+        // ## 为什么没有 Basic 页（2026-10-29 摘除）
+        //
+        // HyperCeiler 的 Basic 页承载的是它自己的 Xposed 模块配置
+        // （隐藏桌面图标、MIUI 图标样式、LSPosed 作用域、应用语言），
+        // 前四项对 Praxis 没有对应概念。而且该页 `PrefsConfigurator.setup()`
+        // 会读 `PrefsBridge`，而 `PrefsBridge` 在本进程从未初始化 ——
+        // 点进去必崩（IllegalStateException）。
+        //
+        // 与其补一个只为了让崩溃消失的初始化、再留一页五项里四项无意义的设置，
+        // 直接摘掉这一环：Permission 直接连 Completion。
+        //
+        // ## 为什么声明顺序不变
+        //
+        // `mTermsAndStatementState` 与 `mPermissionState` 的变量声明顺序仍是
+        // 「权限在前、协议在后」，只有 `setNextState` 的链接顺序是协议在前。
+        // 老设备上 `pref_oobe_state` 里可能残留名为 `BasicState` 的存档，
+        // `restoreState()` 对 `getStateInfo(state) == null` 已有跳过分支
+        // （见 :319 起的 `if (getStateInfo(state) != null)`），所以不会崩。
         setNextState(mCurrentState, mTermsAndStatementState);
         setNextState(mTermsAndStatementState, mPermissionState);
-        setNextState(mPermissionState, mBasicState);
-        setNextState(mBasicState, mCompleteState);
+        setNextState(mPermissionState, mCompleteState);
     }
 
     private void addState(State state) {
@@ -111,9 +121,6 @@ public class StateMachine {
         }
         if (TermsAndStatementState.class.getSimpleName().equals(state)) {
             return mStates.get(TermsAndStatementState.class.hashCode());
-        }
-        if (BasicState.class.getSimpleName().equals(state)) {
-            return mStates.get(BasicState.class.hashCode());
         }
         if (CongratulationState.class.getSimpleName().equals(state)) {
             return mStates.get(CongratulationState.class.hashCode());

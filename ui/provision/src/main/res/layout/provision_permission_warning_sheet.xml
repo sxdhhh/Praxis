@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  [Praxis] 权限不全时的警告弹窗内容。
+
+  原来用 `android.app.AlertDialog.Builder`（系统原生），在 miuix 引导页里
+  是块完全不搭调的白色方角弹窗。这里换成 miuix 的 `BottomSheetModal`，
+  与协议页的 `TermsAndStatementBottomSheet` 同一套容器。
+
+  ## 为什么不给 Button 加 style
+
+  `fan.miuix:bottomsheet` 的 res 里只有 BottomSheet 自己的主题
+  （`Theme.Miuix.BottomSheetDialog.*` / `Widget.Miuix.BottomSheet.*`），
+  **没有任何 Button 样式**。写 `?attr/` 式的按钮样式会因
+  找不到 attr 直接在 aapt2 阶段报错。
+
+  所以按钮用主题默认的 Button，只靠 `background="@null"` + 文字色
+  跟随主题；正文/标题复用本模块已有的
+  `ProvisionServiceTitleTextStyle` / `ProvisionListSecondaryTextStyle`
+  （styles.xml:38/51），与权限页的其他文字同源。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="24dp">
+
+    <TextView
+        android:id="@+id/permission_warning_title"
+        style="@style/ProvisionServiceTitleTextStyle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <TextView
+        android:id="@+id/permission_warning_desc"
+        style="@style/ProvisionListSecondaryTextStyle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:lineSpacingExtra="4dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:orientation="horizontal">
+
+        <!-- 取消在左、确认在右，weight 平分：长中文在窄屏上不会被挤成两行。 -->
+        <Button
+            android:id="@+id/permission_warning_back"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:background="@null"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/permission_warning_continue"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:background="@null"
+            android:textSize="15sp" />
+    </LinearLayout>
+</LinearLayout>

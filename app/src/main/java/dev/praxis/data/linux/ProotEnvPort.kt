@@ -716,9 +716,45 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
         format: TarFormat,
         onLine: (String) -> Unit,
     ): Int {
+        // ── xz 预解：由 Java 完成，不依赖设备上的 xz 命令（2026-10-29 修）──
+        //
+        // ## 为什么必须有这一步
+        //
+        // `runTar` 对 [TarFormat.Xz] 用的是 `tar -xJopf`。而 Android 的
+        // toybox 里 `J` **只是个转发器**，它 exec 外部 `xz`：
+        //
+        // ```
+        // $ toybox tar -cJf t.tar.xz a.txt
+        // tar: exec xz: No such file or directory      exit=1
+        // $ toybox tar -xJopf t.tar.xz                  exit=127
+        // $ toybox tar -czf t.tar.gz a.txt              exit=0   ← gzip 是内建
+        // $ which xz unxz xzcat                          （全空）
+        // ```
+        //
+        // 所以 `.tar.xz` 在本设备上**永远解不开** —— 这正 Kali 装不上的根因。
+        // `.tar.gz` 不出问题只是因为 gzip 在 toybox 里是内建实现。
+        //
+        // 修法：先用 `org.tukaani:xz`（纯 Java，无 native）把它解成裸 `.tar`，
+        // 再把 `format` 换成 [TarFormat.Raw] 交给后续流程。这样：
+        //  - 设备上没有任何外部命令依赖；
+        //  - 硬链接探测 / 排除 / 补副本那套逻辑（对 Raw 已实现）原样复用；
+        //  - [TarFormat] 的语义不变（它仍表示「源文件格式」）。
+        var working = tarball
+        var effectiveFormat = format
+        if (format == TarFormat.Xz) {
+            onLine("检测到 xz 镜像，正在用内置解码器解压一层（不依赖系统 xz 命令）…")
+            val raw = decompressXz(tarball, onLine)
+            if (raw == null) {
+                onLine("xz 解压失败：镜像损坏或不是合法的 xz 流。")
+                return -1
+            }
+            working = raw
+            effectiveFormat = TarFormat.Raw
+        }
+
         // ① 先问 tar 有哪些硬链接条目。用同一次探测顺带拿到「这份镜像有没有」，
         //    没有就完全走原路径，不多付任何代价。
-        val linkEntries = listHardLinkEntries(tarball, format, onLine)
+        val linkEntries = listHardLinkEntries(working, effectiveFormat, onLine)
         if (linkEntries.isEmpty()) {
             // ## 必须用具名参数 `onLine =`
             //
@@ -727,7 +763,7 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
             // 塞进 `excludes` 槽位，编译期报的却是「No value passed for
             // parameter 'onLine'」—— 错误信息指向缺失参数，而真实错因是
             // 第 4 个位置被占。这类报错极易误判成「忘了传 onLine」。
-            return runTar(tarball, target, format, onLine = onLine).exitCode
+            return runTar(working, target, effectiveFormat, onLine = onLine).exitCode
         }
 
         // ② 有硬链接：排除它们再解，避开 SELinux 的 link 限制。
@@ -737,9 +773,9 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
                 "系统不允许应用创建硬链接（SELinux 拒绝 link），这与镜像本身无关。",
         )
         val exit = runTar(
-            tarball = tarball,
+            tarball = working,
             target = target,
-            format = format,
+            format = effectiveFormat,
             excludes = linkEntries.map { it.linkName },
             onLine = onLine,
         ).exitCode
@@ -749,6 +785,54 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
         //    但必须报出来 —— 否则用户会在容器里遇到「perl 找不到」且毫无线索。
         materializeLinks(target, linkEntries, onLine)
         return 0
+    }
+
+    /**
+     * 用纯 Java 把 `.xz` 解成裸 `.tar`，返回临时文件；失败返回 null。
+     *
+     * ## 为什么不用设备上的 xz
+     *
+     * Android 没有 `xz`（实测 `which xz unxz xzcat` 全空，toybox 工具列表里
+     * 也只有 `tar`）。toybox 的 `-J` 只是 `exec xz`，因此必然失败。
+     * `org.tukaani:xz` 是纯 Java 实现（约 120KB，无 native 库），与设备无关。
+     *
+     * ## 输出位置
+     *
+     * 放在**源文件同目录**，名为 `<原名>.praxis-raw.tar`。理由：
+     *  - 同目录保证同一文件系统，后续不会因跨设备拷贝失败；
+     *  - 名字里带 `.praxis-raw` 便于异常退出后人工识别与清理，
+     *    也不会被「按 *.tar.xz 找镜像」的逻辑误当成源文件。
+     *
+     * ## 失败时清理
+     *
+     * 解到一半失败会留一个残缺 tar。必须删掉：下一步 `runTar` 会把它当
+     * 合法输入去 `listHardLinkEntries`，报出来的错会指向「tar 格式不对」，
+     * 而不是「xz 解压失败」—— 排查方向直接跑偏。
+     */
+    private fun decompressXz(source: File, onLine: (String) -> Unit): File? {
+        val out = File(source.parentFile, source.name + ".praxis-raw.tar")
+        return runCatching {
+            org.tukaani.xz.XZInputStream(source.inputStream().buffered()).use { input ->
+                out.outputStream().buffered().use { sink ->
+                    val buffer = ByteArray(64 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val n = input.read(buffer)
+                        if (n <= 0) break
+                        sink.write(buffer, 0, n)
+                        total += n
+                    }
+                    sink.flush()
+                    onLine("xz 解压完成：${total / (1024 * 1024)} MB")
+                }
+            }
+            onLine("已得到裸 tar：${out.name}")
+            out
+        }.getOrElse { e ->
+            onLine("xz 解压异常：${e::class.java.simpleName} ${e.message ?: ""}")
+            runCatching { out.delete() }
+            null
+        }
     }
 
     /**

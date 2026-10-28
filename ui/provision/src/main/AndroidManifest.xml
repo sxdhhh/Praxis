@@ -50,10 +50,6 @@
             android:exported="true"
             android:theme="@style/ProvisionTheme" />
 
-        <activity
-            android:name=".activity.BasicSettingsActivity"
-            android:exported="true"
-            android:theme="@style/ProvisionTheme" />
 
         <activity
             android:name=".activity.CongratulationActivity"

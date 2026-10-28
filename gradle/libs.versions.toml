@@ -61,9 +61,17 @@ okhttp = "4.12.0"
 junit = "4.13.2"
 kyantBackdrop = "2.0.1"
 kyantShapes = "1.2.1"
+# XZ：Kali rootfs 是 .tar.xz，而 Android 的 toybox `-J` 只是转发外部
+# `xz` 命令（系统里没有）。用纯 Java 实现。
+xz = "1.10"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+# 迁移测试（G2）：room-testing 提供 MigrationTestHelper，需要在 androidTest 里跑真实 SQLite。
+androidx-junit = { module = "androidx.test.ext:junit", version = "1.2.1" }
+room-testing = { module = "androidx.room:room-testing", version.ref = "room" }
+# 纯 Java XZ 解码（无 native，~120KB）。用于解 Kali 的 .tar.xz。
+xz = { module = "org.tukaani:xz", version.ref = "xz" }
 # HyperCeiler 引导链（`:ui:provision`）直接使用的四个 androidx 库。
 #
 # 版本对齐 `fan.miuix:1.0.13.0` 的 pom 要求（pom 里写死的传递版本）：
