@@ -52,8 +52,38 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      # 不用 android-actions/setup-android@v3。
+      #
+      # 它在 v3 里默认执行 `sdkmanager tools`（安装旧版 SDK Tools 包），
+      # 而该包已从 Google 的 repository 里下架，实测报：
+      #   Warning: Failed to find package 'tools'
+      #   Error: sdkmanager failed with exit code 1
+      # 整个 job 在第 4 步就挂了，后面全 skipped。
+      #
+      # ubuntu-latest runner 本身**预装** Android SDK
+      # （路径 /usr/local/lib/android/sdk，含 build-tools、platform-tools、
+      # platforms）。本项目 compileSdk=37，而预装的是 android-35/36 ——
+      # 但 AGP 会自动下载缺失的 platform（前提是 licenses 已接受），
+      # 所以下面用 sdkmanager 只补 license 与指定 platform，不做全量升级。
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "SDK 目录: $SDK"
+          ls "$SDK" || true
+          # 接受全部 license，否则 AGP 下载 platform 时会卡在 "not accepted"。
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || \
+            yes | "$SDK/cmdline-tools/16.0/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          # 显式装 compileSdk=37 对应的 platform（build-tools 用已有的最新版）。
+          SDKMGR=$(ls -d "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
+          if [ -n "$SDKMGR" ]; then
+            "$SDKMGR" "platforms;android-37" > /dev/null 2>&1 || \
+              echo "::warning::android-37 装不上，交给 AGP 自动下载"
+          fi
+          echo "platforms:"; ls "$SDK/platforms" || true
+          echo "build-tools:"; ls "$SDK/build-tools" || true
 
       - name: Gradle cache
         uses: actions/cache@v4
@@ -72,6 +102,35 @@ jobs:
       # 不写的话 AGP 报 "SDK location not found"。
       - name: Write local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+      # 覆盖 gradle.properties 里针对**本机内存紧张**做的调优。
+      #
+      # 仓库里的 gradle.properties 是给开发机用的：-Xmx2g、
+      # kotlin.compiler.execution.strategy=in-process、max-workers=8。
+      # 那些设置的唯一目的是「避免被 LMK 杀掉」，代价是慢。
+      # GitHub runner 有 16G 内存、4 核、独立机器，不需要这些妥协：
+      #
+      # - 堆提到 4g：Compose 编译器插件与 KSP 在 2g 下会频繁 GC
+      # - kotlin 改回 daemon：in-process 让编译与配置共用同一个堆，
+      #   在 4g 下反而是瓶颈
+      # - max-workers 按 runner 核数（4）设，比 8 更合适
+      #
+      # 用 ~/.gradle/gradle.properties 而不是改仓库文件：
+      # user home 的 properties 优先级高于项目目录，且不影响本地开发。
+      - name: Tune Gradle for CI
+        run: |
+          mkdir -p ~/.gradle
+          cat > ~/.gradle/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          org.gradle.max-workers=4
+          org.gradle.vfs.watch=true
+          kotlin.compiler.execution.strategy=daemon
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          EOF
+          cat ~/.gradle/gradle.properties
 
       # 只跑 lint 与编译，不跑测试：本仓库没有 instrumentation 测试，
       # 单元测试需要额外配置（见各模块 build.gradle.kts 的 testImplementation）。
