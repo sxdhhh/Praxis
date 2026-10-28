@@ -17,4 +17,6 @@
   ~
   ~ Copyright (C) 2023-2026 HyperCeiler Contributions
   --><resources>
-    </resources>
+    <string name="provision_back_description">Indietro</string>
+    <string name="provision_start_content_description">Avvia</string>
+</resources>
