@@ -252,9 +252,15 @@ class MainActivity : ComponentActivity() {
             // 走到这里两种可能：读到真实设置，或超时兜底。
             // 兜底时 `themeLoaded` 也要置上，否则 splash 不会撤。
             themeLoaded = true
-            val resolved = themeOrNull ?: ReadyState(
-                theme = ThemeSettings(),
-            )
+            // `themeOrNull` 是 `ThemeSettings?`（见上面 themeStateFlow 的 map）。
+            //
+            // 这里曾写成 `themeOrNull ?: ReadyState(theme = ThemeSettings())`，
+            // 是删旧引导页时漏改的：那时 Flow 元素类型是 `ReadyState?`，
+            // 兜底也要给 ReadyState。现在 ReadyState 只剩 theme 一个字段、
+            // 已无意义，Flow 也改成直出 ThemeSettings，两边对不上 ——
+            // `?:` 的公共父类型退化成 Any，于是 `resolved.theme` 报
+            // Unresolved reference 'theme' on receiver of type 'Any'。
+            val resolved: ThemeSettings = themeOrNull ?: ThemeSettings()
 
             CompositionLocalProvider(
                 LocalNavigationEventDispatcherOwner provides navigationEventOwner,
