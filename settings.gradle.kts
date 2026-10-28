@@ -22,7 +22,13 @@ dependencyResolutionManagement {
         // CI 没有凭证，远程解析必然失败 —— 所以 AAR 直接入库。
         //
         // 见 `third_party/miuix/build.gradle.kts` 与 `third_party/maven/`。
-        maven { setUrl(rootProject.layout.projectDirectory.dir("third_party/maven")) }
+        //
+        // 注意这里**不能用 `rootProject`**：`settings.gradle.kts` 求值时
+        // rootProject 还没建出来（Gradle 的初始化顺序是
+        // settings → project），引用它会报
+        // `Unresolved reference 'layout'`。
+        // settings 脚本里代表仓库根目录的是 `rootDir`（File 类型）。
+        maven { setUrl(File(rootDir, "third_party/maven")) }
         google()
         mavenCentral()
         maven { setUrl("https://jitpack.io") }
