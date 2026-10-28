@@ -1,6 +1,7 @@
 package dev.praxis
 
 import android.app.Application
+import android.content.ComponentCallbacks2
 import dev.praxis.core.data.log.PraxisLogger
 import dev.praxis.core.data.log.PraxisTimberTree
 import dev.praxis.di.appModule
@@ -188,25 +189,26 @@ class PraxisApplication : Application() {
      */
     override fun onLowMemory() {
         super.onLowMemory()
-        onTrimMemory(TRIM_MEMORY_COMPLETE_LEVEL)
+        onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
     }
 
     companion object {
         /**
-         * 清缓存的最低 trim level。
+         * 清缓存的最低 trim level：`TRIM_MEMORY_UI_HIDDEN`。
          *
-         * `TRIM_MEMORY_UI_HIDDEN` = 20：界面已不可见，此时清缓存零代价。
-         * 更低的值代表「还在前台但内存紧」，那些留给轮询判定去处理。
-         */
-        private const val TRIM_CACHE_THRESHOLD = 20
-
-        /**
-         * `ComponentCallbacks2.TRIM_MEMORY_COMPLETE` 的数值。
+         * 语义见常量名：界面已不可见，此时清缓存零代价。更低的值代表
+         * 「还在前台但内存紧」，那些留给轮询判定去处理。
          *
-         * 直接写字面量而不是引用常量：`onLowMemory` 是废弃 API，
-         * 语义上等价于「进程即将被杀」，用 COMPLETE 的数值最贴近。
+         * ## 为什么直接引用常量而不是写 20（2026-10-29）
+         *
+         * 原来写的是字面量 20 且注释里说明了它等于 UI_HIDDEN，功能正确。
+         * 但 lint 的 `WrongConstant` 检查要求「传给标注了 `@IntDef` 的参数
+         * 必须是该 IntDef 的常量或其字面量」—— 一个自定义的 `const val`
+         * 既不是常量引用也不是字面量，于是整条链被报成 error。
+         * 直接引用真实常量既让 lint 满足，也让「20 是什么意思」不再需要
+         * 靠注释解释。
          */
-        private const val TRIM_MEMORY_COMPLETE_LEVEL = 80
+        private val TRIM_CACHE_THRESHOLD = ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
 
         /**
          * 当前的内存监控实例（`onTrimMemory` 要用）。
