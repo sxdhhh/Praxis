@@ -1618,8 +1618,17 @@ private fun ChatInputBar(
                         strokeWidth = 1.6.dp,
                     )
                     Spacer(Modifier.width(8.dp))
+                    // ## 正在生成工具参数时显示实时字数（2026-10-29）
+                    //
+                    // 这段时间 `stage` 仍是 Receiving（模型在产出，工具还没跑），
+                    // 但正文一个字节都没有 —— 界面上只有光标，像卡死。
+                    // 上游（Operit）的做法是显示「工具名 + 已接收字符数」，
+                    // 这里用 `toolDraft.label`（形如 `write_file · 1.2k 字`）。
+                    //
+                    // 有 draft 就用它，否则回落到阶段文案：用户既知道在干什么，
+                    // 也知道进度在动。
                     Text(
-                        text = state.stage.label,
+                        text = state.toolDraft?.label ?: state.stage.label,
                         style = MiuixTheme.textStyles.footnote1,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )

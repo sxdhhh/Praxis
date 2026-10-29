@@ -139,6 +139,48 @@ data class ChatBubble(
     val variantCount: Int = 1,
 )
 
+/**
+ * 正在流式生成的工具调用（进度态，不可执行）。
+ *
+ * ## 它解决什么问题（2026-10-29）
+ *
+ * 上游把 `tool_calls.arguments` **分片**下发，参数可能几十 KB（写长文件、
+ * 传大 JSON）。在 [AiStreamEvent.ToolCalls][dev.praxis.core.ai.AiStreamEvent.ToolCalls]
+ * （收齐才发）之前，界面上一个字节都没有 —— 用户看到光标一直闪，判断是「卡死了」。
+ *
+ * Operit 的做法就是在这段时间显示「工具名 + 已接收字符数」，让人知道它在动。
+ * 这个类型承载那份信息。
+ *
+ * ## 为什么不带 arguments 片段
+ *
+ * 半截 JSON 无法解析，UI 拿到也只能丢；带上反而诱使别人去 `parse` 它。
+ * 只给字符数就够画进度文字。
+ *
+ * @param toolName 工具名（第一片之后才已知，可能为空）
+ * @param argumentsChars 已接收的参数总字符数
+ * @param callIndex 本次回复里第几个工具调用（0 起）
+ */
+data class ToolCallDraft(
+    val toolName: String,
+    val argumentsChars: Int,
+    val callIndex: Int = 0,
+) {
+    /**
+     * 用户可读的进度文案，如 `write_file · 1.2k 字`。
+     *
+     * 千位以上折成 `1.2k`：几十 KB 的原文写成 `12345 字` 会太长，
+     * 而这一行还要和其他状态文案挤在一起。
+     */
+    val label: String
+        get() {
+            val name = toolName.ifBlank { "工具" }
+            val size = when {
+                argumentsChars >= 10_000 -> "%.1fk".format(argumentsChars / 1000f)
+                else -> argumentsChars.toString()
+            }
+            return name + " · " + size + " 字"
+        }
+}
 /** 一次工具调用的 UI 投影。 */
 data class ToolCallInfo(
     val name: String,
@@ -269,6 +311,22 @@ data class ChatState(
      * 注意：这是**过程态**，不是错误。失败仍走 [error]。
      */
     val stage: ChatStage = ChatStage.Idle,
+    /**
+     * 正在流式生成的工具调用进度（`stage == ExecutingTool` 之前的那段）。
+     *
+     * ## 为什么单独一个字段而不是塞进 stage
+     *
+     * [ChatStage] 只表达「在干什么」这一档，而进度需要一个会变的数字。
+     * 每次字数变化都改 stage 会让 `stage` 反复写同一个值（无意义重组），
+     * 而单独一个可空对象只在真正变化时更新。
+     *
+     * ## 为什么是 `null` 表示没有
+     *
+     * 「没有正在生成的工具调用」是常态（绝大多数时刻都是 null）。
+     * 用一个非空默认值就要额外维护「是否有效」，反而多一个状态位。
+     */
+    val toolDraft: ToolCallDraft? = null,
+
 
     /**
      * 一次性操作提示（如「继续」被拒绝的原因）。
