@@ -549,6 +549,24 @@ fun ChatTab(
     }
 
 
+    // ## 底栏显示的模型名要与运行时一致（2026-10-29 修）
+    //
+    // 运行时（`SettingsBackedProvider`）走 `resolve(FunctionSlot.CHAT, global)`：
+    // 功能位有覆盖就用覆盖的模型。而这里原先无条件显示
+    // `modelSettings.activeModel` —— 用户在「功能模型 → 对话」里指定了
+    // `deepseek-v4-pro`，实际请求用的就是它，但胶囊仍显示全局池里的另一个。
+    // 用户据此判断「切换没生效」，然后来回折腾设置。
+    //
+    // 用同一个 resolve 算显示名，两边永远一致。
+    val functionModels by settingsRepository.functionModelSettings
+        .collectAsStateWithLifecycle(initialValue = dev.praxis.core.model.settings.FunctionModelSettings())
+    val chatDisplayModel = remember(modelSettings, functionModels) {
+        functionModels.resolve(
+            dev.praxis.core.model.settings.FunctionSlot.CHAT,
+            modelSettings,
+        ).model
+    }
+
     ChatScreen(
         state = state,
         onInputChange = viewModel::onInputChange,
@@ -597,7 +615,7 @@ fun ChatTab(
         onConfirmDeleteMessage = viewModel::confirmDeleteMessage,
         onDismissDeleteMessage = viewModel::dismissDeleteMessage,
         onClearReplyTo = viewModel::clearReplyTo,
-        // ── 底部设置条（1:1 对齐 Operit `ClassicChatSettingsBar`）────
+    // ── 底部设置条（1:1 对齐 Operit `ClassicChatSettingsBar`）────
         //
         // 模型名直接取 `modelSettings`（它的来源是 DataStore 流，改完
         // 立刻回流到这里，不需要额外刷新机制）。
@@ -608,7 +626,18 @@ fun ChatTab(
         // `modelName`）。底部设置条是「当前在用哪个模型」的状态显示，
         // 显示 `a,b,c` 既读不懂也不准确 —— 该显示按 `modelIndex`
         // 取出来的那一个。
-        modelName = modelSettings.activeModel,
+        // ## 显示名必须与运行时用的是同一个模型（2026-10-29 修）
+        //
+        // 运行时（`SettingsBackedProvider`）现在走
+        // `resolve(FunctionSlot.CHAT, global)` —— 功能位有覆盖就用覆盖的模型。
+        // 而这里原先无条件显示 `modelSettings.activeModel`（全局池里选中的那个）。
+        //
+        // 后果具体：用户在「功能模型 → 对话」里指定了 `deepseek-v4-pro`，
+        // 实际请求用的就是它，但底栏那颗胶囊仍显示全局池里的 `glm-5.1`。
+        // 用户据此判断「切换没生效」，然后去来回切设置 —— 全是白折腾。
+        //
+        // 这里用同一个 `resolve` 算显示名，保证两边永远一致。
+        modelName = chatDisplayModel,
         // 思考强度写入走 `SettingsRepository.setThinkingEffort` ——
         // 它写的是**全局设置**（`ModelSettings.thinkingEffort`），
         // 下一轮 `readRuntimeConfig()` 就会读到新值，不必重启会话。
