@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Tune
@@ -196,11 +197,23 @@ internal fun ChatSettingsBar(
     // Operit 同样是三个独立 boolean（`showMemorySection` / `showModelSection` /
     // `showToolsSection` …），不是「同时只开一个」的手风琴：
     // 用户常要同时对照「模型」与「思考强度」，互斥会逼他反复点开点关。
-    var showModelSection by remember { mutableStateOf(true) }
+    // ## 默认全部折叠（2026-10-29，对齐 Operit）
+    //
+    // 旧值模型分区是 **true**：一打开面板就是「模型分区全展开」。
+    // 而它内部有模型池 + 管理入口 + 思考强度，展开后直接顶满卡片，
+    // 用户看到的第一眼是一堆行，这正是“乱”的直接来源。
+    //
+    // Operit 五个分区全部默认折叠（ClassicChatSettingsBar.kt:140-144 全是
+    // mutableStateOf(false)），折叠时每行右侧显示当前值 ——
+    // 「折叠隐藏的是选项，不是信息」。
+    var showModelSection by remember { mutableStateOf(false) }
     var showToolsSection by remember { mutableStateOf(false) }
     var showBehaviorSection by remember { mutableStateOf(false) }
     // 思考强度四档的二级展开（对应上游 `ThinkingSettingsItem` 的 expanded）。
     var showThinkingList by remember { mutableStateOf(false) }
+
+    /** 模型池子列表是否展开（二级折叠，见模型分区的注释）。 */
+    var showModelList by remember { mutableStateOf(false) }
     var showMemorySection by remember { mutableStateOf(false) }
     var showPluginsSection by remember { mutableStateOf(false) }
 
@@ -337,29 +350,61 @@ internal fun ChatSettingsBar(
                                 showTopDivider = false,
                                 onExpandedChange = { showModelSection = it },
                             ) {
-                                // ## 就地选模型，不再跳页（2026-10-29）
+                                // ## 模型池改为二级折叠（2026-10-29，对齐 Operit）
                                 //
-                                // 旧实现只有一个 ActionRow：点一下 `showMenu = false`
-                                // 然后 `onOpenModelSettings()` —— 直接离开聊天页。
-                                // 但模型池就在本地（`ModelSettings.model` 是逗号分隔的
-                                // 列表），切一个模型完全不需要跳页，跳走反而打断了对话。
+                                // 旧写法把模型池里的**每一个模型**都铺成一行
+                                // `ChoiceRow`。用户配了 20 个模型时，这个分区展开后
+                                // 直接占掉大半屏 —— 截图里那种“乱”，主要就是它。
                                 //
-                                // 现在改成内联列表：每一行一个模型，当前项打勾，
-                                // 点一下立即生效且**不关面板**（用户可能想连着比几个）。
+                                // Operit 的做法是两级：先一行「模型：当前名」的按钮，
+                                // 点开才在**下方子区域**列出可选模型。它比这里还多一级
+                                // （配置 → 模型），因为 Operit 支持多服务商；Praxis 只有
+                                // 一个 `baseUrl`（见 `ModelSettings`），所以只保留
+                                // 「当前选中」与「可选列表」这一级。
                                 //
-                                // 没有模型池时才退回「去设置里配」那一行。
+                                // 为什么不是弹窗：这是**在面板里选**，选完还要接着配
+                                // 思考强度。弹窗会盖住分区、还得先关掉，多两步操作。
                                 if (models.isNotEmpty() && onSelectModel != null) {
-                                    models.forEachIndexed { index, name ->
-                                        ChoiceRow(
-                                            label = name,
-                                            selected = index == activeModelIndex,
-                                            onClick = { onSelectModel(index) },
-                                        )
+                                    ActionRow(
+                                        icon = Icons.Outlined.DataObject,
+                                        title = "选择模型",
+                                        // 当前模型名已显示在**分区头**的 value 里
+                                        // （`value = modelName`）。这里再写一遍就是
+                                        // 同一屏出现两次同一个名字，纯重复。
+                                        // 写数量既提示“还有别的可选”，也不重复信息。
+                                        detail = "共 " + models.size + " 个可用",
+                                        trailing = if (showModelList) "收起" else "展开",
+                                        onClick = { showModelList = !showModelList },
+                                    )
+                                    FoldableContent(visible = showModelList) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                // 子区域背景再浅一档：与「展开的思考强度」
+                                                // 用同一个层级语言，用户能看出
+                                                // “这些是上一行的选项”。
+                                                .background(
+                                                    MiuixTheme.colorScheme
+                                                        .surfaceVariant.copy(alpha = 0.3f),
+                                                )
+                                                .padding(start = 8.dp, end = 8.dp),
+                                        ) {
+                                            models.forEachIndexed { index, name ->
+                                                ChoiceRow(
+                                                    label = name,
+                                                    selected = index == activeModelIndex,
+                                                    onClick = { onSelectModel(index) },
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                                 if (onManageModels != null || onOpenModelSettings != null) {
                                     ActionRow(
-                                        icon = Icons.Outlined.DataObject,
+                                        // 与上面「选择模型」区分：那个是 DataObject（数据对象），
+                                        // 这个用 Settings（管理入口）。两行同图标会让人以为
+                                        // 是同一个功能的两个入口。
+                                        icon = Icons.Outlined.Settings,
                                         title = if (models.isEmpty()) {
                                             "去配置模型 / 服务商"
                                         } else {
@@ -486,13 +531,23 @@ internal fun ChatSettingsBar(
                                                 MiuixTheme.colorScheme.outline.copy(alpha = 0.2f),
                                             ),
                                     )
+                                    // ## 紧凑档 + 空 detail（2026-10-29）
+                                    //
+                                    // 原来每行写「可用 / 已禁用」。但右侧的 Switch
+                                    // **本身就在表达这个状态** —— 再用一行文字重复一遍，
+                                    // 等于每个工具多占 15dp 的高度去说一件开关已经说过的事。
+                                    //
+                                    // 几十个工具排下来，这行重复文字就是“乱”的主体。
+                                    // Operit 的工具组也不写状态文字（`SettingItem` 只画
+                                    // 图标 + 标题 + Switch）。
                                     toolNames.forEach { name ->
                                         val enabled = name !in disabledTools
                                         SwitchRow(
                                             title = name,
-                                            detail = if (enabled) "可用" else "已禁用",
+                                            detail = "",
                                             checked = enabled,
                                             onCheckedChange = { onToggleTool(name, it) },
+                                            compact = true,
                                         )
                                     }
                                 }
@@ -593,13 +648,16 @@ internal fun ChatSettingsBar(
                                 expanded = showPluginsSection,
                                 onExpandedChange = { showPluginsSection = it },
                             ) {
+                                // 与工具组同理：技能名本身就说明了一切，
+                                // 「启用中 / 已禁用」与右侧 Switch 重复（2026-10-29）。
                                 skillNames.forEach { name ->
                                     val enabled = name !in disabledSkills
                                     SwitchRow(
                                         title = name,
-                                        detail = if (enabled) "启用中" else "已禁用",
+                                        detail = "",
                                         checked = enabled,
                                         onCheckedChange = { onToggleSkill(name, it) },
+                                        compact = true,
                                     )
                                 }
                             }
@@ -926,14 +984,31 @@ private fun FoldSection(
 @Composable
 private fun SwitchRow(
     title: String,
+    /** 副说明。传空串则不占第二行（见 [compact]）。 */
     detail: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    /**
+     * 紧凑档：单行 36dp，不画副说明。
+     *
+     * ## 为什么需要它（2026-10-29，对齐 Operit）
+     *
+     * Operit 的 `SettingItem` 是 `heightIn(min = 36.dp)` + **单行标题**
+     * （`maxLines = 2` 只在标题过长时换行，不会有一行固定的副标题）。
+     *
+     * 而 Praxis 旧版统一 44dp + 两行（标题 + 副说明）。在「工具」分区里
+     * 几十个工具名一个一个排下去时，每行多出的 8dp 与一行副文字会把它撑成
+     * 一大片，扫起来非常累 —— 这就是用户说的“内容太乱”。
+     *
+     * 开关类是**状态**，副说明只在真的需要解释代价时才加（比如
+     * 「关闭流式输出」）。工具/技能这类“名字即含义”的项用紧凑档。
+     */
+    compact: Boolean = false,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 44.dp)
+            .heightIn(min = if (compact) 36.dp else 44.dp)
             .clickable { onCheckedChange(!checked) }
             .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -946,13 +1021,16 @@ private fun SwitchRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = detail,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 11.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // 紧凑档不画副说明：那一行在「几十个工具名」的场景里是纯噪音。
+            if (!compact && detail.isNotBlank()) {
+                Text(
+                    text = detail,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = 11.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         Spacer(Modifier.width(8.dp))
         // onCheckedChange = null 表示「由父容器接管点击」，

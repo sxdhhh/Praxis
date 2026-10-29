@@ -326,4 +326,54 @@ class WiringGuardTest {
 
     private fun countOf(haystack: String, needle: String): Int =
         haystack.split(needle).size - 1
+
+
+    /**
+     * 功能面板的五个分区必须默认全部折叠。
+     *
+     * ## 它防的是什么
+     *
+     * 模型分区曾经默认 **true**。面板一打开就是“模型池全展开”：
+     * 里面还有管理入口和思考强度，全摊开后顶满整张卡片，
+     * 用户第一眼看到的就是一堆行 —— 原话「内容太乱了」。
+     *
+     * Operit 五个分区全部默认折叠（`ClassicChatSettingsBar.kt:140-144`
+     * 全是 mutableStateOf(false)），折叠时右侧显示当前值，
+     * 即「折叠隐藏的是选项，不是信息」。
+     */
+    @Test
+    fun chatSettingsBar_allSectionsCollapsedByDefault() {
+        val bar = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatSettingsBar.kt")
+        listOf(
+            "showMemorySection",
+            "showModelSection",
+            "showToolsSection",
+            "showBehaviorSection",
+            "showPluginsSection",
+        ).forEach { name ->
+            assertTrue(
+                "$name 必须默认折叠（mutableStateOf(false)）",
+                bar.contains("var $name by remember { mutableStateOf(false) }"),
+            )
+        }
+    }
+
+    /**
+     * 模型池必须是**二级折叠**，不能直接平铺在分区里。
+     *
+     * 平铺 20 个模型会占掉大半屏，把「管理模型」「思考强度」挤出去。
+     * 这就是用户说的「太乱」的主因。
+     */
+    @Test
+    fun chatSettingsBar_modelListIsSecondLevelFold() {
+        val bar = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatSettingsBar.kt")
+        assertTrue(
+            "模型池必须有独立的展开状态 showModelList",
+            bar.contains("var showModelList by remember { mutableStateOf(false) }"),
+        )
+        assertTrue(
+            "模型池必须由 FoldableContent 包住（二级折叠）",
+            bar.contains("FoldableContent(visible = showModelList)"),
+        )
+    }
 }
