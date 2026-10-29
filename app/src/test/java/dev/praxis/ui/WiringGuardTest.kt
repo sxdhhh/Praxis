@@ -196,4 +196,38 @@ class WiringGuardTest {
             vm.contains("ptyPort?.write(ptyId"),
         )
     }
+
+    /**
+     * 恢复路径必须还原工具身份，否则重启后工具卡片退化为纯文本。
+     *
+     * ## 这条护栏防的是什么（2026-10-25 报过、2026-10-29 重新出现）
+     *
+     * `ChatScreen` 决定画 `ToolCallCard` 还是画纯文本，判据**只有**
+     * `bubble.tool != null`。而会话恢复时构造 `ChatBubble` 的那处代码
+     * 与「工具执行完立刻追加气泡」的那处是**两套完全独立的构造点**：
+     *
+     *  - 实时路径（`runToolCalls` 里）：传了 `tool = ToolCallInfo(...)`；
+     *  - 恢复路径（`observeSession` 里）：只传了 `role` / `text` / 时间戳。
+     *
+     * 于是「刚跑完的工具是卡片，重启后同一批工具变成文字」。库侧字段
+     * （`toolName` / `toolArgs` / `isError`）一直是齐的，所以这件事
+     * 编译期、lint、单元测试、运行时全都不报错 —— 只能靠源码断言。
+     *
+     * 断言只看「恢复路径那一段里有 tool =」，不匹配具体写法：
+     * 换个构造方式（比如抽个 `row.toBubble()`）也照样要求带上工具身份。
+     */
+    @Test
+    fun chatRestore_restoresToolIdentity() {
+        val vm = read(
+            "feature/chat/src/main/java/dev/praxis/feature/chat/ChatViewModel.kt",
+        )
+        assertTrue(
+            "恢复路径没有还原 tool，重启后工具卡片会退化成纯文本",
+            vm.contains("tool = if (role == BubbleRole.Tool)"),
+        )
+        assertTrue(
+            "工具结果落盘时用了 buildToolSummary 加前缀，恢复时必须剥掉",
+            vm.contains("unwrapToolSummary("),
+        )
+    }
 }

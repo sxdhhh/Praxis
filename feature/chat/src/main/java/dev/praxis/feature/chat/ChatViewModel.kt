@@ -509,6 +509,32 @@ class ChatViewModel(
                     // 组的版本总数在这一步还不知道（要等所有行都映射完）。
                     // 先置 1，下面的折叠步骤会回填真实值。
                     variantCount = 1,
+                    // ## 工具身份必须一起还原（2026-10-25 修，2026-10-29 复核仍在）
+                    //
+                    // `ChatScreen` 画卡片还是画纯文本，判据**只有**
+                    // `bubble.tool != null`（见 `ChatScreen.kt` 的
+                    // `val tool = bubble.tool; if (tool != null)`）。
+                    // 这里不传，重启后历史里的工具调用就全退化成一段
+                    // `[工具 xxx 完成]` 纯文本 —— 参数字段、折叠、耗时
+                    // 全部消失，只有本次进程内新跑的工具才有卡片。
+                    //
+                    // 库侧字段是齐的（`toolName` / `toolArgs` / `isError`），
+                    // 唯一缺的是 `elapsedMs`（没落盘），所以传 null：
+                    // 卡片只是不显示耗时，其余照常。
+                    tool = if (role == BubbleRole.Tool) {
+                        ToolCallInfo(
+                            name = row.toolName?.takeIf { it.isNotBlank() } ?: "工具",
+                            argumentsJson = row.toolArgs.orEmpty(),
+                            // `content` 存的是 `buildToolSummary` 的产物
+                            // （`[工具 x 完成]\n正文`），要剥掉首行标签
+                            // 否则卡片里会把「完成了」重复显示两遍。
+                            result = unwrapToolSummary(row.content),
+                            isError = row.isError,
+                            elapsedMs = null,
+                        )
+                    } else {
+                        null
+                    },
                 )
             }
 
@@ -1836,6 +1862,40 @@ class ChatViewModel(
                 parametersJson = spec.parametersJson,
             )
         }
+    }
+
+    /**
+     * 把落盘的 `buildToolSummary` 产物还原成「纯结果正文」。
+     *
+     * ## 为什么需要剥
+     *
+     * 落盘用的是 [buildToolSummary]，形如：
+     *
+     * ```
+     * [工具 read_file 完成]
+     * 文件内容……
+     * ```
+     *
+     * 而 [ToolCallCard][dev.praxis.feature.chat.widget.ToolCallCard]
+     * 自己已经在标题行画「工具名 + 状态」，`result` 再带一遍
+     * `[工具 xxx 完成]` 就会重复两次。
+     *
+     * ## 为什么按前缀剥而不是按行号剥
+     *
+     * 早期版本落盘的是裸结果（没有前缀），线上库里有两种格式共存。
+     * 按行号剥会把「老数据的真实第一行」吃掉，所以只在**确实匹配
+     * 前缀形状**时才剥；不匹配就原样返回。
+     *
+     * 前缀形状严格限定为 `[工具 <名字> 完成]` 或 `[工具 <名字> 失败]`
+     * 后跟一个换行 —— 正文里出现同样字样但不在首行的情况不受影响。
+     */
+    private fun unwrapToolSummary(content: String): String {
+        val newline = content.indexOf('\n')
+        if (newline < 0) return content
+        val head = content.substring(0, newline)
+        val looksLikeSummary = head.startsWith("[工具 ") &&
+            (head.endsWith(" 完成]") || head.endsWith(" 失败]"))
+        return if (looksLikeSummary) content.substring(newline + 1) else content
     }
 
     private fun buildToolSummary(exec: dev.praxis.core.tool.ToolExecution): String {
