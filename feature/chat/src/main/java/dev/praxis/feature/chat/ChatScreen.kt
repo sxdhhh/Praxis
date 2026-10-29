@@ -907,6 +907,44 @@ fun ChatScreen(
                                 // 图片透传：气泡里要能回看用户发过的图
                                 // （见 `ChatBubble.images` 的 KDoc）。
                                 images = bubble.images,
+                                // ## 一轮只开一个「回复」头（2026-10-29）
+                                //
+                                // 数据上「一次回复」是**多条** Assistant 气泡：
+                                // 模型说话 → 调工具 → 再说话 → 再调工具 → 收尾，
+                                // 每一段都由 `runToolCalls` 新建一个 `followUpId` 气泡。
+                                // 若每段都打「回复」标签，同一轮就被切成
+                                // 「回复 / 回复 / 回复」三段，中间夹着工具卡片 ——
+                                // 那正是用户看到的形态。
+                                //
+                                // 正确形态：本轮**第一条**正文打头，后续正文与工具
+                                // 卡片都挂在这个头下面：
+                                //
+                                //     回复
+                                //     ├ 正文①
+                                //     ├ 工具卡片
+                                //     └ 正文②
+                                //
+                                // ## 判据为什么是「往前找，遇到 User / Summary 就停」
+                                //
+                                // 一轮的边界就是上一条 User（或摘要块）。中间无论
+                                // 夹多少 Tool 都属于同一轮，因为工具调用是**回复的一部分**，
+                                // 不是新的发言轮次。
+                                //
+                                // Error 也算「已开过头」：错误气泡本身就是这一轮的结果，
+                                // 后面若还有正文（重试后继续），不该再打第二个「回复」。
+                                //
+                                // ## 为什么用前向扫描而不是给 ChatBubble 加字段
+                                //
+                                // 加字段就要在 `publish()`、恢复路径、发送路径、
+                                // 重试路径四处同步维护，任一处漏了就又错位。
+                                // 而「本条之前、同轮内、有没有 Assistant」是列表顺序的
+                                // 纯函数，随时算都对，存下来反而是第二份需要同步的真相。
+                                //
+                                // 代价：每条气泡渲染时扫一次前置条目。轮内条数是个位数，
+                                // 而 `itemsIndexed` 只为可见项调用 —— 可忽略。
+                                showLabel = remember(index, state.bubbles) {
+                                    !hasEarlierAssistantInTurn(state.bubbles, index)
+                                },
                                 onRetry = if (bubble.role == BubbleRole.Error) onRetry else null,
                                 // 长按弹出动作菜单（复制/引用/编辑重发/重新生成/删除）。
                                 // 传 null 时不响应长按（不传回调时不该有「按了没反应」的感觉）。
@@ -1835,6 +1873,41 @@ private fun ChatInputBar(
  *
  * 顺序不能反：先截断会切出半截标签，`<[^>]*>` 就匹配不到了。
  */
+/**
+ * 本条气泡之前、**同一轮内**是否已经出现过助手正文。
+ *
+ * ## 「同一轮」的边界
+ *
+ * 一轮 = 一条用户消息（或一块摘要）之后、到下一条用户消息之前的全部内容。
+ * 工具卡片算这一轮的**组成部分**，不构成新轮次 —— 模型「想 → 调 → 看结果 → 再说」
+ * 在语义上是同一次回答。
+ *
+ * 所以向前扫到 `User` / `Summary` 就停，中途遇到 `Tool` 直接跳过。
+ *
+ * ## 为什么 Error 也算「已经开过头」
+ *
+ * 错误气泡本身就是这一轮的回答结果。用户重试后若能继续，屏幕上不该出现
+ * 第二个「回复」头 —— 那会读成「AI 又开口了一次」。
+ *
+ * ## 返回值的用法
+ *
+ * `true` 表示本轮已经有头了，当前这条**不**再画标签。
+ * 因此调用方写 `showLabel = !hasEarlierAssistantInTurn(...)`。
+ */
+private fun hasEarlierAssistantInTurn(bubbles: List<ChatBubble>, index: Int): Boolean {
+    var i = index - 1
+    while (i >= 0) {
+        when (bubbles[i].role) {
+            BubbleRole.User, BubbleRole.Summary -> return false
+            BubbleRole.Assistant, BubbleRole.Error -> return true
+            // 工具卡片属于本轮内容，继续往前找。
+            BubbleRole.Tool -> Unit
+        }
+        i--
+    }
+    return false
+}
+
 private fun replyPreviewText(raw: String): String {
     val plain = raw.replace(Regex("<[^>]*>"), "").trim().replace(Regex("\\s+"), " ")
     return if (plain.length > 50) plain.take(50) + "..." else plain
