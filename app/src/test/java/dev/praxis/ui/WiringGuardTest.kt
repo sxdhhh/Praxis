@@ -489,4 +489,210 @@ class WiringGuardTest {
             app.contains("forSummary,"),
         )
     }
+
+
+    /**
+     * 自定义请求头必须真的写进 HTTP 请求。
+     *
+     * ## 它防的是什么
+     *
+     * 设置页有个「自定义请求头」分区，能填能存 —— 但如果 provider 不读它，
+     * 那就是个纯装饰：用户填了中转站要求的 `X-Api-Key`，请求照样 401，
+     * 而且**没有任何错误提示**指向「头没发出去」。
+     *
+     * 这类「存了不用」的假控件看不出来：编译过、lint 过、单测过、
+     * 运行时也不报错，只是不生效。
+     */
+    @Test
+    fun customHeaders_are_actually_sent() {
+        val provider = read("app/src/main/java/dev/praxis/data/ai/OpenAiCompatProvider.kt")
+        assertTrue(
+            "OpenAiCompatProvider 必须接收 customHeaders",
+            provider.contains("private val customHeaders"),
+        )
+        assertTrue(
+            "必须把 customHeaders 逐条 addHeader 到请求上",
+            provider.contains("customHeaders.forEach"),
+        )
+        assertTrue(
+            "必须有头名合法性校验（避免 OkHttp 抛 IllegalArgumentException）",
+            provider.contains("isValidHeaderName"),
+        )
+        // SettingsBackedProvider 必须把读到的头传下去 —— 少这一步，
+        // provider 支持了也白搭。
+        val settings = read("app/src/main/java/dev/praxis/data/ai/SettingsBackedProvider.kt")
+        assertTrue(
+            "SettingsBackedProvider 必须把 advanced.customHeaders 传给 provider",
+            settings.contains("customHeaders = advanced.customHeaders"),
+        )
+    }
+
+    /**
+     * 请求队列（限流 + 并发）必须真的在发请求前生效。
+     *
+     * ## 为什么这条特别重要
+     *
+     * 限流器写了但没接进请求路径，是「看起来做了、其实完全没做」的典型。
+     * 用户填了「每分钟 10 次」，程序照样一秒发 20 个 —— 然后 429。
+     */
+    @Test
+    fun requestThrottle_isWiredIntoRequestPath() {
+        val settings = read("app/src/main/java/dev/praxis/data/ai/SettingsBackedProvider.kt")
+        assertTrue(
+            "必须从 modelAdvancedSettings 读取限流配置",
+            settings.contains("repository.modelAdvancedSettings.first()"),
+        )
+        assertTrue(
+            "必须在发请求前 acquire 名额",
+            settings.contains("throttle.acquire()"),
+        )
+        assertTrue(
+            "必须在 finally 里归还名额（否则异常路径会泄漏并发位）",
+            settings.contains("permit?.close()"),
+        )
+        // 节流器必须跨请求复用（否则「每分钟 N 次」变成「每个请求各自 N 次」），
+        // 但换配置时必须丢掉旧实例 —— 否则用户「10 → 30 → 10」改回来时
+        // 会拿到仍带着旧窗口时间戳的实例，额度比配置更紧。
+        assertTrue(
+            "节流器必须有缓存（每请求新建等于窗口清零、限流失效）",
+            settings.contains("private val throttles"),
+        )
+        assertTrue(
+            "换配置时必须重建节流器（丢掉旧窗口）",
+            settings.contains("throttles.clear()"),
+        )
+    }
+
+    /**
+     * 进阶配置必须能存也能读回来。
+     *
+     * ## 存的三个字段缺一不可
+     *
+     * 少任何一个，那个设置项就是「改了没反应」。
+     */
+    @Test
+    fun advancedSettings_roundTrip() {
+        val repo = read("core/data/src/main/kotlin/dev/praxis/core/data/settings/SettingsRepository.kt")
+        assertTrue("必须有读取流", repo.contains("val modelAdvancedSettings: Flow<ModelAdvancedSettings>"))
+        assertTrue("必须能写请求头", repo.contains("suspend fun setCustomHeaders"))
+        assertTrue("必须能写 RPM", repo.contains("suspend fun setRequestLimitPerMinute"))
+        assertTrue("必须能写并发上限", repo.contains("suspend fun setMaxConcurrentRequests"))
+        // 请求头里可能含令牌，必须走加密路径（与 apiKey 同一口径）。
+        assertTrue(
+            "请求头必须加密存储（值里可能是中转站令牌）",
+            repo.contains("val encrypted = cipher?.encrypt(serialized)"),
+        )
+        // 路由必须把 UI 草稿写进仓库。
+        val route = read("feature/settings/src/main/java/dev/praxis/feature/settings/ai/ModelRoute.kt")
+        assertTrue("路由必须保存请求头", route.contains("repository.setCustomHeaders(customHeaders)"))
+        assertTrue("路由必须保存 RPM", route.contains("repository.setRequestLimitPerMinute(requestLimitPerMinute)"))
+        assertTrue("路由必须保存并发上限", route.contains("repository.setMaxConcurrentRequests(maxConcurrentRequests)"))
+    }
+
+    /**
+     * 模型管理页必须真的画出这两个分区。
+     */
+    @Test
+    fun modelScreen_hasCustomHeadersAndQueueSections() {
+        val screen = read("feature/settings/src/main/java/dev/praxis/feature/settings/ai/ModelScreen.kt")
+        assertTrue("必须有「自定义请求头」分区", screen.contains("title = \"自定义请求头\""))
+        assertTrue("必须有「请求队列」分区", screen.contains("title = \"请求队列\""))
+        assertTrue(
+            "三个新参数必须进 onSave 回调",
+            screen.contains("requestLimitPerMinute = rpmDraft.toIntOrNull() ?: 0"),
+        )
+        assertTrue(
+            "dirty 判据必须包含进阶配置（否则按钮一直显示「已保存」）",
+            screen.contains("!= advanced.requestLimitPerMinute"),
+        )
+    }
+
+
+    /**
+     * 自定义请求头必须真的写进 HTTP 请求。
+     *
+     * ## 它防的是什么
+     *
+     * 设置页有个「自定义请求头」分区，能填能存 —— 但如果 provider 不读它，
+     * 那就是个纯装饰：用户填了中转站要求的 `X-Api-Key`，请求照样 401，
+     * 而且**没有任何错误提示**指向「头没发出去」。
+     *
+     * 这类「存了不用」的假控件看不出来：编译过、lint 过、单测过、
+     * 运行时也不报错，只是不生效。
+     */
+    @Test
+    fun customHeaders_are_actually_sent() {
+        val provider = read("app/src/main/java/dev/praxis/data/ai/OpenAiCompatProvider.kt")
+        assertTrue(
+            "OpenAiCompatProvider 必须接收 customHeaders",
+            provider.contains("private val customHeaders"),
+        )
+        assertTrue(
+            "必须把 customHeaders 逐条 addHeader 到请求上",
+            provider.contains("customHeaders.forEach"),
+        )
+        assertTrue(
+            "必须有头名合法性校验（避免 OkHttp 抛 IllegalArgumentException）",
+            provider.contains("isValidHeaderName"),
+        )
+        // SettingsBackedProvider 必须把读到的头传下去 —— 少这一步，
+        // provider 支持了也白搭。
+        val settings = read("app/src/main/java/dev/praxis/data/ai/SettingsBackedProvider.kt")
+        assertTrue(
+            "SettingsBackedProvider 必须把 advanced.customHeaders 传给 provider",
+            settings.contains("customHeaders = advanced.customHeaders"),
+        )
+    }
+
+    /**
+     * 请求队列（限流 + 并发）必须真的在发请求前生效。
+     *
+     * ## 为什么这条特别重要
+     *
+     * 限流器写了但没接进请求路径，是「看起来做了、其实完全没做」的典型。
+     * 用户填了「每分钟 10 次」，程序照样一秒发 20 个 —— 然后 429。
+     */
+    /**
+     * 进阶配置必须能存也能读回来。
+     *
+     * ## 存的三个字段缺一不可
+     *
+     * 少任何一个，那个设置项就是「改了没反应」。
+     */
+    @Test
+    fun advancedSettings_roundTrip() {
+        val repo = read("core/data/src/main/kotlin/dev/praxis/core/data/settings/SettingsRepository.kt")
+        assertTrue("必须有读取流", repo.contains("val modelAdvancedSettings: Flow<ModelAdvancedSettings>"))
+        assertTrue("必须能写请求头", repo.contains("suspend fun setCustomHeaders"))
+        assertTrue("必须能写 RPM", repo.contains("suspend fun setRequestLimitPerMinute"))
+        assertTrue("必须能写并发上限", repo.contains("suspend fun setMaxConcurrentRequests"))
+        // 请求头里可能含令牌，必须走加密路径（与 apiKey 同一口径）。
+        assertTrue(
+            "请求头必须加密存储（值里可能是中转站令牌）",
+            repo.contains("val encrypted = cipher?.encrypt(serialized)"),
+        )
+        // 路由必须把 UI 草稿写进仓库。
+        val route = read("feature/settings/src/main/java/dev/praxis/feature/settings/ai/ModelRoute.kt")
+        assertTrue("路由必须保存请求头", route.contains("repository.setCustomHeaders(customHeaders)"))
+        assertTrue("路由必须保存 RPM", route.contains("repository.setRequestLimitPerMinute(requestLimitPerMinute)"))
+        assertTrue("路由必须保存并发上限", route.contains("repository.setMaxConcurrentRequests(maxConcurrentRequests)"))
+    }
+
+    /**
+     * 模型管理页必须真的画出这两个分区。
+     */
+    @Test
+    fun modelScreen_hasCustomHeadersAndQueueSections() {
+        val screen = read("feature/settings/src/main/java/dev/praxis/feature/settings/ai/ModelScreen.kt")
+        assertTrue("必须有「自定义请求头」分区", screen.contains("title = \"自定义请求头\""))
+        assertTrue("必须有「请求队列」分区", screen.contains("title = \"请求队列\""))
+        assertTrue(
+            "三个新参数必须进 onSave 回调",
+            screen.contains("requestLimitPerMinute = rpmDraft.toIntOrNull() ?: 0"),
+        )
+        assertTrue(
+            "dirty 判据必须包含进阶配置（否则按钮一直显示「已保存」）",
+            screen.contains("!= advanced.requestLimitPerMinute"),
+        )
+    }
 }

@@ -9,6 +9,8 @@ import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Article
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -50,6 +52,10 @@ import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
 import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.util.Locale
+import dev.praxis.core.model.settings.CustomHeader
+import dev.praxis.core.model.settings.ModelAdvancedSettings
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.clickable
 
 /**
  * API 配置页（对齐 Operit `ModelApiSettingsSection` 的信息架构，控件全部 miuix）。
@@ -165,7 +171,23 @@ fun ModelScreen(
         compactThreshold: Float,
         /** 思考强度。 */
         thinkingEffort: ThinkingEffort,
+        /** 自定义请求头（完整列表，不是增量）。 */
+        customHeaders: List<CustomHeader>,
+        /** 每分钟最大请求数。0 = 不限。 */
+        requestLimitPerMinute: Int,
+        /** 最大并发请求数。0 = 不限。 */
+        maxConcurrentRequests: Int,
     ) -> Unit,
+    /**
+     * 进阶配置（自定义请求头 + 请求队列）。
+     *
+     * ## 为什么是顶层参数而不是 onSave 的入参
+     *
+     * 它只有一个来源（[ModelRoute] 从 `repository.modelAdvancedSettings` 读），
+     * 页内也不需要把它回传给调用方 —— 回传走 [onSave] 的三个独立参数。
+     * 放在顶层还能给默认值，让 @Preview / 单测不必构造完整对象。
+     */
+    advanced: ModelAdvancedSettings = ModelAdvancedSettings(),
     modifier: Modifier = Modifier,
     /**
      * 清除已保存的密钥。
@@ -261,6 +283,12 @@ fun ModelScreen(
         contextLimitK.toInt() * 1000 != settings.contextLimit ||
         kotlin.math.abs(compactThreshold - settings.compactThreshold) > 0.001f ||
         thinkingEffort != settings.thinkingEffort ||
+        // 进阶配置也要参与「有未保存改动」的判定，否则用户改完请求头
+        // 会看到按钮仍是「已保存」，以为已经落盘。
+        headerRows.map { it.first.trim() to it.second }
+            .filter { it.first.isNotEmpty() } != advanced.customHeaders ||
+        (rpmDraft.toIntOrNull() ?: 0) != advanced.requestLimitPerMinute ||
+        (concurrencyDraft.toIntOrNull() ?: 0) != advanced.maxConcurrentRequests ||
         apiKey.isNotEmpty()
 
     // 本地推理（Ollama / LM Studio / llama.cpp）不需要 Key。
@@ -841,6 +869,172 @@ fun ModelScreen(
             }
         }
 
+        // ── 自定义请求头（1:1 对齐 Operit CustomHeadersSettingsSection）─────
+        //
+        // ## 为什么默认折叠
+        //
+        // 绝大多数用户不需要自定义头（0 项）。默认展开会在一页设置里塞一份
+        // 空表单，把「保存」按钮挤到屏幕外。折叠后只在标题右侧显示已配数量。
+        item {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Article,
+                title = "自定义请求头",
+                subtitle = "中转站或企业网关要求的额外 HTTP 头",
+            )
+        }
+        item {
+            Card(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    // 标题行本身就是展开开关（与 Operit 一致：整行可点）。
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { headersExpanded = !headersExpanded },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (headersExpanded) "收起" else "展开",
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        val configured = headerRows.count { it.first.isNotBlank() }
+                        Text(
+                            text = if (configured > 0) "已配置 $configured 项" else "未配置",
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                    if (headersExpanded) {
+                        Spacer(Modifier.height(12.dp))
+                        headerRows.forEachIndexed { index, row ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                TextField(
+                                    value = row.first,
+                                    onValueChange = { v ->
+                                        // ## 为什么这里允许任意字符进草稿
+                                        //
+                                        // 过滤放在发送前（`OpenAiCompatProvider`
+                                        // 的 `isValidHeaderName`），不放输入时：
+                                        // 用户输到一半必然出现非法中间态，
+                                        // 输入时拦会让「输不进去」变成常态。
+                                        headerRows = headerRows.toMutableList().also {
+                                            it[index] = v.replace("\n", "").replace("\r", "") to row.second
+                                        }
+                                    },
+                                    label = "头名",
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                TextField(
+                                    value = row.second,
+                                    onValueChange = { v ->
+                                        headerRows = headerRows.toMutableList().also {
+                                            it[index] = row.first to v.replace("\n", "").replace("\r", "")
+                                        }
+                                    },
+                                    label = "值",
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                TextButton(
+                                    text = "删",
+                                    onClick = {
+                                        val next = headerRows.toMutableList()
+                                        next.removeAt(index)
+                                        // 删到空时必须留一行空框，否则整个列表
+                                        // 消失、用户找不到「添加」入口。
+                                        headerRows = next.ifEmpty { listOf("" to "") }
+                                    },
+                                )
+                            }
+                        }
+                        TextButton(
+                            text = "添加一行",
+                            onClick = { headerRows = headerRows + ("" to "") },
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            // 说清「内置头不会被覆盖」：用户最容易问的就是
+                            // 「我填了 Authorization 为什么还带了原来的」。
+                            text = "键为空的行会被忽略。这里加的头会与内置的 " +
+                                "Authorization / Content-Type 同时存在，不互相覆盖。",
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── 请求队列（1:1 对齐 Operit AdvancedSettingsSection 的队列部分）──
+        //
+        // ## 为什么不搬 API Key 池
+        //
+        // Operit 的 Advanced 里有「多 Key 轮询」与「Key 可用性测试」。
+        // Praxis 的密钥是**单个加密值**（`SettingsRepository.setApiKey`），
+        // 搬过来得先改存储为列表 —— 那是另一轮量级。宁可这轮只做真正
+        // 能生效的两项（限流 + 并发），也不摆一组存不进去的控件。
+        item {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Speed,
+                title = "请求队列",
+                subtitle = "撞到 429 或额度紧张时才需要填",
+            )
+        }
+        item {
+            Card(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    TextField(
+                        value = rpmDraft,
+                        onValueChange = { v ->
+                            // 只收数字：这里填的是次数，混进字母会让
+                            // 换算成 Int 时静默变 0（等于「不限流」），
+                            // 而用户以为自己已经配好了。
+                            rpmDraft = v.filter { it.isDigit() }.take(6)
+                        },
+                        label = "每分钟最大请求数（留空 = 不限）",
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    TextField(
+                        value = concurrencyDraft,
+                        onValueChange = { v ->
+                            concurrencyDraft = v.filter { it.isDigit() }.take(3)
+                        },
+                        label = "最大并发请求数（留空 = 不限）",
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "两个限制分工不同：前者管每分钟总量，后者管同一瞬间在飞的个数。" +
+                            "Praxis 同时最多只有对话、摘要、标题、记忆四类请求，一般不需要填。",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+            }
+        }
+
         // ── 保存 ────────────────────────────────────────────────────
         item {
             Card(
@@ -869,6 +1063,13 @@ fun ModelScreen(
                                     contextLimitK.toInt() * 1000,
                                     compactThreshold,
                                     thinkingEffort,
+                                    // 自定义头传**整份列表**：只传增量的话，
+                                    // 删掉的行永远删不掉（库里是覆盖写）。
+                                    customHeaders = headerRows
+                                        .map { it.first.trim() to it.second }
+                                        .filter { it.first.isNotEmpty() },
+                                    requestLimitPerMinute = rpmDraft.toIntOrNull() ?: 0,
+                                    maxConcurrentRequests = concurrencyDraft.toIntOrNull() ?: 0,
                                 )
                                 // 保存后清空密钥草稿，避免它一直留在内存里。
                                 apiKey = ""

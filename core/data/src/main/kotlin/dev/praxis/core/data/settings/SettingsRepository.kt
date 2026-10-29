@@ -13,6 +13,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dev.praxis.core.model.settings.ColorSource
 import dev.praxis.core.model.settings.ApiProvider
+import dev.praxis.core.model.settings.ModelAdvancedSettings
 import dev.praxis.core.model.settings.ModelSettings
 import dev.praxis.core.model.settings.FunctionSlot
 import dev.praxis.core.model.settings.FunctionModelSettings
@@ -87,6 +88,66 @@ class SettingsRepository(
                 ?: dev.praxis.core.model.settings.ThinkingEffort.None,
         )
     }
+
+    /**
+     * 模型进阶配置（自定义请求头 + 请求队列）。
+     *
+     * ## 为什么请求头值要解密而不是直接给
+     *
+     * 存的是密文（与 `apiKey` 同一条路径：Android Keystore 里的密钥，
+     * 不落在 data/data 里）。请求头里常放中转站令牌，理由与 apiKey 完全相同。
+     *
+     * ## 解密失败返回空表而不是抛
+     *
+     * 与 [apiKey] 同一口径：换机恢复 / Keystore 被清时抛异常会让
+     * 整个设置页崩掉；返回空表等价于「还没配头」，用户重填即可。
+     */
+    val modelAdvancedSettings: Flow<ModelAdvancedSettings> = dataStore.data.map { prefs ->
+        val rawHeaders = prefs[KEY_CUSTOM_HEADERS] ?: ""
+        val decrypted = if (rawHeaders.isEmpty()) {
+            ""
+        } else {
+            val c = cipher
+            if (c == null) rawHeaders
+            else if (!dev.praxis.core.data.security.KeystoreCipher.looksEncrypted(rawHeaders)) {
+                rawHeaders
+            } else {
+                c.decrypt(rawHeaders) ?: ""
+            }
+        }
+        ModelAdvancedSettings(
+            customHeaders = ModelAdvancedSettings.parseHeaders(decrypted),
+            // 夹下限不夹上限：RPM 填 0 是合法的（不限流）；
+            // 上限没必要管 —— 填 1e9 等于不限流，行为正确。
+            requestLimitPerMinute = (prefs[KEY_REQUEST_LIMIT_RPM] ?: 0).coerceAtLeast(0),
+            maxConcurrentRequests = (prefs[KEY_MAX_CONCURRENT] ?: 0).coerceAtLeast(0),
+        )
+    }
+
+    /**
+     * 写入自定义请求头。
+     *
+     * 空表等于「删光所有头」，与「不修改」不同 —— 调用方要传用户看到的当前表，
+     * 而不是只传新增的那条。
+     */
+    suspend fun setCustomHeaders(headers: List<dev.praxis.core.model.settings.CustomHeader>) {
+        val serialized = dev.praxis.core.model.settings.ModelAdvancedSettings
+            .serializeHeaders(headers)
+        if (serialized.isEmpty()) {
+            put(KEY_CUSTOM_HEADERS, "")
+            return
+        }
+        val encrypted = cipher?.encrypt(serialized)
+        put(KEY_CUSTOM_HEADERS, encrypted ?: serialized)
+    }
+
+    /** 每分钟最大请求数。0 = 不限流。 */
+    suspend fun setRequestLimitPerMinute(limit: Int) =
+        put(KEY_REQUEST_LIMIT_RPM, limit.coerceAtLeast(0))
+
+    /** 最大并发请求数。0 = 不限。 */
+    suspend fun setMaxConcurrentRequests(limit: Int) =
+        put(KEY_MAX_CONCURRENT, limit.coerceAtLeast(0))
 
     suspend fun setBaseUrl(url: String) = put(KEY_BASE_URL, url.trim())
 
@@ -681,6 +742,19 @@ private val KEY_CONTEXT_LIMIT = intPreferencesKey("context_limit")
 private val KEY_COMPACT_THRESHOLD = floatPreferencesKey("compact_threshold")
 /** 思考强度（枚举名）。 */
 private val KEY_THINKING_EFFORT = stringPreferencesKey("thinking_effort")
+
+/**
+ * 自定义请求头（`键值...`，密文）。
+ *
+ * 与 `KEY_API_KEY` 同样加密：值里可能是中转站令牌。
+ */
+private val KEY_CUSTOM_HEADERS = stringPreferencesKey("model_custom_headers")
+
+/** 每分钟最大请求数。0 = 不限流（缺 key 时也是 0，老用户行为不变）。 */
+private val KEY_REQUEST_LIMIT_RPM = intPreferencesKey("model_request_limit_rpm")
+
+/** 最大并发请求数。0 = 不限。 */
+private val KEY_MAX_CONCURRENT = intPreferencesKey("model_max_concurrent")
 /** 用户自定义系统提示词（原文，不 trim）。 */
 private val KEY_SYSTEM_PROMPT = stringPreferencesKey("system_prompt")
 
