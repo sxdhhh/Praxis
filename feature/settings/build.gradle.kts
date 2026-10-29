@@ -54,6 +54,16 @@ dependencies {
     // 按本项目纪律必须自己声明 —— 靠 `:ui:design` 的 `api` 传递虽然眼下能编过，
     // 但上游一旦把那条降成 implementation，报错会出现在本模块且很难定位。
     api(libs.miuix.blur)
+    // ## 为什么需要 material-icons-extended（2026-10-29 新增）
+    //
+    // 模型管理页的用户可辨图标不在 `material-icons-core` 里（core 只有几十个
+    // 最常用的）。本页用到了 `Icons.Outlined.Speed`（请求队列）与
+    // `Icons.Outlined.List`（自定义请求头）—— 它们属于 extended。
+    //
+    // 漏了这条的症状很典型：**编译期只报「Unresolved reference: Speed」**，
+    // 报错位置在调用处，很容易被误以为是 import 写错，而不是少依赖。
+    // `:feature:chat` 早就踩过同一次（见它的 build.gradle.kts 注释）。
+    implementation(libs.compose.material.icons.extended)
 
     testImplementation(libs.junit)
     // LinuxEnvViewModelTest 用 runTest / setMain 驱动 viewModelScope。

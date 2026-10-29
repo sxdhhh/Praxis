@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import dev.praxis.core.data.settings.SettingsRepository
+import dev.praxis.core.model.settings.ModelAdvancedSettings
 import dev.praxis.core.model.settings.ModelSettings
 import kotlinx.coroutines.launch
 
@@ -43,6 +44,11 @@ fun ModelRoute(
     val modelSettings by repository.modelSettings.collectAsState(
         initial = ModelSettings(),
     )
+    // 进阶配置（自定义请求头 + 请求队列）。单独一条流，理由见
+    // `ModelAdvancedSettings` 的 KDoc：里面的值可能含令牌，不与模型参数混在一起。
+    val advanced by repository.modelAdvancedSettings.collectAsState(
+        initial = ModelAdvancedSettings(),
+    )
     val scope = rememberCoroutineScope()
     // 密钥单独读一次（不进 data class，避免跟随配置对象到处流）。
     val keyMasked = remember { mutableStateOf("") }
@@ -69,11 +75,13 @@ fun ModelRoute(
 
     ModelScreen(
         settings = modelSettings,
+        advanced = advanced,
         apiKeyMasked = keyMasked.value,
         savedApiKey = keyPlain.value,
         modelCatalogFetcher = modelCatalogFetcher,
         onSave = { baseUrl, model, modelIndex, apiKey, provider, temperature,
-            contextLimit, compactThreshold, thinkingEffort ->
+            contextLimit, compactThreshold, thinkingEffort,
+            customHeaders, requestLimitPerMinute, maxConcurrentRequests ->
             scope.launch {
                 repository.setBaseUrl(baseUrl)
                 // 上下文三项一起写：它们决定进度条与压缩行为，
@@ -105,6 +113,11 @@ fun ModelRoute(
                     keyPlain.value = apiKey
                     keyMasked.value = maskApiKey(apiKey)
                 }
+                // 进阶配置三项一起写：分开写会出现「头更新了但限流没更新」
+                // 的半截状态，而这三项在请求路径上是一起被读的。
+                repository.setCustomHeaders(customHeaders)
+                repository.setRequestLimitPerMinute(requestLimitPerMinute)
+                repository.setMaxConcurrentRequests(maxConcurrentRequests)
             }
         },
         onClearApiKey = {

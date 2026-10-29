@@ -55,6 +55,24 @@ import java.util.concurrent.TimeUnit
 class OpenAiCompatProvider(
     private val baseUrl: String,
     private val apiKey: String,
+    /**
+     * 用户自定义请求头（设置页「自定义请求头」分区）。
+     *
+     * ## 为什么默认值放在这里而不是让调用方一定传
+     *
+     * 标题生成、模型列表拉取等调用点不关心自定义头，传空表等于
+     * 「没有额外要求」。给默认值才能让这些调用点不改一行、行为不变。
+     *
+     * ## 与内置头的顺序
+     *
+     * 自定义头**后加**：OkHttp 的 `addHeader` 是追加，不是覆盖。
+     * 所以用户填 `Authorization: Bearer xxx` 时，请求会带两个
+     * Authorization —— 这是刻意的：中转站有时要求保留原始 Bearer，
+     * 同时又要求一个自定义标识头。若用户想**替换**内置 Authorization，
+     * 他应当把 apiKey 留空（见 `stream()` 里的 `isNotBlank` 判断）。
+     */
+    private val customHeaders: List<dev.praxis.core.model.settings.CustomHeader> =
+        emptyList(),
     private val client: OkHttpClient = defaultClient(),
     private val json: Json = Json { ignoreUnknownKeys = true; isLenient = true },
 ) : AiProvider {
@@ -72,6 +90,22 @@ class OpenAiCompatProvider(
             .addHeader("Accept", "text/event-stream")
             .apply {
                 if (apiKey.isNotBlank()) addHeader("Authorization", "Bearer $apiKey")
+                // 用户自定义头（设置页可配）。
+                //
+                // ## 为什么要过滤非法头名
+                //
+                // OkHttp 对头名做严格校验，含空格 / 冒号 / 中文的头名会抛
+                // `IllegalArgumentException` —— 那会让**整个请求**崩掉，
+                // 而用户只是多填了一行空行。这里静默跳过非法项：
+                // 发得出去比「为了一个手误什么都不发」重要。
+                customHeaders.forEach { (name, value) ->
+                    val n = name.trim()
+                    if (isValidHeaderName(n)) {
+                        // 值里的换行也必须去掉：HTTP 头值不允许 CR/LF，
+                        // 而用户从别处粘贴时很容易带上。
+                        addHeader(n, value.replace("\r", "").replace("\n", "").trim())
+                    }
+                }
             }
             .post(body.toRequestBody(JSON_MEDIA_TYPE))
             .build()
@@ -160,6 +194,22 @@ class OpenAiCompatProvider(
      * 这里只留一行委托，避免出现「上游改了规则、这一份没改」的第二份实现。
      */
     private fun endpoint(): String = ChatEndpoint.resolve(baseUrl)
+
+    /**
+     * 头名是否合法（RFC 7230 token）。
+     *
+     * ## 为什么要自己判而不交给 OkHttp
+     *
+     * OkHttp 抛的是 `IllegalArgumentException`，它会被外面当成
+     * 「网络异常」报给用户，提示完全不搭（用户看到的是「网络失败」，
+     * 实际是头名写错了）。这里先挡掉，只在日志层面留白。
+     */
+    private fun isValidHeaderName(name: String): Boolean {
+        if (name.isEmpty()) return false
+        return name.all { c ->
+            c.isLetterOrDigit() || c in "!#$%&'*+-.^_`|~"
+        }
+    }
 
     private fun buildRequestBody(request: ChatRequest) = buildJsonObject {
         put("model", request.model)

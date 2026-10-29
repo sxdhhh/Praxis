@@ -6,6 +6,7 @@ import dev.praxis.core.ai.AiException
 import dev.praxis.core.ai.AiProvider
 import dev.praxis.core.ai.AiStreamEvent
 import dev.praxis.core.ai.ChatRequest
+import dev.praxis.core.ai.RequestThrottle
 import dev.praxis.core.data.settings.SettingsRepository
 import dev.praxis.core.model.settings.FunctionSlot
 import kotlinx.coroutines.flow.Flow
@@ -52,6 +53,8 @@ class SettingsBackedProvider(
         // 覆盖模型（单值，不存在池子），所以要用 resolve 后的 model。
         val chatOverride = repository.functionModelSettings.first()
             .resolve(FunctionSlot.CHAT, settings)
+        // 进阶配置（自定义请求头 + 请求队列）。两件事都要在**发请求前**取到。
+        val advanced = repository.modelAdvancedSettings.first()
         val apiKey = repository.apiKey()
 
         // 未配置时给出**可操作**的错误，而不是发一个注定 401 的请求。
@@ -71,7 +74,25 @@ class SettingsBackedProvider(
             )
         }
 
-        val delegate = OpenAiCompatProvider(
+        // ── 请求节流（对齐 Operit 的 RateLimitedAIService）───────────
+        //
+        // 位置很关键：必须在**建请求之前**等到名额，否则并发/限流就只是
+        // 记账而不是控制。
+        //
+        // ## 节流器为什么是「按配置值缓存」而不是每次新建
+        //
+        // 限流窗口与并发闸门必须跨请求存活，否则「每分钟 10 次」就变成
+        // 「每个请求各自 10 次」—— 完全失效。所以不能每次新建。
+        //
+        // 但也不能写成单例常量：用户把 10 改成 30 之后必须立刻生效，
+        // 固定实例要等进程重启。
+        //
+        // 折中：按 `(rpm, concurrency)` 缓存（见 [throttleFor]）——
+        // 值不变就复用同一实例（窗口连续），值一变就换新实例（立即生效）。
+        val throttle = throttleFor(advanced.requestLimitPerMinute, advanced.maxConcurrentRequests)
+        val permit = if (throttle.isNoOp) null else throttle.acquire()
+        try {
+            val delegate = OpenAiCompatProvider(
             // ## 必须用 resolve 后的 baseUrl（2026-10-29）
             //
             // 功能模型页允许给「对话」单独填地址（比如主模型走中转站、
@@ -81,31 +102,90 @@ class SettingsBackedProvider(
             // `resolve` 已处理回落：未覆盖时它就是 `global.baseUrl`。
             baseUrl = chatOverride.baseUrl,
             apiKey = apiKey,
+            // 自定义请求头：很多中转站靠这个标识账号/渠道，不传直接 401。
+            customHeaders = advanced.customHeaders,
         )
         // temperature 必须在这里覆盖：`ChatRequest` 的默认值是写死的 0.7，
         // 而 `ChatViewModel` 构造 `ChatRequest` 时不带 temperature。
         // 之前只 copy 了 model，导致设置页存下的温度**从来没有进过请求体** ——
         // 表现为「改了温度没任何变化」。model 与 temperature 都取设置里的值。
-        emitAll(
-            delegate.stream(
-                request.copy(
-                    // ## 必须用 `activeModel` 而不是 `settings.model`（2026-10-24 修）
-                    //
-                    // `settings.model` 现在是**模型池**（逗号分隔多个），
-                    // 直接塞进请求体会把 `"a,b,c"` 整串发给服务端 ——
-                    // 那不是一个存在的模型名，必然 400（model not found）。
-                    //
-                    // `activeModel` 按 `modelIndex` 从池里取**单个**，
-                    // 越界时回落第 0 个。这是 1:1 对齐 Operit
-                    // `MultiServiceManager.createServiceFromConfig` 的做法：
-                    // 那里也是 `getValidModelIndex` + `getModelByIndex`
-                    // 先算出 `selectedModelName`，再 `copy(modelName = ...)`。
-                    // 覆盖生效时用覆盖的模型（单值）；未覆盖时 resolve 已回落
-                    // 到 `global.activeModel`（池子里当前选中的那个）。
-                    model = chatOverride.model,
-                    temperature = chatOverride.temperature,
+            emitAll(
+                delegate.stream(
+                    request.copy(
+                        // ## 必须用 `activeModel` 而不是 `settings.model`（2026-10-24 修）
+                        //
+                        // `settings.model` 现在是**模型池**（逗号分隔多个），
+                        // 直接塞进请求体会把 `"a,b,c"` 整串发给服务端 ——
+                        // 那不是一个存在的模型名，必然 400（model not found）。
+                        //
+                        // `activeModel` 按 `modelIndex` 从池里取**单个**，
+                        // 越界时回落第 0 个。这是 1:1 对齐 Operit
+                        // `MultiServiceManager.createServiceFromConfig` 的做法：
+                        // 那里也是 `getValidModelIndex` + `getModelByIndex`
+                        // 先算出 `selectedModelName`，再 `copy(modelName = ...)`。
+                        // 覆盖生效时用覆盖的模型（单值）；未覆盖时 resolve 已回落
+                        // 到 `global.activeModel`（池子里当前选中的那个）。
+                        model = chatOverride.model,
+                        temperature = chatOverride.temperature,
+                    ),
                 ),
-            ),
-        )
+            )
+        } finally {
+            // 一定要在 finally 里还名额：emitAll 抛异常（网络错误、用户取消、
+            // 上游 4xx）时若不还，并发名额就永久泄漏，几次之后彻底卡死。
+            permit?.close()
+        }
+    }
+
+    companion object {
+        /**
+         * 节流器缓存。
+         *
+         * ## 为什么按配置值缓存而不是单例一个
+         *
+         * 用户在设置页把「每分钟 10 次」改成 30，必须**立刻**生效（下次请求
+         * 就用新额度）。若固定一个实例，改动要等进程重启。
+         *
+         * 反过来也不能每次都新建 —— 新建等于窗口清零，「限流」形同虚设。
+         *
+         * 按 `(rpm, concurrency)` 作为 key 缓存：值不变就复用（窗口连续），
+         * 值一变就换新实例（立即生效）。旧实例被丢弃时它内部的计数随之消失，
+         * 这正是「换了配置就该重新开始计」的语义。
+         */
+        private val throttles = java.util.concurrent.ConcurrentHashMap<String, RequestThrottle>()
+
+        /**
+         * 取当前配置对应的节流器。
+         *
+         * ## 为什么只保留**一份**（换配置时清掉旧的）
+         *
+         * 如果按 key 累积缓存，用户「10 → 30 → 10」来回改三次之后，
+         * 第三次会拿到**最初那个**实例 —— 它内部的滑动窗口还停在上一次的
+         * 时间戳上，实际额度比用户看到的配置更紧（或者更松）。
+         *
+         * 那是个极难查的 bug：用户改回 10 次/分钟，却发现自己只能发 3 次
+         * 就卡住了，因为窗口里还残留着改配置之前的记录。
+         *
+         * 正确语义是「配置一变就重新开始计」，所以这里同时候只留一份：
+         * 新配置进来时把其它配置的实例全部丢掉。
+         */
+        internal fun throttleFor(rpm: Int, concurrency: Int): RequestThrottle {
+            if (rpm <= 0 && concurrency <= 0) return NO_OP_THROTTLE
+            val key = "$rpm|$concurrency"
+            // 已经只缓存这一份时直接复用（窗口连续）。
+            val existing = throttles[key]
+            if (existing != null && throttles.size == 1) return existing
+            // 配置变了：清掉所有旧实例，只留新的 —— 等价于「重新开始计」。
+            val fresh = RequestThrottle(rpm, concurrency)
+            throttles.clear()
+            throttles[key] = fresh
+            return fresh
+        }
+
+        /** 两个限制都未配时的共享空实例（不持有任何状态）。 */
+        private val NO_OP_THROTTLE = RequestThrottle(0, 0)
+
+        /** 仅供单测：清掉缓存，避免测试间互相影响。 */
+        internal fun resetThrottleCacheForTest() = throttles.clear()
     }
 }
