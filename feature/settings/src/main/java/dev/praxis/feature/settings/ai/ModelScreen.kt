@@ -1,6 +1,14 @@
 package dev.praxis.feature.settings.ai
 
 import dev.praxis.feature.settings.common.SettingsList
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.DataObject
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,7 +43,6 @@ import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.RadioButton
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
@@ -321,13 +328,21 @@ fun ModelScreen(
         // 这里不再补一个 Spacer —— 两道加起来是 24dp，与其余页面的 12dp 不一致。
         // ── 服务商 ──────────────────────────────────────────────────
         //
-        // 这里**不加** SmallTitle：卡片里只有这一行，行标题已经写着「服务商」，
-        // 再加分组标题会在同一屏出现两条一模一样的「服务商」。
-        // 其余分组有多行内容，才需要分组标题。
+        // 旧实现这里**不加**分组标题，理由是「卡片里只有一行，行标题已写着
+        // 「服务商」」。但那之后卡片里多出了说明文字与本地服务商提示，
+        // 且整页七个分区里只有它没有标题 —— 扫视时会显得缺了一级。
+        // 现在统一补上 SettingsSectionHeader（1:1 对齐 Operit：每个分区
+        // 都有图标 + 标题 + 副标题）。
+        item {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Cloud,
+                title = "服务商",
+                subtitle = "选一个预置服务商可自动填好地址与模型",
+            )
+        }
         item {
             Card(
                 modifier = Modifier
-                    .padding(top = 12.dp)
                     .padding(horizontal = 12.dp)
                     .padding(bottom = 12.dp),
             ) {
@@ -373,7 +388,13 @@ fun ModelScreen(
         }
 
         // ── 接口地址 ────────────────────────────────────────────────
-        item { SmallTitle("接口地址") }
+        item {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Link,
+                title = "接口地址",
+                subtitle = "服务商的 API 根地址，三种写法都接受",
+            )
+        }
         item {
             Card(
                 modifier = Modifier
@@ -423,7 +444,13 @@ fun ModelScreen(
         }
 
         // ── API Key ────────────────────────────────────────────────
-        item { SmallTitle("API Key") }
+        item {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Key,
+                title = "API Key",
+                subtitle = "加密保存在本机，不上传任何服务器",
+            )
+        }
         item {
             Card(
                 modifier = Modifier
@@ -494,7 +521,13 @@ fun ModelScreen(
         }
 
         // ── 模型 ────────────────────────────────────────────────────
-        item { SmallTitle("模型") }
+        item {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.DataObject,
+                title = "模型",
+                subtitle = "从服务商拉取，或手动填写模型 ID",
+            )
+        }
         item {
             Card(
                 modifier = Modifier
@@ -652,7 +685,13 @@ fun ModelScreen(
         // 只做 temperature：它是 `OpenAiCompatProvider` 真正写进请求体的四个参数
         // 之一（model / stream / temperature / max_tokens）。
         // topP / topK / penalty 在请求体里没有对应字段，放进来就是假的。
-        item { SmallTitle("参数") }
+        item {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Tune,
+                title = "参数",
+                subtitle = "采样温度等影响输出风格的项",
+            )
+        }
         item {
             Card(
                 modifier = Modifier
@@ -687,7 +726,13 @@ fun ModelScreen(
         // 同一个模型 ID 在不同服务商那里上限不同（128k / 32k / 按套餐）。
         // 内置表必然过时，且会给出一条「系统认为你超了但其实能发」的假告警。
         // 填 0 表示未知 —— 此时只显示已用量，不画比例，也不做压缩判断。
-        item { SmallTitle("上下文") }
+        item {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Storage,
+                title = "上下文",
+                subtitle = "上下文长度上限，以及超限时的压缩阈值",
+            )
+        }
         item {
             Card(
                 modifier = Modifier
@@ -756,7 +801,13 @@ fun ModelScreen(
         // 各家参数名与取值域都不同（`reasoning_effort` / `thinking_budget` /
         // `enable_thinking`）。抽象成 None/Low/Medium/High 四档由 provider 翻译，
         // 用户换服务商时不用重配，也不会因为填错值直接 400。
-        item { SmallTitle("思考") }
+        item {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Psychology,
+                title = "思考",
+                subtitle = "推理强度。越高越慢越贵，复杂任务才需要",
+            )
+        }
         item {
             Card(
                 modifier = Modifier
