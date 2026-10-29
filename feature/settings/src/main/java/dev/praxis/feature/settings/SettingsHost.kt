@@ -285,7 +285,14 @@ private fun SettingsPageBody(
             modifier = modifier,
             modelCatalogFetcher = modelCatalogFetcher,
         )
-        PraxisRoute.SettingsFunctionModel -> FunctionModelRoute(repository, modifier)
+        // 功能位也要能拉模型列表：与主模型页共用一个 fetcher。
+        // 不传的话功能位只剩手填输入框 —— 用户得回上一页抄模型 id，
+        // 抄错一个字符就是 400 model not found。
+        PraxisRoute.SettingsFunctionModel -> FunctionModelRoute(
+            repository = repository,
+            modifier = modifier,
+            modelCatalogFetcher = modelCatalogFetcher,
+        )
         PraxisRoute.SettingsSystemPrompt -> SystemPromptRoute(repository, modifier)
 
         // ── 角色卡系统 ──
