@@ -413,4 +413,80 @@ class WiringGuardTest {
             headerCount >= 7,
         )
     }
+
+
+    /**
+     * 主对话必须吃 `FunctionSlot.CHAT` 的覆盖。
+     *
+     * ## 它防的是什么（2026-10-29）
+     *
+     * `FunctionSlot.CHAT` 一直存在于枚举里，「功能模型」页也遍历展示、
+     * 能编辑、能保存 —— 但全仓**没有任何地方 resolve 它**。
+     * 于是用户给「对话」配了模型与地址，存进 DataStore 后再也没被读过：
+     * 主对话永远用全局那一套。这是典型的「有 UI 无接线」假控件。
+     *
+     * 修法：`SettingsBackedProvider` 在每次请求时
+     * `resolve(FunctionSlot.CHAT, settings)`，用它的 model / baseUrl /
+     * temperature；连「是否已配置」的判据也换成 resolve 后的值 ——
+     * 否则只给功能位填了地址的用户会被误判成「未配置」。
+     */
+    @Test
+    fun chatProvider_honoursFunctionSlotChatOverride() {
+        val provider = read("app/src/main/java/dev/praxis/data/ai/SettingsBackedProvider.kt")
+        assertTrue(
+            "SettingsBackedProvider 必须 resolve FunctionSlot.CHAT",
+            provider.contains("resolve(FunctionSlot.CHAT, settings)"),
+        )
+        assertTrue(
+            "baseUrl 必须用 resolve 结果（否则功能位的地址是假控件）",
+            provider.contains("baseUrl = chatOverride.baseUrl"),
+        )
+        assertTrue(
+            "model 必须用 resolve 结果",
+            provider.contains("model = chatOverride.model"),
+        )
+        assertTrue(
+            "未配置判据必须看 resolve 后的值",
+            provider.contains("chatOverride.baseUrl.isBlank()"),
+        )
+    }
+
+    /**
+     * 底栏胶囊显示的模型名必须与运行时用的是同一个。
+     *
+     * 运行时走 `resolve(CHAT)`，显示若仍读 `modelSettings.activeModel`，
+     * 功能位一覆盖就会「显示 A、实际用 B」—— 用户据此判断切换失效。
+     */
+    @Test
+    fun chatTab_modelNameMatchesRuntimeResolution() {
+        val tab = read("app/src/main/java/dev/praxis/ui/tab/ChatTab.kt")
+        assertTrue(
+            "底栏模型名必须来自 resolve(CHAT) 的结果",
+            tab.contains("modelName = chatDisplayModel"),
+        )
+        assertTrue(
+            "必须存在 chatDisplayModel 的解析",
+            tab.contains("FunctionSlot.CHAT"),
+        )
+        assertTrue(
+            "不应再直接用 modelSettings.activeModel 作为显示名",
+            !tab.contains("modelName = modelSettings.activeModel"),
+        )
+    }
+
+    /**
+     * 摘要模型的回落链必须跟随主对话（CHAT 覆盖）。
+     */
+    @Test
+    fun summaryModel_followsChatOverride() {
+        val app = read("app/src/main/java/dev/praxis/ui/PraxisApp.kt")
+        assertTrue(
+            "summaryModelProvider 必须先算 CHAT 覆盖再 resolve 摘要位",
+            app.contains("val forSummary = global.copy("),
+        )
+        assertTrue(
+            "摘要回落必须用 forSummary 而不是原始 global",
+            app.contains("forSummary,"),
+        )
+    }
 }

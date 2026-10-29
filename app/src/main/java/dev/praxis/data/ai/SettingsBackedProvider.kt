@@ -7,6 +7,7 @@ import dev.praxis.core.ai.AiProvider
 import dev.praxis.core.ai.AiStreamEvent
 import dev.praxis.core.ai.ChatRequest
 import dev.praxis.core.data.settings.SettingsRepository
+import dev.praxis.core.model.settings.FunctionSlot
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
@@ -34,10 +35,34 @@ class SettingsBackedProvider(
 
     override fun stream(request: ChatRequest): Flow<AiStreamEvent> = flow {
         val settings = repository.modelSettings.first()
+        // ## CHAT 功能位的覆盖必须生效（2026-10-29 修）
+        //
+        // 这里原先是直接读 `settings`（全局），于是「功能模型」页里
+        // 给「对话」那一项配的模型与地址**存进去了但从来没用过** ——
+        // `FunctionSlot.CHAT` 在设置页会遍历展示、能编辑、能保存，
+        // 但全仓没有任何地方 `resolve(CHAT)`。用户改了主对话模型没反应。
+        //
+        // 现在按 Operit 的 `setConfigForFunction(FunctionType.CHAT, ...)` 语义，
+        // 主对话也走功能位解析：有覆盖用覆盖，没覆盖逐字段回落全局。
+        //
+        // 为什么是「逐字段」而不是「整块替换」：
+        // `resolve()` 内部已经处理了回落（`o.model ?: global.activeModel`、
+        // `o.baseUrl ?: global.baseUrl`），所以直接用它的返回值即可；
+        // 但 `modelIndex` 的语义需要额外想清楚 —— 覆盖时它指向的是
+        // 覆盖模型（单值，不存在池子），所以要用 resolve 后的 model。
+        val chatOverride = repository.functionModelSettings.first()
+            .resolve(FunctionSlot.CHAT, settings)
         val apiKey = repository.apiKey()
 
         // 未配置时给出**可操作**的错误，而不是发一个注定 401 的请求。
-        if (!settings.isConfigured) {
+        //
+        // ## 判据必须看 resolve 之后的值（2026-10-29）
+        //
+        // `settings.isConfigured` 只看全局的 `baseUrl` + `activeModel`。
+        // 若用户只给「对话」功能位填了地址与模型（全局留空），
+        // 旧判据会在这里拦下来、报「模型未配置」—— 明明配好了却发不出去。
+        // 所以把 resolve 的结果当作判断依据。
+        if (chatOverride.baseUrl.isBlank() || chatOverride.model.isBlank()) {
             throw AiException(
                 AiError(
                     kind = AiErrorKind.INVALID_REQUEST,
@@ -47,7 +72,14 @@ class SettingsBackedProvider(
         }
 
         val delegate = OpenAiCompatProvider(
-            baseUrl = settings.baseUrl,
+            // ## 必须用 resolve 后的 baseUrl（2026-10-29）
+            //
+            // 功能模型页允许给「对话」单独填地址（比如主模型走中转站、
+            // 对话走官方端点）。如果这里仍读 `settings.baseUrl`，
+            // 那个字段就是**存了但没用**的假控件 —— 用户改完地址毫无变化。
+            //
+            // `resolve` 已处理回落：未覆盖时它就是 `global.baseUrl`。
+            baseUrl = chatOverride.baseUrl,
             apiKey = apiKey,
         )
         // temperature 必须在这里覆盖：`ChatRequest` 的默认值是写死的 0.7，
@@ -68,8 +100,10 @@ class SettingsBackedProvider(
                     // `MultiServiceManager.createServiceFromConfig` 的做法：
                     // 那里也是 `getValidModelIndex` + `getModelByIndex`
                     // 先算出 `selectedModelName`，再 `copy(modelName = ...)`。
-                    model = settings.activeModel,
-                    temperature = settings.temperature,
+                    // 覆盖生效时用覆盖的模型（单值）；未覆盖时 resolve 已回落
+                    // 到 `global.activeModel`（池子里当前选中的那个）。
+                    model = chatOverride.model,
+                    temperature = chatOverride.temperature,
                 ),
             ),
         )

@@ -412,9 +412,31 @@ fun PraxisApp(
                 summaryModelProvider = {
                     val global = settingsRepository.modelSettings.first()
                     val fm = settingsRepository.functionModelSettings.first()
+                    // ## 回落链要跟着主对话走（2026-10-29）
+                    //
+                    // 摘要功能位没单独指定模型时，它应该用「主对话在用的那个」。
+                    // 而主对话现在可能被 `FunctionSlot.CHAT` 覆盖（见
+                    // `SettingsBackedProvider`）。若这里仍拿 `global` 去 resolve，
+                    // 摘要会用全局池里的模型 —— 与主对话用的不一致。
+                    //
+                    // 换算一次：把 CHAT 的覆盖结果**当成新的 global** 再 resolve，
+                    // 于是「CHAT 覆盖 → 摘要跟随覆盖值」这条链自然成立，
+                    // 而「CHAT 未覆盖 → 仍是 global」也不变。
+                    val chat = fm.resolve(
+                        dev.praxis.core.model.settings.FunctionSlot.CHAT,
+                        global,
+                    )
+                    val forSummary = global.copy(
+                        baseUrl = chat.baseUrl,
+                        model = chat.model,
+                        // 摘要模型必须是单值：`resolve` 对未覆盖分支读
+                        // `global.activeModel`，而 activeModel 按 modelIndex 从
+                        // 池里取。把池子缩成单个模型，索引必然落在 0。
+                        modelIndex = 0,
+                    )
                     fm.resolve(
                         dev.praxis.core.model.settings.FunctionSlot.CONTEXT_SUMMARY,
-                        global,
+                        forSummary,
                     ).model
                 },
                 /**
