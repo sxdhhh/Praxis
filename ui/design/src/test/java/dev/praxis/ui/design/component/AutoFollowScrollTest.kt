@@ -1,5 +1,6 @@
 package dev.praxis.ui.design.component
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -156,5 +157,82 @@ class AutoFollowScrollTest {
     @Test
     fun `totalItems 为 0 时不算到底`() {
         assertFalse(isAtBottom(ready = true, lastVisibleIndex = 0, totalItems = 0))
+    }
+
+    // ── unknownRemainingPx（2026-10-29：止抽搐）───────────────
+
+    /**
+     * 末项未进视口时，剩余量**不得超过一屏**。
+     *
+     * 旧实现返回整屏（≈2000px），弹簧的 a ∝ target 会被顶到 260000 px/s²，
+     * 一帧就把速度干到 4000px/s；末项入视口后刹不住 → 冲过头再顿一下，
+     * 这就是用户说的「时而抽搐时而正常」。
+     */
+    @Test
+    fun `未知剩余量 不超过一屏`() {
+        val px = unknownRemainingPx(
+            lastItemSize = 4000,   // 夸张地大（工具卡可能真有这么高）
+            afterContentPadding = 0,
+            viewportHeight = 2000,
+        )
+        assertTrue("不应超过视口高度，实际 $px", px <= 2000)
+    }
+
+    /** 剩余量至少推进一项，否则末项永远进不了视口（会死循环）。 */
+    @Test
+    fun `未知剩余量 至少一项高度`() {
+        val px = unknownRemainingPx(
+            lastItemSize = 120,
+            afterContentPadding = 8,
+            viewportHeight = 2000,
+        )
+        assertEquals(128, px)
+    }
+
+    /** 条目高度为 0（未测量完）时不能返回 0。 */
+    @Test
+    fun `未知剩余量 零高度时仍为正`() {
+        assertTrue(
+            unknownRemainingPx(lastItemSize = 0, afterContentPadding = 0, viewportHeight = 0) > 0,
+        )
+    }
+
+    // ── nextAutoFollow（2026-10-29）─────────────────────────
+
+    /**
+     * 到底了就必须恢复跟随 —— 即使此刻 isScrollInProgress 为 true。
+     *
+     * 这对应真机上的一个具体场景：用户手动滑到底，回弹动画还没结束。
+     * 若先判 inProgress，会被当成「离开底部」→ 之后的新内容不跟随。
+     */
+    @Test
+    fun `到底优先 即便正在滚动 `() {
+        assertTrue(
+            nextAutoFollow(atBottom = true, inProgress = true, selfScroll = false, current = false),
+        )
+    }
+
+    /** 用户自己拖离底部 → 关跟随。 */
+    @Test
+    fun `用户拖离底部 关闭跟随`() {
+        assertFalse(
+            nextAutoFollow(atBottom = false, inProgress = true, selfScroll = false, current = true),
+        )
+    }
+
+    /** 我们自己的滚动不能关跟随（否则「滚两下就不跟了」）。 */
+    @Test
+    fun `自身滚动 不改跟随`() {
+        assertTrue(
+            nextAutoFollow(atBottom = false, inProgress = true, selfScroll = true, current = true),
+        )
+    }
+
+    /** 静止且不在底部：保持原状（不要因为一次探测就把跟随掀了）。 */
+    @Test
+    fun `静止时保持原状态`() {
+        assertTrue(
+            nextAutoFollow(atBottom = false, inProgress = false, selfScroll = false, current = true),
+        )
     }
 }
