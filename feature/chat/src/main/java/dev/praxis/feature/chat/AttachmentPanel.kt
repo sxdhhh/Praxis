@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -155,10 +154,24 @@ fun AttachmentPanel(
             ) {
                 Card(
                     modifier = Modifier
-                        // bottom = 44dp：与 Tune 的卡片同一抬起量（让出底栏高度）。
-                        .padding(bottom = 44.dp, end = 12.dp)
-                        .widthIn(max = 420.dp)
-                        .fillMaxWidth()
+                        // ## 尺寸与抬起量必须与「功能弹窗」一致（2026-10-29 修）
+                        //
+                        // 旧值：`bottom = 44.dp, end = 12.dp, widthIn(max=420dp) + fillMaxWidth`。
+                        // 后果（截图对比）：这个面板比下面的功能面板**宽得多、也低得多**，
+                        // 两者底边不在一条线上，视觉上像两个不相干的浮层。
+                        //
+                        // 三处浮层（模型选择 / 功能 / 附件）应当是**同一块板的三种内容**：
+                        // 同宽、同右边距、同底边。基准取功能弹窗
+                        // （`ChatSettingsBar` 的 `width(280.dp)` +
+                        // `padding(bottom = 96.dp, end = 8.dp)`）。
+                        //
+                        // 为什么去掉 `fillMaxWidth()`：它与 `width(280.dp)` 互斥，
+                        // 留着会按父级铺满，宽度又被撑回满屏。宽度只由 width 决定。
+                        .padding(bottom = 96.dp, end = 8.dp)
+                        .width(280.dp)
+                        // 高度上限也与功能弹窗一致：8 个格子（2 行）远小于 420dp，
+                        // 这里给上限只是为了让三块板的“最大高度”口径相同。
+                        .heightIn(max = 420.dp)
                         // 卡片自己吃掉点击，否则点格子会被外层 Box 的 onClick 关掉。
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
