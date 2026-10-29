@@ -722,9 +722,18 @@ fun ModelPill(
                 ) {
                     Card(
                         modifier = Modifier
-                            .padding(bottom = 44.dp, end = 12.dp)
-                            .width(260.dp)
-                            .heightIn(max = 380.dp)
+                            // ## 三块浮层共用同一套尺寸（2026-10-29 修）
+                            //
+                            // 旧值 `bottom = 44.dp / end = 12.dp / width = 260.dp /
+                            // max = 380.dp` 与功能弹窗（96 / 8 / 280 / 420）不一致，
+                            // 于是点开模型选择时卡片明显**比功能面板低一截、窄一圈**，
+                            // 底边不在同一条线上。
+                            //
+                            // 三块浮层现在共用同一组值，切换时卡片位置不动，
+                            // 只有内容变 —— 这才是“同一块板的三种内容”。
+                            .padding(bottom = 96.dp, end = 8.dp)
+                            .width(280.dp)
+                            .heightIn(max = 420.dp)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,

@@ -230,4 +230,100 @@ class WiringGuardTest {
             vm.contains("unwrapToolSummary("),
         )
     }
+
+
+    /**
+     * 底栏三个浮层必须共用同一套尺寸与抬起量。
+     *
+     * ## 它防的是什么
+     *
+     * 模型选择 / 功能 / 附件（图片·拍照·记忆…）是**同一块板的三种内容**：
+     * 用户点不同按钮时，卡片应该原地换内容，而不是换位置、换宽窄。
+     *
+     * 这三处曾经各写各的：
+     *   - 功能弹窗  bottom=96 / end=8  / width=280 / max=420
+     *   - 模型选择  bottom=44 / end=12 / width=260 / max=380
+     *   - 附件面板  bottom=44 / end=12 / widthIn(max=420)+fillMaxWidth
+     *
+     * 结果就是截图上看到的：点开附件面板，卡片**明显更宽、更矮**，底边
+     * 与功能面板不在一条线上。
+     *
+     * 这类偏差**编译器与 lint 都不报**，页面上也“能看”，只是不像同一套 UI。
+     * 只能靠源码断言钉住。
+     */
+    @Test
+    fun bottomSheets_shareSameSizeAndLift() {
+        val settings = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatSettingsBar.kt")
+        val attachment = read("feature/chat/src/main/java/dev/praxis/feature/chat/AttachmentPanel.kt")
+
+        // 三处都必须出现这一组值（功能弹窗 + 模型选择 → settings；附件 → attachment）。
+        val expected = listOf(".padding(bottom = 96.dp, end = 8.dp)", ".width(280.dp)")
+        expected.forEach { needle ->
+            assertTrue(
+                "ChatSettingsBar 缺少统一尺寸 $needle（两个弹窗都要有，出现次数=${countOf(settings, needle)}）",
+                countOf(settings, needle) >= 2,
+            )
+            assertTrue(
+                "AttachmentPanel 缺少统一尺寸 $needle",
+                attachment.contains(needle),
+            )
+        }
+        // 附件面板不允许再出现 fillMaxWidth（会把宽度撑回满屏）。
+        assertTrue(
+            "AttachmentPanel 的 Card 不应使用 fillMaxWidth（宽度由 width(280.dp) 决定）",
+            !attachment.contains(".widthIn(max = 420.dp)
+                        .fillMaxWidth()"),
+        )
+    }
+
+    private fun countOf(haystack: String, needle: String): Int =
+        haystack.split(needle).size - 1
+
+
+    /**
+     * 底栏三个浮层必须共用同一套尺寸与抬起量。
+     *
+     * ## 它防的是什么
+     *
+     * 模型选择 / 功能 / 附件（图片·拍照·记忆…）是**同一块板的三种内容**：
+     * 用户点不同按钮时，卡片应该原地换内容，而不是换位置、换宽窄。
+     *
+     * 这三处曾经各写各的：
+     *   - 功能弹窗  bottom=96 / end=8  / width=280 / max=420
+     *   - 模型选择  bottom=44 / end=12 / width=260 / max=380
+     *   - 附件面板  bottom=44 / end=12 / widthIn(max=420)+fillMaxWidth
+     *
+     * 结果就是截图上看到的：点开附件面板，卡片**明显更宽、更矮**，底边
+     * 与功能面板不在一条线上。
+     *
+     * 这类偏差**编译器与 lint 都不报**，页面上也“能看”，只是不像同一套 UI。
+     * 只能靠源码断言钉住。
+     */
+    @Test
+    fun bottomSheets_shareSameSizeAndLift() {
+        val settings = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatSettingsBar.kt")
+        val attachment = read("feature/chat/src/main/java/dev/praxis/feature/chat/AttachmentPanel.kt")
+
+        // 三处都必须出现这一组值（功能弹窗 + 模型选择 → settings；附件 → attachment）。
+        val expected = listOf(".padding(bottom = 96.dp, end = 8.dp)", ".width(280.dp)")
+        expected.forEach { needle ->
+            assertTrue(
+                "ChatSettingsBar 缺少统一尺寸 $needle（两个弹窗都要有，出现次数=${countOf(settings, needle)}）",
+                countOf(settings, needle) >= 2,
+            )
+            assertTrue(
+                "AttachmentPanel 缺少统一尺寸 $needle",
+                attachment.contains(needle),
+            )
+        }
+        // 附件面板不允许再出现 fillMaxWidth（会把宽度撑回满屏）。
+        assertTrue(
+            "AttachmentPanel 的 Card 不应使用 fillMaxWidth（宽度由 width(280.dp) 决定）",
+            !attachment.contains(".widthIn(max = 420.dp)
+                        .fillMaxWidth()"),
+        )
+    }
+
+    private fun countOf(haystack: String, needle: String): Int =
+        haystack.split(needle).size - 1
 }
