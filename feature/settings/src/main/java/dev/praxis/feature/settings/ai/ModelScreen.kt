@@ -56,6 +56,7 @@ import dev.praxis.core.model.settings.CustomHeader
 import dev.praxis.core.model.settings.ModelAdvancedSettings
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.clickable
+import dev.praxis.ui.widgets.FoldableContent
 
 /**
  * API 配置页（对齐 Operit `ModelApiSettingsSection` 的信息架构，控件全部 miuix）。
@@ -909,7 +910,7 @@ fun ModelScreen(
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
-                    if (headersExpanded) {
+                    FoldableContent(visible = headersExpanded) {
                         Spacer(Modifier.height(12.dp))
                         headerRows.forEachIndexed { index, row ->
                             Row(

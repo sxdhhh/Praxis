@@ -34,6 +34,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import dev.praxis.ui.widgets.FoldableContent
+import androidx.compose.foundation.layout.width
 
 /**
  * 功能模型配置页（对齐 Operit「功能模型配置」的信息架构）。
@@ -69,6 +70,13 @@ import dev.praxis.ui.widgets.FoldableContent
 @Composable
 fun FunctionModelRoute(
     repository: SettingsRepository,
+    /**
+     * 模型列表拉取端口（`:app` 注入）。
+     *
+     * 可空：未装配时功能位不给「选择」按钮，只留手填输入框 ——
+     * 与 `ModelRoute` 同一个口径（能力没装配就不画点了没反应的按钮）。
+     */
+    modelCatalogFetcher: dev.praxis.core.ai.ModelCatalogFetcher? = null,
     modifier: Modifier = Modifier,
 ) {
     val global by repository.modelSettings.collectAsState(initial = ModelSettings())
@@ -77,6 +85,63 @@ fun FunctionModelRoute(
 
     // 同时只展开一个：一次只改一处，避免多个输入框同时可编辑造成「改了哪个」的困惑。
     var expanded by remember { mutableStateOf<FunctionSlot?>(null) }
+
+    // ── 模型选择器（功能位用）──────────────────────────────────────
+    //
+    // ## 为什么功能位也要一个选择器
+    //
+    // 原本这里只有一个「模型 ID」输入框。用户得回主模型页看一遍准确 id、
+    // 记住、再回来手打 —— 打错一个字符就是 400 model not found，
+    // 而报错只写服务端原话，很难看出是拼写问题。
+    //
+    // ## 列表来源
+    //
+    // 与主模型页共用同一个 `ModelCatalogFetcher`，但地址与服务商按**功能位
+    // 自己的解析结果**（功能位可以覆盖服务商）。否则用户把某功能位切到
+    // 别家后，拉到的仍是主服务商的列表。
+    var pickerSlot by remember { mutableStateOf<FunctionSlot?>(null) }
+    var pickingModels by remember {
+        mutableStateOf<List<dev.praxis.core.ai.AiModelOption>>(emptyList()),
+    }
+    var picking by remember { mutableStateOf(false) }
+    var pickError by remember { mutableStateOf<String?>(null) }
+    // 明文密钥只用于拉列表，不进任何 UI 快照（与 ModelRoute 同一理由）。
+    var plainKey by remember { mutableStateOf("") }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        plainKey = repository.apiKey()
+    }
+
+    /** 按「功能位覆盖 → 全局」算出这次拉取要用的地址与服务商，然后拉列表。 */
+    fun fetchFor(slot: FunctionSlot) {
+        val fetcher = modelCatalogFetcher ?: return
+        if (picking) return
+        val override = functions[slot]
+        val provider = override.provider ?: global.provider
+        val baseUrl = override.baseUrl ?: global.baseUrl
+        val kind = when {
+            !provider.requiresApiKey ->
+                dev.praxis.core.ai.ModelCatalogFetcher.ProviderKind.NoAuth
+            provider == ApiProvider.OpenRouter ->
+                dev.praxis.core.ai.ModelCatalogFetcher.ProviderKind.OpenRouter
+            else -> dev.praxis.core.ai.ModelCatalogFetcher.ProviderKind.Bearer
+        }
+        picking = true
+        pickError = null
+        pickerSlot = slot
+        scope.launch {
+            val result = fetcher.fetch(baseUrl = baseUrl, apiKey = plainKey, providerKind = kind)
+            picking = false
+            result.fold(
+                onSuccess = { pickingModels = it },
+                onFailure = { error ->
+                    pickError = (error as? dev.praxis.core.ai.ModelCatalog.ParseFailure)
+                        ?.reason?.description
+                        ?: error.message
+                        ?: "未知错误"
+                },
+            )
+        }
+    }
 
     SettingsList(modifier = modifier.fillMaxSize()) {
         item { Spacer(Modifier.height(8.dp)) }
@@ -108,6 +173,13 @@ fun FunctionModelRoute(
                         resolvedModel = functions.resolve(slot, global).model,
                         expanded = expanded == slot,
                         onToggleExpand = { expanded = if (expanded == slot) null else slot },
+                        // 「选择模型」：拉列表并开弹窗。传 null 表示能力未装配
+                        // （页面不画那个按钮，而不是画一个点了没反应的）。
+                        onPickModel = if (modelCatalogFetcher != null) {
+                            { fetchFor(slot) }
+                        } else {
+                            null
+                        },
                         onModelChange = { newModel ->
                             scope.launch {
                                 val prev = functions[slot]
@@ -163,6 +235,44 @@ fun FunctionModelRoute(
 
         item { Spacer(Modifier.height(24.dp)) }
     }
+
+    // ── 模型选择弹窗（常驻挂载）─────────────────────────────
+    //
+    // ## 两个「不能」
+    //
+    // 1. **不能**放进 `SettingsList` 里：那是 LazyColumn，弹窗会随 item
+    //    滚出屏幕而被回收（`ModelScreen` 的模型弹窗也为此放在 list 之外）。
+    // 2. **不能**包 `if (pickerSlot != null)`：关窗那一刻组件就离开组合，
+    //    退场动画来不及播，表现是「啪」地消失。
+    //
+    // 所以组件常驻、只用 `visible` 控制显示；弹窗内必需的非空 slot 用
+    // `pickerSlot ?: expanded ?: first()` 兜底（不可见时用什么值都无所谓，
+    // 但必须给一个，避免可空穿透到组件签名里）。
+    //
+    // 单选：点一行就写进当前功能位并关窗。
+    val pickingSlot = pickerSlot
+        ?: expanded
+        ?: FunctionSlot.entries.first()
+    ModelSelectDialog(
+        options = pickingModels,
+        selected = functions[pickingSlot].model.orEmpty(),
+        loading = picking,
+        error = pickError,
+        onRefresh = { fetchFor(pickingSlot) },
+        onPick = { picked ->
+            scope.launch {
+                val prev = functions[pickingSlot]
+                repository.setFunctionModel(
+                    pickingSlot,
+                    prev.copy(model = picked),
+                )
+            }
+            pickerSlot = null
+        },
+        onDismiss = { pickerSlot = null },
+        visible = pickerSlot != null,
+    )
+
 }
 
 /** 一个功能位：折叠头一行，展开后是编辑区。 */
@@ -173,6 +283,8 @@ private fun FunctionSlotRow(
     resolvedModel: String,
     expanded: Boolean,
     onToggleExpand: () -> Unit,
+    /** 打开模型选择弹窗；null = 该能力未装配（不画按钮）。 */
+    onPickModel: (() -> Unit)?,
     onModelChange: (String) -> Unit,
     onProviderChange: (ApiProvider) -> Unit,
     onReset: () -> Unit,
@@ -219,15 +331,30 @@ private fun FunctionSlotRow(
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
-                TextField(
-                    value = current.model.orEmpty(),
-                    onValueChange = onModelChange,
+                // 输入框与「选择」按钮同一行：按钮是给这个框用的，
+                // 分到下一行会让人不确定它作用在哪。
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 10.dp),
-                    label = "模型 ID（留空 = 跟随全局）",
-                    singleLine = true,
-                )
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextField(
+                        value = current.model.orEmpty(),
+                        onValueChange = onModelChange,
+                        modifier = Modifier.weight(1f),
+                        label = "模型 ID（留空 = 跟随全局）",
+                        singleLine = true,
+                    )
+                    if (onPickModel != null) {
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(
+                            text = "选择",
+                            onClick = onPickModel,
+                            textStyle = MiuixTheme.textStyles.footnote1,
+                        )
+                    }
+                }
                 // 服务商切换只在「已经覆盖模型」时给：没覆盖时 provider 跟着全局走，
                 // 单独改 provider 会得到一个「地址变了但模型还是全局那个」的错配。
                 if (current.isOverridden) {

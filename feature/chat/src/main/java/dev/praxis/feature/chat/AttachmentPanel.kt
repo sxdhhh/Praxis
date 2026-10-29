@@ -36,6 +36,7 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.widgets.MiuixAnimatedPopup
 
 /**
  * 附件面板中的一个格子。
@@ -130,18 +131,18 @@ fun AttachmentPanel(
     // `Popup(TopStart)` + 满屏 `Box`（自己接点击）+ `Card` 贴 `BottomEnd`。
     // 满屏 Box 是关键：Popup 的内容尺寸若随内容变化，窗口会每帧重排
     // （那正是 2026-10-25 修过的「一抖一抖」）。满屏固定尺寸就没这问题。
-    if (visible) {
-        Popup(
-            alignment = Alignment.TopStart,
-            onDismissRequest = { onDismiss?.invoke() },
-            properties = PopupProperties(
-                focusable = true,
-                dismissOnBackPress = true,
-                // 满屏 Box 已铺满，outside 区域不存在；开着它会让
-                // 「点格子内部」也被判成 outside 而误关。
-                dismissOnClickOutside = false,
-            ),
-        ) {
+    MiuixAnimatedPopup(
+        visible = visible,
+        alignment = Alignment.TopStart,
+        onDismissRequest = { onDismiss?.invoke() },
+        properties = PopupProperties(
+            focusable = true,
+            dismissOnBackPress = true,
+            // 满屏 Box 已铺满，outside 区域不存在；开着它会让
+            // 「点格子内部」也被判成 outside 而误关。
+            dismissOnClickOutside = false,
+        ),
+    ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -249,7 +250,6 @@ fun AttachmentPanel(
                 }
             }
         }
-    }
 }
 @Composable
 private fun AttachmentCellView(

@@ -695,4 +695,92 @@ class WiringGuardTest {
             screen.contains("!= advanced.requestLimitPerMinute"),
         )
     }
+
+
+    /**
+     * 模型弹窗必须能一键全选。
+     *
+     * ## 作用域必须是「当前筛选结果」
+     *
+     * 如果全选作用在 `options`（全部模型）上，用户搜「gpt」再点全选，
+     * 会悄悄选中一堆他看不见的模型 —— 确认后模型池里多出几十个名字。
+     * 所以断言的是 `filtered`。
+     */
+    @Test
+    fun modelPicker_hasSelectAllScopedToFiltered() {
+        val dlg = read("feature/settings/src/main/java/dev/praxis/feature/settings/ai/ModelPickerDialog.kt")
+        assertTrue("必须有全选/取消全选", dlg.contains("allFilteredSelected"))
+        assertTrue(
+            "全选必须作用在当前筛选结果上（不能是 options）",
+            dlg.contains("draftIds + filtered.map { it.id }"),
+        )
+        // 取消全选也要只从可见项里移除，不能清空整个草稿。
+        assertTrue(
+            "取消全选必须只移除可见项",
+            dlg.contains("draftIds - filtered.map { it.id }.toSet()"),
+        )
+    }
+
+    /**
+     * 功能位必须能用模型选择器，而不是只能手打模型 ID。
+     */
+    @Test
+    fun functionModelScreen_hasModelPicker() {
+        val screen = read("feature/settings/src/main/java/dev/praxis/feature/settings/ai/FunctionModelScreen.kt")
+        assertTrue("功能位 Route 必须接收 fetcher", screen.contains("modelCatalogFetcher"))
+        assertTrue("必须有拉取入口", screen.contains("fun fetchFor("))
+        assertTrue("必须挂单值选择弹窗", screen.contains("ModelSelectDialog("))
+        assertTrue(
+            "弹窗必须常驻、用 visible 控制（不能包 if，否则退场动画播不了）",
+            screen.contains("visible = pickerSlot != null"),
+        )
+        // 选择后必须写回 functional 覆盖（单值），而不是池子。
+        assertTrue(
+            "选中后必须写回功能位模型",
+            screen.contains("prev.copy(model = picked)"),
+        )
+        // 地址与服务商要按功能位自己的覆盖解析，否则拉到的是主服务商的列表。
+        assertTrue(
+            "拉取必须用功能位覆盖的 baseUrl",
+            screen.contains("override.baseUrl ?: global.baseUrl"),
+        )
+    }
+
+    /**
+     * 单值选择弹窗必须存在且点击即选中。
+     */
+    @Test
+    fun modelSelectDialog_isSingleValueAndClickToPick() {
+        val dlg = read("feature/settings/src/main/java/dev/praxis/feature/settings/ai/ModelSelectDialog.kt")
+        assertTrue("必须有单选弹窗", dlg.contains("fun ModelSelectDialog("))
+        assertTrue("点击即回调选中", dlg.contains("onClick = { onPick(option.id) }"))
+        // 与多选弹窗同一套退场处理：常驻 + visible。
+        assertTrue("必须用带动画的 Dialog", dlg.contains("MiuixAnimatedDialog("))
+    }
+
+    /**
+     * 折叠/弹出必须有动画，不能直接 if 硬切。
+     */
+    @Test
+    fun modelScreen_headerSectionUsesFoldableContent() {
+        val screen = read("feature/settings/src/main/java/dev/praxis/feature/settings/ai/ModelScreen.kt")
+        assertTrue(
+            "自定义请求头分区必须用 FoldableContent（不能 if (headersExpanded) 硬切）",
+            screen.contains("FoldableContent(visible = headersExpanded)"),
+        )
+        assertTrue(
+            "不得再出现硬切的 if (headersExpanded) {",
+            !screen.contains("if (headersExpanded) {"),
+        )
+    }
+
+    /**
+     * 贴边浮层（AttachmentsPanel）必须有进出场动画。
+     */
+    @Test
+    fun attachmentPanel_usesAnimatedPopup() {
+        val panel = read("feature/chat/src/main/java/dev/praxis/feature/chat/AttachmentPanel.kt")
+        assertTrue("附件面板必须用带动画的 Popup", panel.contains("MiuixAnimatedPopup("))
+        assertTrue("必须用 visible 控制", panel.contains("visible = visible,"))
+    }
 }

@@ -231,6 +231,84 @@ fun ModelPickerDialog(
 
                 Spacer(Modifier.height(8.dp))
 
+                // ── 全选 / 取消全选（拉取后一键全选）───────────────────
+                //
+                // ## 为什么作用域是 `filtered` 而不是 `options`
+                //
+                // 用户搜「gpt」是想「把 gpt 系列全勾上」，不是「把所有模型全勾上」。
+                // 作用在 `filtered` 上，「筛选 + 全选」就自然组合成批量操作；
+                // 作用在 `options` 上则会悄悄选中一堆他看不见的模型，
+                // 确认后模型池里多出几十个名字 —— 那是最难解释的一种结果。
+                //
+                // 没有任何可选项时整行不画（列表处于错误态或空态时这一行毫无意义）。
+                if (filtered.isNotEmpty()) {
+                    val allFilteredSelected = filtered.all { it.id in draftIds }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            // 全选 / 取消全选合成一个按钮：
+                            // 两个按钮同时存在时用户每次都要先判断「现在是哪种状态」，
+                            // 而按钮上的文字已经把这个判断做完了。
+                            text = if (allFilteredSelected) {
+                                if (search.isBlank()) "取消全选" else "取消选中这批"
+                            } else {
+                                if (search.isBlank()) "全选" else "选中这批"
+                            },
+                            onClick = {
+                                draftIds = if (allFilteredSelected) {
+                                    // 只从可见项里移除，保留之前选中的其它模型。
+                                    draftIds - filtered.map { it.id }.toSet()
+                                } else {
+                                    // 同理：只并入可见项，不清掉已选的其它项。
+                                    draftIds + filtered.map { it.id }
+                                }
+                            },
+                            textStyle = MiuixTheme.textStyles.footnote1,
+                        )
+                    }
+                }
+                // ── 全选 / 取消全选（拉取后一键全选）───────────────────
+                //
+                // ## 为什么作用域是 `filtered` 而不是 `options`
+                //
+                // 用户搜「gpt」是想「把 gpt 系列全勾上」，不是「把所有模型全勾上」。
+                // 作用在 `filtered` 上，「筛选 + 全选」就自然组合成批量操作；
+                // 作用在 `options` 上则会悄悄选中一堆他看不见的模型，
+                // 确认后模型池里多出几十个名字 —— 那是最难解释的一种结果。
+                //
+                // 没有任何可选项时整行不画（列表处于错误态或空态时这一行毫无意义）。
+                if (filtered.isNotEmpty()) {
+                    val allFilteredSelected = filtered.all { it.id in draftIds }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            // 全选 / 取消全选合成一个按钮：
+                            // 两个按钮同时存在时用户每次都要先判断「现在是哪种状态」，
+                            // 而按钮上的文字已经把这个判断做完了。
+                            text = if (allFilteredSelected) {
+                                if (search.isBlank()) "取消全选" else "取消选中这批"
+                            } else {
+                                if (search.isBlank()) "全选" else "选中这批"
+                            },
+                            onClick = {
+                                draftIds = if (allFilteredSelected) {
+                                    // 只从可见项里移除，保留之前选中的其它模型。
+                                    draftIds - filtered.map { it.id }.toSet()
+                                } else {
+                                    // 同理：只并入可见项，不清掉已选的其它项。
+                                    draftIds + filtered.map { it.id }
+                                }
+                            },
+                            textStyle = MiuixTheme.textStyles.footnote1,
+                        )
+                    }
+                }
                 // ── 列表 / 错误 / 空态 ────────────────────────────────
                 //
                 // 三者互斥地占同一块区域。高度上限 320dp：超过这个高度弹窗会把
