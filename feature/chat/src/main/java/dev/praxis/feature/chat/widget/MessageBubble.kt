@@ -85,6 +85,23 @@ fun ChatMessageItem(
      * 默认空列表：保住所有现有调用点（含预览与测试）。
      */
     images: List<dev.praxis.core.ai.ChatImage> = emptyList(),
+    /**
+     * 是否画角色标签（`提问` / `回复`）。
+     *
+     * ## 为什么需要这个开关（2026-10-29）
+     *
+     * 一次「回复」在数据上是**多条** Assistant 气泡：模型先说话、调工具、
+     * 再说话、再调工具、最后收尾。每条都会建一个独立气泡（`runToolCalls`
+     * 里 `followUpId`），于是界面上同一轮回复被拆成「回复 / 回复 / 回复」
+     * 三段，中间夹着工具卡片。
+     *
+     * 正确的形态是：**一轮只打一个头**，工具卡片与后续正文都挂在同一个头下面。
+     * 由调用方（`ChatScreen`）按列表顺序算出「本条是不是本轮第一条正文」，
+     * 本组件只负责跟不跟标签。
+     *
+     * 默认 true：所有存量调用点（预览、测试）观感不变。
+     */
+    showLabel: Boolean = true,
 ) {
     when (style) {
         ChatDisplayStyle.Bubble -> MessageBubble(
@@ -95,6 +112,7 @@ fun ChatMessageItem(
             onRetry = onRetry,
             onLongPress = onLongPress,
             images = images,
+            showLabel = showLabel,
         )
         ChatDisplayStyle.Cursor -> CursorMessage(
             kind = kind,
@@ -104,6 +122,7 @@ fun ChatMessageItem(
             onRetry = onRetry,
             onLongPress = onLongPress,
             images = images,
+            showLabel = showLabel,
         )
     }
 }
@@ -306,6 +325,8 @@ private fun CursorMessage(
     onRetry: (() -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
     images: List<dev.praxis.core.ai.ChatImage> = emptyList(),
+    /** 是否画 `提问` / `回复` 标签。见 [ChatMessageItem.showLabel]。 */
+    showLabel: Boolean = true,
 ) {
     when (kind) {
         BubbleKind.User -> Surface(
@@ -319,7 +340,9 @@ private fun CursorMessage(
             shape = RoundedCornerShape(8.dp),
         ) {
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                MessageLabel(text = "提问", color = MiuixTheme.colorScheme.onSurface)
+                if (showLabel) {
+                    MessageLabel(text = "提问", color = MiuixTheme.colorScheme.onSurface)
+                }
                 // 图片同样画在文字之上，理由见 `MessageBubble` 里 isUser 分支。
                 if (images.isNotEmpty()) {
                     MessageImages(
@@ -344,7 +367,9 @@ private fun CursorMessage(
                 .combinedClickable(onClick = {}, onLongClick = onLongPress)
                 .padding(vertical = 2.dp),
         ) {
-            MessageLabel(text = "回复", color = MiuixTheme.colorScheme.onSurface)
+            if (showLabel) {
+                MessageLabel(text = "回复", color = MiuixTheme.colorScheme.onSurface)
+            }
             MarkdownText(
                 text = text,
                 color = MiuixTheme.colorScheme.onSurface,
