@@ -376,4 +376,41 @@ class WiringGuardTest {
             bar.contains("FoldableContent(visible = showModelList)"),
         )
     }
+
+
+    /**
+     * 模型页每个分区都必须用 SettingsSectionHeader。
+     *
+     * ## 1:1 对齐 Operit
+     *
+     * Operit 的 `SettingsSectionHeader`（`ModelApiSettingsSection.kt:1520`）
+     * 是「图标 24dp + 标题 + 副标题」，六个分区一个不少。
+     *
+     * 而 Praxis 原来七个分区全用 miuix 的 `SmallTitle` —— 一行加粗小字，
+     * **没有图标、没有副标题**。后果：
+     *
+     *  - 一整页分区全靠文字区分，扫视时没有视觉锚点；
+     *  - 「参数」「上下文」「思考」不自解释，得点进去才知道管什么。
+     *
+     * 这类退化编译器与 lint 都不报（`SmallTitle` 是合法组件），
+     * 只能靠源码断言。
+     */
+    @Test
+    fun modelScreen_usesSettingsSectionHeader() {
+        val screen = read("feature/settings/src/main/java/dev/praxis/feature/settings/ai/ModelScreen.kt")
+        assertTrue(
+            "模型页必须使用 SettingsSectionHeader 作为分区头",
+            screen.contains("SettingsSectionHeader("),
+        )
+        assertTrue(
+            "模型页不应再用 miuix 的 SmallTitle（它没有图标与副标题）",
+            !screen.contains("SmallTitle("),
+        )
+        // 七个分区：服务商 / 接口地址 / API Key / 模型 / 参数 / 上下文 / 思考
+        val headerCount = screen.split("SettingsSectionHeader(").size - 1
+        assertTrue(
+            "应有 7 个分区头（实际 $headerCount）",
+            headerCount >= 7,
+        )
+    }
 }
