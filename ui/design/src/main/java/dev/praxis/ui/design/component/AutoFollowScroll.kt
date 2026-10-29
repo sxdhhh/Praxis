@@ -180,16 +180,16 @@ fun AutoFollowScrollLazy(
             if (!probe.ready) return@collect
             run.measured = true
             if (!measuredState.value) measuredState.value = true
-            val atBottom = isAtBottom(
-                ready = probe.ready,
-                lastVisibleIndex = probe.lastIndex,
-                totalItems = probe.total,
+            run.autoFollow = nextAutoFollow(
+                atBottom = isAtBottom(
+                    ready = probe.ready,
+                    lastVisibleIndex = probe.lastIndex,
+                    totalItems = probe.total,
+                ),
+                inProgress = probe.inProgress,
+                selfScroll = run.selfScroll,
+                current = run.autoFollow,
             )
-            when {
-                atBottom -> run.autoFollow = true
-                // 只有「用户自己」拖离底部才关跟随；我们自己的滚动不算。
-                probe.inProgress && !run.selfScroll -> run.autoFollow = false
-            }
         }
     }
 
@@ -381,6 +381,79 @@ internal fun isAtBottom(
     return lastVisibleIndex >= totalItems - 1
 }
 
+/**
+ * “离末尾还有多远”的逼近值（末项尚未进入视口时用）。
+ *
+ * ## 为什么需要它单独成一个纯函数
+ *
+ * 它直接决定弹簧的**加速度起点**（a ∝ target），一个数值取错就会让滚动
+ * “时而抽搐时而正常” —— 而这东西在真机上只能靠肉眼感觉，没法判断是
+ * 差了一倍还是十倍。抽出来之后可以用单测钉住“不许超过一屏”。
+ *
+ * ## 为什么上限是一屏
+ *
+ * 超过一屏没有意义：末项一定在当前视口之外，精确值也给不出来。
+ * 而给得**太大**是有害的：“剩余 2000px” 会让弹簧一帧加速到 4000px/s，
+ * 末项进视口后刹不住，表现为冲过头再顿一下。
+ *
+ * @param lastItemSize 当前最后一个可见项的高度
+ * @param afterContentPadding 列表末尾的 contentPadding
+ * @param viewportHeight 视口高度（作为硬上限）
+ */
+internal fun unknownRemainingPx(
+    lastItemSize: Int,
+    afterContentPadding: Int,
+    viewportHeight: Int,
+): Int {
+    // 下限：至少推进一项，否则末项永远进不了视口（死循环）。
+    val byItem = (lastItemSize.coerceAtLeast(1) + afterContentPadding).coerceAtLeast(1)
+    // 上限：一屏。再多也给不出更精确的信息，只会让弹簧过冲。
+    //
+    // ## `viewportHeight <= 0` 时不能用 coerceAtLeast(byItem) 兜底
+    //
+    // 那等于把上限让给下限，上限形同虚设（第一版就是这么写错的，
+    // 单测当场抓出来：4000 的条目配 2000 视口返回了 4000）。
+    // 未测量时返回下限即可 —— 此时 byItem 本身也不大。
+    if (viewportHeight <= 0) return byItem
+    return byItem.coerceAtMost(viewportHeight)
+}
+
+/**
+ * 视口探测结果 → 新的跟随开关。
+ *
+ * ## 为什么单独抽出来（2026-10-29）
+ *
+ * 旧逻辑写在 `collect` 里，两个分支的顺序是有讲究的：
+ *
+ * ```
+ * when {
+ *     atBottom -> autoFollow = true
+ *     inProgress && !selfScroll -> autoFollow = false
+ * }
+ * ```
+ *
+ * 「到底了」必须**先判**：到底时 `isScrollInProgress` 也可能为 true
+ * （回弹动画）。若先判 `inProgress`，用户手动滑到底会被判成“离开底部”，
+ * 于是之后的新内容不跟随 —— 用户看到的就是“我滑到底了但它不跟了”。
+ *
+ * 把顺序写成纯函数，比在协程里靠注释维护可靠得多。
+ *
+ * @param atBottom 末项是否完整可见
+ * @param inProgress 是否正在滚动
+ * @param selfScroll 这次滚动是否由我们发起
+ * @param current 当前跟随状态
+ */
+internal fun nextAutoFollow(
+    atBottom: Boolean,
+    inProgress: Boolean,
+    selfScroll: Boolean,
+    current: Boolean,
+): Boolean = when {
+    atBottom -> true
+    inProgress && !selfScroll -> false
+    else -> current
+}
+
 /** 一次视口探测的结果。 */
 private data class ViewportProbe(
     val inProgress: Boolean,
@@ -524,7 +597,28 @@ private fun remainingDeltaPx(info: LazyListLayoutInfo): Int? {
     if (info.totalItemsCount <= 0) return null
     val last = info.visibleItemsInfo.lastOrNull() ?: return null
     if (last.index != info.totalItemsCount - 1) {
-        return info.viewportEndOffset.coerceAtLeast(1)
+        // ## 为什么不再返回“一整屏”（2026-10-29 修，止抽搐）
+        //
+        // 旧实现返回 `viewportEndOffset`（≈一屏高，通常 2000px 上下）。
+        // 弹簧的加速度 ∝ (target - x)，目标突然变成 2000 时：
+        //
+        //   a = (k * 2000 - c * v) / m ≈ 260000 px/s²
+        //
+        // 一帧（16ms）就能把速度顶到 4000 px/s 以上。等末项终于进入视口、
+        // 精确剩余量掉到几十 px，速度还挂着几千 —— 阻尼来不及刹，于是：
+        //
+        // - 冲过头 → 撞到列表末端被 LazyList 吞掉 → 观感“顿一下”；
+        // - 下一批内容再来 → 再给一次 2000 目标 → 再弹一次。
+        //
+        // 这就是用户说的“时而抽搐时而正常”：距离远时抽，距离近时正常。
+        //
+        // 现在按“上一项高度”作下限（含末尾 padding）—— 只保证“继续推进”，
+        // 不再给一个夸张的加速度起点。末项入视口后自动切到精确分支。
+        return unknownRemainingPx(
+            lastItemSize = last.size,
+            afterContentPadding = info.afterContentPadding,
+            viewportHeight = info.viewportEndOffset.coerceAtLeast(1),
+        )
     }
     // 精确分支：末项底边 减去 视口内容区末端（扣掉底部 contentPadding）。
     val contentEnd = info.viewportEndOffset - info.afterContentPadding

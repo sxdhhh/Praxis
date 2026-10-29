@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import dev.praxis.core.model.settings.ThinkingEffort
 import dev.praxis.core.tool.PermissionTier
 import dev.praxis.ui.design.component.AutoFollowScrollLazy
+import dev.praxis.ui.design.component.ScrollThumbRail
 import dev.praxis.ui.design.component.LocalScrollBottomLimit
 import dev.praxis.ui.design.component.LocalTopBarInset
 import dev.praxis.ui.design.component.imeLiftPadding
@@ -1070,6 +1071,27 @@ fun ChatScreen(
                 listIndexToPreviewIndex = { listIndex -> listIndexToPreview[listIndex] },
                 modifier = Modifier.align(Alignment.CenterEnd),
             )
+
+            // ── 右侧滚动指示条 + 回到底部（对齐 Operit）───────────
+            //
+            // ## 为什么与导航浮条错开
+            //
+            // 导航浮条（ChatScrollNavigator）也是 `CenterEnd`，两者叠在一起
+            // 会互相盖住。这里靠 `padding(bottom = 96.dp)` 把它推到下方，
+            // 让「浮条在中、指示条在下」—— 与 Operit 的布局一致（它那根
+            // 竖条也在屏幕中下部，而不是正中）。
+            //
+            // ## 为什么只给聊天页加
+            //
+            // 日志页/终端页的滚动语义不同（它们是纯追加流，用户几乎不会
+            // 回看中段），一根常显的进度条在那里只是视觉噪音。
+            // 需要时把同一个组件传进去即可。
+            ScrollThumbRail(
+                lazyState = listState,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(bottom = 96.dp),
+            )
         }
 
         // 丝滑跟随：apixiaoyuan 的弹簧跟随引擎（`AutoFollowScroll.kt`，k=130 / c=24 / m=1）。
@@ -1119,10 +1141,26 @@ fun ChatScreen(
             // 也算进来，那种情况虽然不该出现，但真出现时会表现成
             // 「明明没在输出却在滚」，排查成本高。
             contentVersion = run {
+                // ## 为什么不再加 `bubbles.size * 100_000`（2026-10-29 修）
+                //
+                // 那一项是爲了让「新来一条消息」也能被版本号捕获（条目数没变
+                // 但末条正文为空的场景）。但它把两个本质不同的信号揉成一个
+                // 单调量，代价很具体：
+                //
+                //  1. 只要列表长度变一下，版本号就整体跳 100000。而调用方的
+                //     `itemCount` 已经在做同一件事（条目数变化会单独触发），
+                //     两者叠加就是**同一次新增被计两次**——弹簧被连续唤醒两次，
+                //     第二次启动时 `remaining` 已经接近 0，只给出一帧很小的位移，
+                //     观感上就是“抽一下”。
+                //  2. 删除一个气泡（撤销/清空）也会让它跳，于是“内容变少”
+                //     被判成“版本变了” → 也滚一下。
+                //
+                // 现在只留「末条正文长度」。条目数变化由 `itemCount` 负责，
+                // 两个信号各管一头，不会重复触发。
                 val last = state.bubbles.lastOrNull()
                 val streamLen = last?.let { state.streamingText[it.id]?.length } ?: 0
                 val finalLen = last?.text?.length ?: 0
-                maxOf(streamLen, finalLen) + state.bubbles.size * 100_000
+                maxOf(streamLen, finalLen)
             },
         )
 
