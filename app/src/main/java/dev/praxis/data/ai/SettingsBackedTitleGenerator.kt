@@ -69,6 +69,10 @@ class SettingsBackedTitleGenerator(
                 // 标题生成不期望工具调用；真出现了也不执行（这里不持有执行器），
                 // 直接忽略，最终用已收到的文本作为标题。
                 is AiStreamEvent.ToolCalls -> Unit
+                // 参数生成进度：标题场景不需要，忽略。
+                // 但分支必须列出来 —— 这是穷尽式 `when`（sealed interface），
+                // 少一个分支直接编译失败。
+                is AiStreamEvent.ToolCallDelta -> Unit
                 is AiStreamEvent.Done -> Unit
             }
         }

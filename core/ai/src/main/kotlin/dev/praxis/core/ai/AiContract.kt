@@ -187,6 +187,31 @@ sealed interface AiStreamEvent {
     /** 增量文本。可能为空串（心跳），调用方需容忍。 */
     data class Delta(val text: String) : AiStreamEvent
 
+    /**
+     * 工具调用参数正在流式生成（进度上报，不携带可执行内容）。
+     *
+     * ## 为什么需要这个事件（2026-10-29）
+     *
+     * 上游发 tool_calls 是**分片**的，参数可能几十 KB（写长文件、传大 JSON）。
+     * 在只有 [ToolCalls] 一个终态事件的情况下，从第一个分片到收齐之间
+     * 界面上**一个字节都不显示** —— 用户看到的就是「光标一直闪，像卡死」。
+     *
+     * 这个事件只服务于「让用户知道它在动」，因此：
+     *
+     *  - 不携带 arguments 片段（避免上层误当完整 JSON 去解析）；
+     *  - 只给累计字符数与工具名（够画「write_file · 1.2k 字」）；
+     *  - 允许高频（每个分片一条），上层自己做节流。
+     *
+     * 纯进度事件，**不参与**任何协议回传，丢弃它是安全的。
+     */
+    data class ToolCallDelta(
+        /** 已收到参数的总字符数（跨所有分片累计）。 */
+        val argumentsChars: Int,
+        /** 当前正在生成的工具名（第一片之后才已知，可能为空）。 */
+        val toolName: String,
+        /** 本次回复里第几个工具调用（0 起）。 */
+        val callIndex: Int,
+    ) : AiStreamEvent
     /** 模型发起的工具调用已完整收齐（参数 JSON 可解析）。 */
     data class ToolCalls(val calls: List<ToolCall>) : AiStreamEvent
 

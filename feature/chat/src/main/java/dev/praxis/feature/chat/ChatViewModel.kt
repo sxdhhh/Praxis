@@ -1553,6 +1553,8 @@ class ChatViewModel(
                 is AiStreamEvent.Delta -> sb.append(event.text)
                 // 摘要请求不该发起工具调用；真发起了也忽略（没有工具可跑）。
                 is AiStreamEvent.ToolCalls -> Unit
+                // 工具参数进度：摘要场景不需要，忽略（穷尽 when 必须列出）。
+                is AiStreamEvent.ToolCallDelta -> Unit
                 is AiStreamEvent.Done -> Unit
             }
         }
@@ -1637,8 +1639,37 @@ class ChatViewModel(
                                 persistContent(assistantId, buffer.toString())
                             }
 
+                            is AiStreamEvent.ToolCallDelta -> {
+                                // ## 只更新进度，不碰正文（2026-10-29）
+                                //
+                                // 这段是「模型正在写工具参数」的过程态：参数可能几十 KB，
+                                // 收齐前一个字节都不会显示，用户以为卡死。
+                                // 这里把「工具名 + 已接收字数」丢进 state，
+                                // 让阶段行能画成 `write_file · 1.2k 字`。
+                                //
+                                // 不写 `applyStreamText`：这些字节不是回答正文，
+                                // 混进流式槽会让用户看到半截 JSON。
+                                //
+                                // 也不改 `stage`：仍是 Receiving。参数生成属于「模型在产出」，
+                                // 切到 ExecutingTool 会显示「正在执行工具…」—— 那时工具根本还没跑。
+                                _state.update { current ->
+                                    current.copy(
+                                        toolDraft = ToolCallDraft(
+                                            toolName = event.toolName,
+                                            argumentsChars = event.argumentsChars,
+                                            callIndex = event.callIndex,
+                                        ),
+                                    )
+                                }
+                            }
+
                             is AiStreamEvent.ToolCalls -> {
-                                _state.update { it.copy(stage = ChatStage.ExecutingTool) }
+                                // 参数已收齐：进度条任务完成，清掉 draft。
+                                // 不清的话阶段行会一直挂着「write_file · 1.2k 字」，
+                                // 而实际已经在执行工具了。
+                                _state.update {
+                                    it.copy(stage = ChatStage.ExecutingTool, toolDraft = null)
+                                }
                                 // 工具调用前的正文要定稿：这一段的文本已经完整
                                 // （模型切到工具模式前会结束这句话），之后再来的
                                 // delta 属于**下一段**输出，不能接在这段后面。
@@ -1654,6 +1685,10 @@ class ChatViewModel(
                             }
 
                             is AiStreamEvent.Done -> {
+                                // 兜底：某些网关只发 tool_calls 不发 finish_reason，
+                                // 或参数分片后直接断流 —— draft 必须在这里清掉，
+                                // 否则会永远停在「正在生成 xxx」。
+                                _state.update { it.copy(toolDraft = null) }
                                 // 定稿并清槽：Done 之后不再有 delta，UI 该以
                                 // `bubbles[i].text` 为准（这也是落库的值）。
                                 // 用 `buffer` 而不是 `null`：最后一段 delta 之后

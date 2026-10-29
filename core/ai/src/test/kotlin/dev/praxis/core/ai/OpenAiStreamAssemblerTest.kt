@@ -100,6 +100,48 @@ class OpenAiStreamAssemblerTest {
         assertEquals(listOf(AiStreamEvent.Delta("hi")), events)
     }
 
+    /**
+     * 工具参数分片期间必须上报进度（2026-10-29）。
+     *
+     * ## 它守的是什么
+     *
+     * 参数可能几十 KB，从第一片到收齐之间界面上一个字节都没有，
+     * 用户看到光标一直闪、判断是卡死。这条断言钉住两件事：
+     *
+     *  - 每片都有一条进度事件（不是只在收齐时才有）；
+     *  - 字符数是**累计值**，不是本片长度。
+     */
+    @Test
+    fun `tool call fragments report progressive char counts`() {
+        val a = OpenAiStreamAssembler()
+        val e1 = a.feed(toolChunk(FRAG_HEAD))
+        val e2 = a.feed(toolChunk(FRAG_TAIL))
+
+        val d1 = e1.filterIsInstance<AiStreamEvent.ToolCallDelta>().single()
+        val d2 = e2.filterIsInstance<AiStreamEvent.ToolCallDelta>().single()
+
+        assertEquals("write_file", d1.toolName)
+        assertEquals(FRAG_HEAD_ARGS, d1.argumentsChars)
+        // 第二片是累计：第一片长度 + 第二片长度
+        assertEquals(FRAG_HEAD_ARGS + FRAG_TAIL_ARGS, d2.argumentsChars)
+        // 工具名沿用第一片（后续分片不带 name）
+        assertEquals("write_file", d2.toolName)
+    }
+
+    /** 第一片：带 id 与 name，arguments 是 JSON 开头。 */
+    private val FRAG_HEAD =
+        "{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"p\\\":\"}}"
+
+    /** 后续片：只有 arguments 增量，没有 id / name。 */
+    private val FRAG_TAIL =
+        "{\"index\":0,\"function\":{\"arguments\":\"\\\"/a.txt\\\"}\"}}"
+
+    /** `{"p":` 的字符数。 */
+    private val FRAG_HEAD_ARGS = 5
+
+    /** `"/a.txt"}` 的字符数。 */
+    private val FRAG_TAIL_ARGS = 9
+
     private fun delta(text: String) =
         """{"choices":[{"delta":{"content":"$text"},"finish_reason":null}]}"""
 

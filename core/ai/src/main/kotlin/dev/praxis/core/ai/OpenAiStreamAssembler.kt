@@ -65,7 +65,7 @@ class OpenAiStreamAssembler(
                     }
 
                 delta["tool_calls"]?.jsonArray?.forEach { tc ->
-                    accumulateToolCall(tc.jsonObject)
+                    events += accumulateToolCall(tc.jsonObject)
                 }
             }
 
@@ -112,7 +112,18 @@ class OpenAiStreamAssembler(
     /** 已累积的文本（供非流式场景拼接）。 */
     fun accumulatedText(): String = textBuffer.toString()
 
-    private fun accumulateToolCall(obj: JsonObject) {
+    /**
+     * 累积一片 tool_call 分片，并返回一条进度事件。
+     *
+     * ## 为什么在这里发进度（2026-10-29）
+     *
+     * 参数可能几十 KB，从第一片到收齐之间上层一个字节都收不到，UI 只能干等。
+     * 这里每收到一片就报一次「已累计多少字」，UI 就能画「write_file · 1.2k 字」
+     * 而不是一直闪光标。
+     *
+     * 只报计数、不报内容：上层不该拿半截 JSON 去解析（那必然失败）。
+     */
+    private fun accumulateToolCall(obj: JsonObject): List<AiStreamEvent> {
         val index = obj["index"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
         val bucket = toolBuckets.getOrPut(index) { ToolBucket() }
 
@@ -125,5 +136,14 @@ class OpenAiStreamAssembler(
             }
             fn["arguments"]?.jsonPrimitive?.contentOrNull?.let { bucket.args.append(it) }
         }
+        // 用 bucket 总长而不是本片长度：UI 要显示「一共写了多少」，
+        // 每片只报本片长度会变成一段段不连续的跳动。
+        return listOf(
+            AiStreamEvent.ToolCallDelta(
+                argumentsChars = bucket.args.length,
+                toolName = bucket.name,
+                callIndex = index,
+            ),
+        )
     }
 }
