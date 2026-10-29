@@ -63,6 +63,7 @@ import dev.praxis.feature.chat.menu.MessageContextMenu
 import dev.praxis.feature.chat.menu.MessageCopyPreviewSheet
 import dev.praxis.feature.chat.menu.MessageDeleteConfirmDialog
 import dev.praxis.feature.chat.menu.MessageInfoDialog
+import dev.praxis.feature.chat.navigator.buildTurnEntries
 import dev.praxis.feature.chat.navigator.ChatScrollNavigator
 import dev.praxis.feature.chat.navigator.ChatMessageLocatorPreview
 import dev.praxis.feature.chat.navigator.toLocatorPreview
@@ -511,14 +512,25 @@ fun ChatScreen(
      * [LocatorEntry] 把两者一起带出去，避免在调用处再查一遍
      * （那会引入 O(n) 重复查找，而且容易写错）。
      */
+    // ## 定位器按「轮」而不是按气泡（2026-10-29 修）
+    //
+    // 旧实现逐条收 `bubbles`，只要不是 Tool 就收一条。于是**一轮 AI 回复**
+    // （模型说话 → 调工具 → 说话 → …，数据上是 4~5 条 Assistant 气泡）
+    // 在定位器里变成「4 ai / 5 ai / 6 ai / 7 ai」，内容是「0」这种空正文，
+    // 用户看到十几条一模一样的条目，完全无法据此跳转。
+    //
+    // 现在交给 [buildTurnEntries]：User / Summary / Error 各算一条，
+    // 连续的 Assistant(+Tool) 合并成一整轮算一条。
+    //
+    // ## 为什么仍然带 messageIndex
+    //
+    // 定位器组件把 previews 的**列表下标**当消息序号显示（「当前第 N / M 条」），
+    // 而 `jumpToMessage(index)` 要的是 `bubbles` 的**真实下标**。
+    // 聚合之后两者差得更远（一轮 = 5 个气泡），所以必须继续用
+    // [LocatorEntry] 把两者一起带出去。
     val locatorEntries = remember(state.bubbles) {
-        buildList {
-            state.bubbles.forEachIndexed { index, bubble ->
-                // 工具不是「消息」：不进定位器、不参与跳转计数。
-                if (bubble.role == BubbleRole.Tool) return@forEachIndexed
-                // 其余都是用户能读的内容：提问、回答、错误提示、摘要块。
-                add(LocatorEntry(messageIndex = index, preview = bubble.toLocatorPreview()))
-            }
+        buildTurnEntries(state.bubbles).map { turn ->
+            LocatorEntry(messageIndex = turn.bubbleIndex, preview = turn.preview)
         }
     }
 

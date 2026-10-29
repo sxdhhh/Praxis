@@ -40,23 +40,128 @@ data class ChatMessageLocatorPreview(
  * 不归一化的话，多行消息在单行 Text 里会显示成一堆空格（换行被折叠），
  * 用户看到的是「第 12 条：      」这种认不出来的条目。
  */
+/**
+ * 气泡角色 → 定位器里的 `sender` 文案。
+ *
+ * ## 为什么抽成独立扩展
+ *
+ * 除了单条气泡转换，定位器还要为「一整轮」生成条目（见 [buildTurnEntries]）——
+ * 两种来源必须给出**完全一致**的 sender，否则同一段对话在两种构建路径下会
+ * 显示成不同标签。
+ */
+fun BubbleRole.locatorSender(): String = when (this) {
+    BubbleRole.User -> "user"
+    BubbleRole.Assistant -> "ai"
+    BubbleRole.Tool -> "tool"
+    BubbleRole.Error -> "error"
+    BubbleRole.Summary -> "summary"
+}
+
 fun ChatBubble.toLocatorPreview(): ChatMessageLocatorPreview {
     val normalized = normalizeMessageSearchText(text)
     return ChatMessageLocatorPreview(
         timestamp = timestamp,
-        sender = when (role) {
-            BubbleRole.User -> "user"
-            BubbleRole.Assistant -> "ai"
-            BubbleRole.Tool -> "tool"
-            BubbleRole.Error -> "error"
-            // 与 Operit 的 `sender = "summary"` 同名，导航浮条/定位器
-            // 才能把它与普通助手消息分开显示（见 `chat_sender_summary`）。
-            BubbleRole.Summary -> "summary"
-        },
+        sender = role.locatorSender(),
         previewContent = normalized.take(ChatMessageLocatorPreview.PREVIEW_CHAR_COUNT),
         contentLength = normalized.length,
     )
 }
+
+/**
+ * 把一串气泡按「轮」聚合成定位器条目。
+ *
+ * ## 为什么定位器要按轮而不是按气泡
+ *
+ * 一次回复在数据上是**多条** Assistant 气泡：模型说话 → 调工具 → 再说话 →
+ * 调工具 → 收尾。若按气泡逐条列，定位器里会出现「4 ai / 5 ai / 6 ai / 7 ai」
+ * 且内容是「0」这种空正文 —— 用户看到十几条一模一样的 ai 条目。
+ *
+ * 用户心里的「一条消息」是**一轮对话**：
+ *
+ * ```
+ * 我：你好
+ * AI：（说话 + 调了几次工具 + 说话）   ← 这算「一条」
+ * 我：再见
+ * ```
+ *
+ * 所以把「用户消息」与「一轮 AI 回复」各算一条：
+ *
+ * | 气泡序列 | 定位器条目 |
+ * |---|---|
+ * | User | 1 条（提问） |
+ * | Assistant + Tool* + Assistant + … | 合并成 1 条（回复） |
+ * | Error | 1 条（出错） |
+ * | Summary | 1 条（摘要） |
+ *
+ * ## 合并时取谁的正文
+ *
+ * 优先取**本轮第一段非空正文**；整轮只有工具调用时退回空串。
+ * `timestamp` 取本轮第一条气泡；`contentLength` 取全部正文长度之和。
+ *
+ * ## 返回的下标是「轮首气泡在 bubbles 里的下标」
+ *
+ * 跳转用 `scrollToItem(index)` 落到轮首，用户看到的就是这一轮的开头。
+ */
+fun buildTurnEntries(bubbles: List<ChatBubble>): List<TurnEntry> {
+    val result = ArrayList<TurnEntry>(bubbles.size)
+    var i = 0
+    while (i < bubbles.size) {
+        val head = bubbles[i]
+        when (head.role) {
+            BubbleRole.Tool -> {
+                // 游离的工具气泡：跳过，不让它单独成条。
+                i++
+            }
+
+            BubbleRole.User, BubbleRole.Summary, BubbleRole.Error -> {
+                result.add(TurnEntry(bubbleIndex = i, preview = head.toLocatorPreview()))
+                i++
+            }
+
+            BubbleRole.Assistant -> {
+                val start = i
+                var firstNonBlank: String? = null
+                var totalLength = 0
+                var j = i
+                while (j < bubbles.size) {
+                    val b = bubbles[j]
+                    if (b.role == BubbleRole.User ||
+                        b.role == BubbleRole.Summary ||
+                        b.role == BubbleRole.Error
+                    ) {
+                        break
+                    }
+                    if (b.role == BubbleRole.Assistant) {
+                        val n = normalizeMessageSearchText(b.text)
+                        if (firstNonBlank == null && n.isNotEmpty()) firstNonBlank = n
+                        totalLength += n.length
+                    }
+                    j++
+                }
+                result.add(
+                    TurnEntry(
+                        bubbleIndex = start,
+                        preview = ChatMessageLocatorPreview(
+                            timestamp = head.timestamp,
+                            sender = BubbleRole.Assistant.locatorSender(),
+                            previewContent = firstNonBlank.orEmpty()
+                                .take(ChatMessageLocatorPreview.PREVIEW_CHAR_COUNT),
+                            contentLength = totalLength,
+                        ),
+                    ),
+                )
+                i = j
+            }
+        }
+    }
+    return result
+}
+
+/** 定位器里的一条「轮」，以及它在 `bubbles` 里的落点。 */
+data class TurnEntry(
+    val bubbleIndex: Int,
+    val preview: ChatMessageLocatorPreview,
+)
 
 /**
  * 空白归一化（1:1 照抄上游 `normalizeMessageSearchText`）。
