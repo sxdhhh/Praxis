@@ -1,10 +1,14 @@
 name: build
 
+# 触发条件
+#
+# 1. 手动：Actions 页点「Run workflow」，可选 task 与是否上传产物。
+# 2. push：只在改到会影响 APK 的路径时跑（纯文档/协议提交不浪费 runner）。
 on:
   workflow_dispatch:
     inputs:
       task:
-        description: 'Gradle task'
+        description: 'Gradle 任务'
         required: true
         default: assembleDebug
         type: choice
@@ -12,12 +16,16 @@ on:
           - assembleDebug
           - assembleRelease
       upload_artifact:
-        description: 'Upload APK as artifact'
+        description: '是否上传 APK 产物'
         required: false
         default: true
         type: boolean
   push:
-    branches: [main]
+    # ## 为什么两个分支名都留
+    #
+    # GitHub 默认分支是 `main`，本地长期是 `master`。只写一个的后果是
+    # 「推上去了但 CI 一次没跑」，而且 Actions 页看不出异常（就是没记录）。
+    branches: [main, master]
     paths:
       - 'app/**'
       - 'core/**'
@@ -28,231 +36,132 @@ on:
       - 'build-plugins/**'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
+      - 'gradle.properties'
       - '.github/workflows/build.yml'
 
+# 同一分支的新提交取消上一次未跑完的（手动触发不取消）。
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 jobs:
-  # 与 `build` 并行：单元测试 + lint。
+  # ── 静态检查 + 单测 ───────────────────────────────────
   #
-  # ## 为什么必须存在（2026-10-29）
-  #
-  # `build` 只跑 `assembleDebug`。Kotlin 报错能拦住，但**测试一行不跑**。
-  # 后果很具体：`WiringGuardTest`（接线护栏）写完后 CI 依旧绿 ——
-  # 因为 `app/src/test` 根本没被编译进任何 task。护栏不跑等于没有。
-  #
-  # 同理 lint：`abortOnError = true` 已经配好了，但从没在 CI 里执行过。
+  # 与 build 并行。`assembleDebug` 能拦住 Kotlin 编译错误，但**一行测试都不跑**：
+  # `WiringGuardTest` 这类接线护栏写完了 CI 依旧绿 —— 护栏不跑等于没有。
+  # 同理 lint：`abortOnError = true` 配好了但从没在 CI 执行过。
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # 仓库有 `terminal` submodule；缺了它 `:terminal` 会报
-          # 「No variants exist」。
-          submodules: true
-          fetch-depth: 1
 
-      - name: Set up JDK
+      # ## 为什么是 21 而不是 17
+      #
+      # `build-plugins/PraxisBuildConfig.kt` 里 `JDK_VERSION = 21`，
+      # 所有模块都 `jvmToolchain(21)`。CI 用 17 会在配置阶段直接报
+      # 「No matching toolchains found」。
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Tune Gradle for CI
-        run: |
-          mkdir -p ~/.gradle
-          cat > ~/.gradle/gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8
-          org.gradle.parallel=true
-          org.gradle.caching=true
-          org.gradle.max-workers=4
-          kotlin.compiler.execution.strategy=daemon
-          android.useAndroidX=true
-          android.nonTransitiveRClass=true
-          EOF
-
-      - name: Prepare SDK
-        run: |
-          chmod +x gradlew
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-
-      # 单元测试：纯 JVM，不需要模拟器。
-      #
-      # `--continue` 保留：一个模块用例挂掉不该遮住其它模块的失败，
-      # 一次 push 就能看到全部问题。
-      - name: Unit tests
-        run: |
-          ./gradlew testDebugUnitTest             --no-daemon             --stacktrace             --continue             --console=plain
-
-      # lint：`abortOnError = true` 已在 app 与 library 插件里配好。
-      - name: Lint
-        run: |
-          ./gradlew lintDebug             --no-daemon             --stacktrace             --console=plain
-
-      - name: Upload test reports on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-reports
-          path: |
-            **/build/reports/tests/**
-            **/build/test-results/**
-            **/build/reports/lint-results*.*
-          retention-days: 5
-          if-no-files-found: ignore
-
-  build:
-    # ubuntu-latest 自带 JDK 17，但本项目要 21（PraxisBuildConfig.JDK_VERSION），
-    # 所以显式用 setup-java 装 21，不依赖 runner 预装。
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          # third_party/maven 里有 23 个 AAR（约 3.8MB），是 fan.miuix 的唯一来源，
-          # 不存在于任何公开 Maven 仓库（GitHub Packages 要求组织成员权限）。
-          # 它们已经在 git 里，正常 checkout 即可。
-          fetch-depth: 1
-
-      - name: Setup JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-
-      # 不用 android-actions/setup-android@v3。
-      #
-      # 它在 v3 里默认执行 `sdkmanager tools`（安装旧版 SDK Tools 包），
-      # 而该包已从 Google 的 repository 里下架，实测报：
-      #   Warning: Failed to find package 'tools'
-      #   Error: sdkmanager failed with exit code 1
-      # 整个 job 在第 4 步就挂了，后面全 skipped。
-      #
-      # ubuntu-latest runner 本身**预装** Android SDK
-      # （路径 /usr/local/lib/android/sdk，含 build-tools、platform-tools、
-      # platforms）。本项目 compileSdk=37，而预装的是 android-35/36 ——
-      # 但 AGP 会自动下载缺失的 platform（前提是 licenses 已接受），
-      # 所以下面用 sdkmanager 只补 license 与指定 platform，不做全量升级。
-      - name: Setup Android SDK
-        run: |
-          set -euo pipefail
-          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
-          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
-          echo "SDK 目录: $SDK"
-          ls "$SDK" || true
-          # 接受全部 license，否则 AGP 下载 platform 时会卡在 "not accepted"。
-          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || \
-            yes | "$SDK/cmdline-tools/16.0/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
-          # 显式装 compileSdk=37 对应的 platform（build-tools 用已有的最新版）。
-          SDKMGR=$(ls -d "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
-          if [ -n "$SDKMGR" ]; then
-            "$SDKMGR" "platforms;android-37" > /dev/null 2>&1 || \
-              echo "::warning::android-37 装不上，交给 AGP 自动下载"
-          fi
-          echo "platforms:"; ls "$SDK/platforms" || true
-          echo "build-tools:"; ls "$SDK/build-tools" || true
-
-      - name: Gradle cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # local.properties 被 .gitignore 排除，CI 里没有，必须现写。
-      # 不写的话 AGP 报 "SDK location not found"。
+      # ## 为什么必须自己装 platform 37
+      #
+      # `PraxisBuildConfig.COMPILE_SDK = 37`。runner 预装的 SDK 通常停在 34/35，
+      # 直接构建会报「Failed to find target with hash string android-37」。
+      - name: Install Android SDK platform 37
+        run: |
+          set -e
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-37" \
+            "build-tools;37.0.0" > /dev/null
+
+      # local.properties 不进仓库（含本机 SDK 路径），CI 里现造一份。
       - name: Write local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
-      # 覆盖 gradle.properties 里针对**本机内存紧张**做的调优。
-      #
-      # 仓库里的 gradle.properties 是给开发机用的：-Xmx2g、
-      # kotlin.compiler.execution.strategy=in-process、max-workers=8。
-      # 那些设置的唯一目的是「避免被 LMK 杀掉」，代价是慢。
-      # GitHub runner 有 16G 内存、4 核、独立机器，不需要这些妥协：
-      #
-      # - 堆提到 4g：Compose 编译器插件与 KSP 在 2g 下会频繁 GC
-      # - kotlin 改回 daemon：in-process 让编译与配置共用同一个堆，
-      #   在 4g 下反而是瓶颈
-      # - max-workers 按 runner 核数（4）设，比 8 更合适
-      #
-      # 用 ~/.gradle/gradle.properties 而不是改仓库文件：
-      # user home 的 properties 优先级高于项目目录，且不影响本地开发。
-      - name: Tune Gradle for CI
-        run: |
-          mkdir -p ~/.gradle
-          cat > ~/.gradle/gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8
-          org.gradle.parallel=true
-          org.gradle.caching=true
-          org.gradle.max-workers=4
-          org.gradle.vfs.watch=true
-          kotlin.compiler.execution.strategy=daemon
-          android.useAndroidX=true
-          android.nonTransitiveRClass=true
-          EOF
-          cat ~/.gradle/gradle.properties
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
 
-      # 本 job 只负责「能打包」：assembleDebug。
-      #
-      # 单元测试与 lint 在并行的 `verify` job 里跑（2026-10-29 加）。
-      # 为什么不放在同一个 job 里串行：这两件事互不依赖，合在一起会让
-      # 反馈时间变成两者之和；分开后任一方变红都能先看到。
-      - name: Build
+      - name: Lint
+        run: ./gradlew lintDebug --stacktrace
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-reports
+          path: |
+            **/build/reports/tests/**
+            **/build/reports/lint-results*.html
+            **/build/reports/lint-results*.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ── 构建 APK ─────────────────────────────────────────
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Install Android SDK platform 37
         run: |
-          ./gradlew ${{ inputs.task || 'assembleDebug' }} \
-            --no-daemon \
-            --stacktrace \
-            --console=plain
+          set -e
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-37" \
+            "build-tools;37.0.0" > /dev/null
+
+      - name: Write local.properties
+        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+      # ## 为什么默认是 assembleDebug
+      #
+      # release 需要签名密钥，仓库里没有（也不该有）keystore。
+      # 默认走 debug，保证「点一下就有一个能装的 APK」。
+      - name: Build
+        run: ./gradlew ${{ github.event.inputs.task || 'assembleDebug' }} --stacktrace
 
       - name: Locate APK
         id: apk
         run: |
-          set -euo pipefail
-          TASK="${{ inputs.task || 'assembleDebug' }}"
-          case "$TASK" in
-            assembleRelease) DIR=app/build/outputs/apk/release ;;
-            *)               DIR=app/build/outputs/apk/debug   ;;
-          esac
-          APK=$(find "$DIR" -maxdepth 1 -name '*.apk' | head -1)
-          if [ -z "$APK" ]; then
-            echo "::error::APK not found in $DIR"
-            ls -la "$DIR" || true
+          set -e
+          found=$(find app/build/outputs/apk -name "*.apk" -type f | head -1)
+          if [ -z "$found" ]; then
+            echo "::error::没找到 APK，构建可能没有真正产出产物"
             exit 1
           fi
-          echo "apk=$APK" >> "$GITHUB_OUTPUT"
-          echo "name=$(basename "$APK")" >> "$GITHUB_OUTPUT"
-          echo "Found: $APK ($(du -h "$APK" | cut -f1))"
-          # 打出的包名与版本，用于核对（debug 带 .debug 后缀）
-          "$ANDROID_SDK_ROOT/build-tools/$(ls "$ANDROID_SDK_ROOT/build-tools" | sort -V | tail -1)/aapt2" \
-            dump badging "$APK" 2>/dev/null | head -3 || true
+          echo "path=$found" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$found")" >> "$GITHUB_OUTPUT"
+          ls -lh "$found"
 
       - name: Upload APK
-        if: ${{ inputs.upload_artifact != false }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.upload_artifact != 'false' }}
         uses: actions/upload-artifact@v4
         with:
           name: praxis-apk
-          path: ${{ steps.apk.outputs.apk }}
-          retention-days: 7
-
-      # 构建失败时把 gradle 报告传上去 —— 否则只有一个 "exit code 1"，
-      # 看不到具体哪个文件的 Kotlin 报错。
-      - name: Upload build reports on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-reports
-          path: |
-            **/build/reports/**
-            **/build/outputs/logs/**
-          retention-days: 3
-          if-no-files-found: ignore
+          path: ${{ steps.apk.outputs.path }}
+          retention-days: 14
+          if-no-files-found: error
