@@ -110,6 +110,25 @@ jobs:
           echo "当前已装 build-tools:"
           ls "$ANDROID_SDK_ROOT/build-tools" 2>/dev/null || true
 
+      # ## 为什么 CI 要单独调大堆
+      #
+      # 首次 CI 实测失败：`java.lang.OutOfMemoryError: Metaspace`
+      # （Kotlin FIR 解析阶段炸的，不是编译出错）。
+      #
+      # `gradle.properties` 里是 `-Xmx2g -XX:MaxMetaspaceSize=768m` —— 那是为
+      # **本地 proot 省内存**定的（见该文件的注释），不是给 CI 的。
+      # 18 个模块 + Compose 编译器插件生成大量合成类，768m Metaspace 不够。
+      #
+      # runner 有 7GB+，直接给 4g 堆 / 2g Metaspace。用 GRADLE_OPTS 覆盖，
+      # 不改仓库里的 gradle.properties（那会影响本地构建）。
+      - name: Tune Gradle memory for CI
+        run: |
+          echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=2g -XX:+UseParallelGC -Dfile.encoding=UTF-8" >> gradle.properties.ci
+          cat gradle.properties.ci
+          # 同时给 Kotlin daemon 单独的堆（它不总是继承 Gradle 的）
+          echo "kotlin.daemon.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=1g" >> gradle.properties.ci
+          mv gradle.properties.ci gradle.properties
+
       # local.properties 不进仓库（含本机 SDK 路径），CI 里现造一份。
       - name: Write local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
@@ -183,6 +202,25 @@ jobs:
           ls "$ANDROID_SDK_ROOT/platforms" 2>/dev/null || true
           echo "当前已装 build-tools:"
           ls "$ANDROID_SDK_ROOT/build-tools" 2>/dev/null || true
+
+      # ## 为什么 CI 要单独调大堆
+      #
+      # 首次 CI 实测失败：`java.lang.OutOfMemoryError: Metaspace`
+      # （Kotlin FIR 解析阶段炸的，不是编译出错）。
+      #
+      # `gradle.properties` 里是 `-Xmx2g -XX:MaxMetaspaceSize=768m` —— 那是为
+      # **本地 proot 省内存**定的（见该文件的注释），不是给 CI 的。
+      # 18 个模块 + Compose 编译器插件生成大量合成类，768m Metaspace 不够。
+      #
+      # runner 有 7GB+，直接给 4g 堆 / 2g Metaspace。用 GRADLE_OPTS 覆盖，
+      # 不改仓库里的 gradle.properties（那会影响本地构建）。
+      - name: Tune Gradle memory for CI
+        run: |
+          echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=2g -XX:+UseParallelGC -Dfile.encoding=UTF-8" >> gradle.properties.ci
+          cat gradle.properties.ci
+          # 同时给 Kotlin daemon 单独的堆（它不总是继承 Gradle 的）
+          echo "kotlin.daemon.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=1g" >> gradle.properties.ci
+          mv gradle.properties.ci gradle.properties
 
       - name: Write local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
