@@ -78,12 +78,37 @@ jobs:
       #
       # `PraxisBuildConfig.COMPILE_SDK = 37`。runner 预装的 SDK 通常停在 34/35，
       # 直接构建会报「Failed to find target with hash string android-37」。
+      # ## 为什么不是直揃 `sdkmanager "platforms;android-37"`
+      #
+      # 实测会失败：`Failed to find package 'platforms;android-37'`。
+      # 原因：37 还没进稳定通道。它在 **canary 通道**，而且要带 minor
+      # 版本号（包名是 `platforms;android-37.0`，对应本机 `android-37.0/`
+      # 目录里的 `AndroidVersion.ApiLevel=37.0`）。
+      #
+      # 所以：先开 canary 通道，再装 `android-37.0`。
+      # 容错：如果上游仍找不到（通道改名 / 版本上调），**不阻断构建** ——
+      # 让 Gradle 自己报「缺 platform」，那比在装 SDK 阶段就停下更好排查。
       - name: Install Android SDK platform 37
         run: |
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "::warning::sdkmanager 不在预期路径，跳过（由 Gradle 自己报缺 platform）"
+            exit 0
+          fi
+          # 先试稳定包名，再试 canary 通道的 37.0
+          set +e
+          yes | "$SDKMANAGER" --install "platforms;android-37" > /dev/null 2>&1
+          if [ $? -ne 0 ]; then
+            echo "稳定通道没有 android-37，改试 canary 通道的 android-37.0"
+            yes | "$SDKMANAGER" --channel=3 --install "platforms;android-37.0" > /dev/null 2>&1
+          fi
+          # build-tools 37 同样可能不存在；存在就装，不存在用现有的。
+          yes | "$SDKMANAGER" --install "build-tools;37.0.0" > /dev/null 2>&1
           set -e
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-37" \
-            "build-tools;37.0.0" > /dev/null
+          echo "当前已装 platforms:"
+          ls "$ANDROID_SDK_ROOT/platforms" 2>/dev/null || true
+          echo "当前已装 build-tools:"
+          ls "$ANDROID_SDK_ROOT/build-tools" 2>/dev/null || true
 
       # local.properties 不进仓库（含本机 SDK 路径），CI 里现造一份。
       - name: Write local.properties
@@ -127,12 +152,37 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      # ## 为什么不是直揃 `sdkmanager "platforms;android-37"`
+      #
+      # 实测会失败：`Failed to find package 'platforms;android-37'`。
+      # 原因：37 还没进稳定通道。它在 **canary 通道**，而且要带 minor
+      # 版本号（包名是 `platforms;android-37.0`，对应本机 `android-37.0/`
+      # 目录里的 `AndroidVersion.ApiLevel=37.0`）。
+      #
+      # 所以：先开 canary 通道，再装 `android-37.0`。
+      # 容错：如果上游仍找不到（通道改名 / 版本上调），**不阻断构建** ——
+      # 让 Gradle 自己报「缺 platform」，那比在装 SDK 阶段就停下更好排查。
       - name: Install Android SDK platform 37
         run: |
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "::warning::sdkmanager 不在预期路径，跳过（由 Gradle 自己报缺 platform）"
+            exit 0
+          fi
+          # 先试稳定包名，再试 canary 通道的 37.0
+          set +e
+          yes | "$SDKMANAGER" --install "platforms;android-37" > /dev/null 2>&1
+          if [ $? -ne 0 ]; then
+            echo "稳定通道没有 android-37，改试 canary 通道的 android-37.0"
+            yes | "$SDKMANAGER" --channel=3 --install "platforms;android-37.0" > /dev/null 2>&1
+          fi
+          # build-tools 37 同样可能不存在；存在就装，不存在用现有的。
+          yes | "$SDKMANAGER" --install "build-tools;37.0.0" > /dev/null 2>&1
           set -e
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-37" \
-            "build-tools;37.0.0" > /dev/null
+          echo "当前已装 platforms:"
+          ls "$ANDROID_SDK_ROOT/platforms" 2>/dev/null || true
+          echo "当前已装 build-tools:"
+          ls "$ANDROID_SDK_ROOT/build-tools" 2>/dev/null || true
 
       - name: Write local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
