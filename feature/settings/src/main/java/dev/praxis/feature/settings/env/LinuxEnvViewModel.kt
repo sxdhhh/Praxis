@@ -244,6 +244,29 @@ interface LinuxEnvPort {
         onLine: (String) -> Unit,
     ): Int
 
+    /**
+     * 取回**已经存在**的长驻交互会话（没有则返回 null）。
+     *
+     * ## 为什么必须有这个方法（2026-10-30 修「启动后退出再进变未启动」）
+     *
+     * `running` 原本只看 ViewModel 的私有字段 `shellSession`。而 ViewModel 的
+     * 生命周期跟着页面走：用户点「启动」→ 容器进程真的起来了 → 退出环境页
+     * → ViewModel 被销毁（字段随对象消失）→ 再进来 `refresh()` 时
+     * `shellSession` 是 null → 界面显示「已安装，未运行」。
+     *
+     * 但 proot 进程一直在跑。界面与事实相反，用户只能再点一次「启动」，
+     * 于是同一个 rootfs 上跑起第二个 proot（`--kill-on-exit` 互不感知，
+     * 两个容器并存，文件锁开始冲突）。
+     *
+     * 端口层（`:app` 的 `ProotEnvPort`）本来就持有全部会话列表，所以
+     * 「容器是否在跑」这个事实应该由它回答，而不是由某个会被回收的
+     * ViewModel 记住。
+     *
+     * @return 仍然存活的交互会话句柄；没有则 null。
+     */
+    fun liveSession(env: LinuxEnvironment): LinuxEnvPort.SessionHandle? = null
+
+
     /** 启动一个长驻会话（交互 shell / sshd / frpc）。返回句柄，用于停止。 */
     suspend fun startSession(
         env: LinuxEnvironment,
@@ -489,17 +512,30 @@ class LinuxEnvViewModel(
         //  - activeSources：/etc/apt 当前指向谁（换源就变）。
         val origin = if (installed) env.rootfsOrigin() else null
         val activeSources = if (installed) env.activeSources() else null
+        // ## 接管端口层已有的会话（2026-10-30 修「重进变未启动」）
+        //
+        // 页面每次重建 ViewModel 时 `shellSession` 都是 null，但 proot 进程
+        // 可能还在跑。所以先问端口层「有没有活着的交互会话」，有就把它
+        // 接过来 —— 这一步同时让 `stop()` 能真的停掉那个进程
+        // （否则它会变成一个谁也管不到的孤儿）。
+        //
+        // 只在 `shellSession` 为空或已死时才查：正常路径下（用户刚点启动、
+        // 或已经接管过）手上就有句柄，不必再走一遍加锁查询。
+        if (shellSession?.isAlive != true) {
+            shellSession = runCatching { port.liveSession(env) }.getOrNull()
+        }
+        val running = shellSession?.isAlive == true
         val derived = when {
             !prootOk -> "缺少 proot，无法运行 Linux 环境。"
             !installed -> "尚未安装 ${_state.value.distro.label} 环境。"
-            shellSession?.isAlive == true -> "容器运行中。"
+            running -> "容器运行中。"
             else -> "已安装，未运行。"
         }
         _state.update {
             it.copy(
                 prootAvailable = prootOk,
                 installed = installed,
-                running = shellSession?.isAlive == true,
+                running = running,
                 rootfsOrigin = origin,
                 activeSources = activeSources,
                 summary = if (keepSummary && it.summary.isNotBlank()) it.summary else derived,
@@ -824,6 +860,18 @@ class LinuxEnvViewModel(
     fun start() {
         if (_state.value.busy || shellSession?.isAlive == true) return
         val env = envFor(_state.value.distro)
+        // ## 启动前先看端口层有没有已经在跑的容器（2026-10-30）
+        //
+        // 「重进页面后点启动」这个场景里，容器其实还活着，只是本 VM 不知道。
+        // 不查的话会在同一个 rootfs 上再起一个 proot —— 两个容器同时写
+        // 同一份文件系统，apt 的锁、/tmp 里的文件都会互相踩。
+        //
+        // 查到就直接接管，把状态标成运行中，什么都不启动。
+        runCatching { port.liveSession(env) }.getOrNull()?.let { existing ->
+            shellSession = existing
+            _state.update { it.copy(running = true, summary = "容器运行中。") }
+            return
+        }
         _state.update { it.copy(busy = true, summary = "正在启动容器…") }
         viewModelScope.launch {
             try {

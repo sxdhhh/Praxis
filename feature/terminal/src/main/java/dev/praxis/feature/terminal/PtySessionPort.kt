@@ -71,6 +71,25 @@ interface PtySessionPort {
      * 只在「刚接上已有会话、需要回填历史」时用；实时渲染走 [outputFlow]。
      */
     fun screen(sessionId: String, maxLines: Int = 500): String? = null
+
+    /**
+     * 上一次 [open] 失败的原因（失败后由实现方写入，成功后应清空）。
+     *
+     * ## 为什么需要它（2026-10-30）
+     *
+     * [open] 只返回 `String?`，失败即 null。而终端页拿不到 null 会**静默降级**
+     * 到「一次一条命令」的管道模式 —— 那条路跑的是**宿主自己的 sh**，
+     * 完全不在 proot 容器里。用户看到的是「终端能敲命令」，但 `apt`、`pkill`、
+     * `/etc` 全是宿主的，与「进到下载好的 Linux 里」完全不同。
+     *
+     * 症状因此极具误导性：终端可用、`ls` 有输出、甚至 `uname` 也能跑，
+     * 只是看到的不是容器。没有报错、没有提示，用户只能从文件名或
+     * `cat /etc/os-release` 里察觉不对。
+     *
+     * 有了这个字段，UI 才能在屏幕上直接写「容器会话没起来，原因：…」，
+     * 而不是让用户以为自己在容器里。
+     */
+    val lastError: String? get() = null
 }
 
 /**
