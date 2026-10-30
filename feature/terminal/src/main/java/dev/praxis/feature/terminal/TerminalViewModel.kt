@@ -502,8 +502,31 @@ class TerminalViewModel(
             // 真正精确的值由 UI 在 `onResize` 里量出来后覆盖。
             val sessionId = port.open(tab.title, INITIAL_PTY_ROWS, DEFAULT_COLUMNS)
             if (sessionId == null) {
-                // 开会话失败：保持管道模式。不弹错误，因为管道也能用，
-                // 只是没有交互能力 —— 而用户可能只是没装 Linux 环境。
+                // ## 开会话失败必须说出来，不能静默降级（2026-10-30）
+                //
+                // 旧实现到这里直接 `return`。后果是终端**看起来完全正常**：
+                // 能敲命令、`ls` 有输出 —— 但跑的是宿主自己的 `sh`，
+                // 不是下载好的 Linux 容器。用户会以为「终端接的就是 shell」，
+                // 而真相是容器会话压根没建起来。
+                //
+                // 这里把原因写到屏幕上。不做成弹窗：终端页的主信息面就是
+                // 屏幕本身，用户回头看历史时也应当能看到「为什么不在容器里」。
+                val why = port.lastError?.takeIf { it.isNotBlank() }
+                    ?: "容器会话未能建立（原因未知）。"
+                runCatching {
+                    tab.session.feed(
+                        "
+[当前不是 Linux 容器]
+" +
+                            "原因：$why
+" +
+                            "现在输入的命令会在**宿主环境**执行，不是下载好的 Linux。
+" +
+                            "可先去「设置 → Linux 环境」确认已安装并启动，再回到本页。
+",
+                    )
+                }
+                publish()
                 return@launch
             }
             ptySessionIds[tab.id] = sessionId

@@ -1274,10 +1274,34 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
             .redirectErrorStream(true)
         applyEnv(pb, env)
         val process = pb.start()
-        val session = ProotSession(process, onLine)
+        // ## 交互 shell 会话要打标记（2026-10-30）
+        //
+        // `liveSession()` 必须能区分「用户启动的那个交互容器」与
+        // 「sshd / frpc / vsftpd」这三类长驻会话 —— 后三者跑起来不代表
+        // 用户点了「启动」。判据只能用**参数形状**：调用方传的是
+        // `ProotCommand.loginArgs(env)`（用于交互 shell），其它用途各自传
+        // 不同的 args。这里用「是否要求 /bin/sh 或 /bin/bash 作为末尾命令」
+        // 来识别，比传入一个额外 boolean 更贴近真实调用点
+        // （`LinuxEnvViewModel.start()` 是唯一传 loginArgs 的地方）。
+        val isShell = args.lastOrNull()?.let { last ->
+            last == "/bin/sh" || last == "/bin/bash" || last.endsWith("/sh") || last.endsWith("/bash")
+        } == true
+        val session = ProotSession(process, onLine, isShell)
         session.startPump()
         synchronized(sessions) { sessions += session }
         session
+    }
+
+    /**
+     * 取回仍存活的交互 shell 会话。
+     *
+     * 顺手清掉已死的会话，避免列表越积越长（每次 refresh 都会调到这里）。
+     */
+    override fun liveSession(env: LinuxEnvironment): LinuxEnvPort.SessionHandle? {
+        synchronized(sessions) {
+            sessions.removeAll { !it.isAlive }
+            return sessions.firstOrNull { it.isShellSession && it.isAlive }
+        }
     }
 
     companion object {
@@ -1398,6 +1422,13 @@ enum class TarFormat(
 private class ProotSession(
     private val process: Process,
     private val onLine: (String) -> Unit,
+    /**
+     * 是否由「启动容器」（交互 shell）创建的会话。
+     *
+     * sshd / frpc / vsftpd 也是 proot 会话，但它们跑起来不代表用户
+     * 点了「启动容器」。`liveSession()` 只认这一类。
+     */
+    val isShellSession: Boolean = false,
 ) : LinuxEnvPort.SessionHandle {
 
     override val isAlive: Boolean get() = process.isAlive

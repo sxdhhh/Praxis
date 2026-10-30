@@ -783,4 +783,130 @@ class WiringGuardTest {
         assertTrue("附件面板必须用带动画的 Popup", panel.contains("MiuixAnimatedPopup("))
         assertTrue("必须用 visible 控制", panel.contains("visible = visible,"))
     }
+
+
+    /**
+     * 「容器是否在跑」必须能从端口层问出来，而不是只靠 ViewModel 字段。
+     *
+     * ## 它防的是什么（2026-10-30）
+     *
+     * `running` 原本只读 ViewModel 的私有 `shellSession`。ViewModel 随页面
+     * 销毁后字段就没了，而 proot 进程还在跑 —— 用户「启动 → 退出环境页
+     * → 再进来」看到的是「未启动」。界面与事实相反，用户会再点一次启动，
+     * 于是同一个 rootfs 上跑两个 proot，apt 锁与 /tmp 开始互相踩。
+     */
+    @Test
+    fun linuxEnv_runningStateSurvivesViewModelRecreation() {
+        val port = read("feature/settings/src/main/java/dev/praxis/feature/settings/env/LinuxEnvViewModel.kt")
+        assertTrue(
+            "端口必须提供「查已有活会话」的能力",
+            port.contains("fun liveSession(env: LinuxEnvironment)"),
+        )
+        assertTrue(
+            "refresh 必须从端口层接管已有会话",
+            port.contains("shellSession = runCatching { port.liveSession(env) }.getOrNull()"),
+        )
+        assertTrue(
+            "start 必须先去重，不能无条件起第二个 proot",
+            port.contains("runCatching { port.liveSession(env) }.getOrNull()?.let { existing ->"),
+        )
+        // 实现侧：会话要能区分「交互 shell」与「sshd/frpc/vsftpd」。
+        val impl = read("app/src/main/java/dev/praxis/data/linux/ProotEnvPort.kt")
+        assertTrue("会话必须带「是否交互 shell」标记", impl.contains("isShellSession"))
+        assertTrue("必须实现 liveSession", impl.contains("override fun liveSession("))
+    }
+
+    /**
+     * 终端开会话失败时必须说出来，不能静默降级成宿主 shell。
+     *
+     * ## 这个缺陷的表现最有欺骗性
+     *
+     * 降级到 `ShellCommandRunner` 后终端**完全可用**：能敲 `ls`、有输出、
+     * `uname` 也正常。但它跑的是宿主自己的 sh，不在下载好的 Linux 里。
+     * 用户只能说「终端接的是 shell」，而看不到任何报错。
+     */
+    @Test
+    fun terminal_reportsContainerSessionFailure() {
+        val port = read("feature/terminal/src/main/java/dev/praxis/feature/terminal/PtySessionPort.kt")
+        assertTrue("端口必须暴露失败原因", port.contains("val lastError: String?"))
+
+        val adapter = read("app/src/main/java/dev/praxis/data/linux/ProotPtySessionAdapter.kt")
+        assertTrue(
+            "适配器必须留住 create 抛出的异常原因",
+            adapter.contains("lastError = created.exceptionOrNull()?.let"),
+        )
+
+        val vm = read("feature/terminal/src/main/java/dev/praxis/feature/terminal/TerminalViewModel.kt")
+        assertTrue(
+            "会话没起来时必须把原因写到终端屏幕",
+            vm.contains("[当前不是 Linux 容器]"),
+        )
+        assertTrue(
+            "必须明确告知命令会在宿主环境执行",
+            vm.contains("宿主环境"),
+        )
+    }
+
+
+    /**
+     * 「容器是否在跑」必须能从端口层问出来，而不是只靠 ViewModel 字段。
+     *
+     * ## 它防的是什么（2026-10-30）
+     *
+     * `running` 原本只读 ViewModel 的私有 `shellSession`。ViewModel 随页面
+     * 销毁后字段就没了，而 proot 进程还在跑 —— 用户「启动 → 退出环境页
+     * → 再进来」看到的是「未启动」。界面与事实相反，用户会再点一次启动，
+     * 于是同一个 rootfs 上跑两个 proot，apt 锁与 /tmp 开始互相踩。
+     */
+    @Test
+    fun linuxEnv_runningStateSurvivesViewModelRecreation() {
+        val port = read("feature/settings/src/main/java/dev/praxis/feature/settings/env/LinuxEnvViewModel.kt")
+        assertTrue(
+            "端口必须提供「查已有活会话」的能力",
+            port.contains("fun liveSession(env: LinuxEnvironment)"),
+        )
+        assertTrue(
+            "refresh 必须从端口层接管已有会话",
+            port.contains("shellSession = runCatching { port.liveSession(env) }.getOrNull()"),
+        )
+        assertTrue(
+            "start 必须先去重，不能无条件起第二个 proot",
+            port.contains("runCatching { port.liveSession(env) }.getOrNull()?.let { existing ->"),
+        )
+        // 实现侧：会话要能区分「交互 shell」与「sshd/frpc/vsftpd」。
+        val impl = read("app/src/main/java/dev/praxis/data/linux/ProotEnvPort.kt")
+        assertTrue("会话必须带「是否交互 shell」标记", impl.contains("isShellSession"))
+        assertTrue("必须实现 liveSession", impl.contains("override fun liveSession("))
+    }
+
+    /**
+     * 终端开会话失败时必须说出来，不能静默降级成宿主 shell。
+     *
+     * ## 这个缺陷的表现最有欺骗性
+     *
+     * 降级到 `ShellCommandRunner` 后终端**完全可用**：能敲 `ls`、有输出、
+     * `uname` 也正常。但它跑的是宿主自己的 sh，不在下载好的 Linux 里。
+     * 用户只能说「终端接的是 shell」，而看不到任何报错。
+     */
+    @Test
+    fun terminal_reportsContainerSessionFailure() {
+        val port = read("feature/terminal/src/main/java/dev/praxis/feature/terminal/PtySessionPort.kt")
+        assertTrue("端口必须暴露失败原因", port.contains("val lastError: String?"))
+
+        val adapter = read("app/src/main/java/dev/praxis/data/linux/ProotPtySessionAdapter.kt")
+        assertTrue(
+            "适配器必须留住 create 抛出的异常原因",
+            adapter.contains("lastError = created.exceptionOrNull()?.let"),
+        )
+
+        val vm = read("feature/terminal/src/main/java/dev/praxis/feature/terminal/TerminalViewModel.kt")
+        assertTrue(
+            "会话没起来时必须把原因写到终端屏幕",
+            vm.contains("[当前不是 Linux 容器]"),
+        )
+        assertTrue(
+            "必须明确告知命令会在宿主环境执行",
+            vm.contains("宿主环境"),
+        )
+    }
 }

@@ -40,11 +40,38 @@ class ProotPtySessionAdapter(
     private val delegate: TerminalSessionPort,
 ) : PtySessionPort {
 
+    /**
+     * 上一次 [open] 失败的原因。
+     *
+     * ## 为什么要把异常接住并留住（2026-10-30）
+     *
+     * 旧实现是 `runCatching { delegate.create(name) }.getOrNull()`：
+     * 异常被吞成 null，UI 只能知道「失败」，不可能知道「为什么」。
+     *
+     * 而 `create` 抛出的信息恰恰是可操作的 —— 它会说明是 rootfs 缺
+     * `/bin/sh`、proot 参数不适用、还是进程秒退。把这条信息丢掉，
+     * 用户就只能看到「终端能敲命令但环境不对」，完全指不到真正原因。
+     *
+     * `@Volatile`：写入在 IO 线程（`open` 是 suspend），读取在主线程。
+     * 只要求可见性，不需要互斥。
+     */
+    @Volatile
+    override var lastError: String? = null
+        private set
+
     override suspend fun open(name: String, rows: Int, cols: Int): String? {
         // create 是幂等的（同名返回既有会话），所以重复进页面不会造出
         // 第二个 shell —— 这正是 `startPtySession` 敢在 addTab 里无脑调的前提。
-        val info = runCatching { delegate.create(name) }.getOrNull() ?: return null
-        if (info.closed) return null
+        val created = runCatching { delegate.create(name) }
+        lastError = created.exceptionOrNull()?.let { e ->
+            e.message?.takeIf { it.isNotBlank() } ?: (e::class.simpleName ?: "未知错误")
+        }
+        val info = created.getOrNull() ?: return null
+        if (info.closed) {
+            lastError = "会话已关闭（${info.id}）。容器进程可能刚启动就退出了。"
+            return null
+        }
+        lastError = null
         // 建完立刻对齐尺寸。失败不算错：管道降级时 resize 恒 false，
         // 那种模式下没有窗口概念，UI 也不该因此报错。
         if (rows > 0 && cols > 0) {
