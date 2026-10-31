@@ -515,15 +515,10 @@ class TerminalViewModel(
                     ?: "容器会话未能建立（原因未知）。"
                 runCatching {
                     tab.session.feed(
-                        "
-[当前不是 Linux 容器]
-" +
-                            "原因：$why
-" +
-                            "现在输入的命令会在**宿主环境**执行，不是下载好的 Linux。
-" +
-                            "可先去「设置 → Linux 环境」确认已安装并启动，再回到本页。
-",
+                        "[当前不是 Linux 容器]\r\n" +
+                            "原因：" + why + "\r\n" +
+                            "现在输入的命令会在**宿主环境**执行，不是下载好的 Linux。\r\n" +
+                            "可先去「设置 → Linux 环境」确认已安装并启动，再回到本页。\r\n",
                     )
                 }
                 publish()
