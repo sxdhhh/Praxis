@@ -15,10 +15,12 @@ import org.junit.Test
  * 「能装上但跑不起来」的 vsftpd，而失败只出现在容器里的日志中，
  * 真机上很难每次都手工复现。所以把「必须出现的选项」钉在这里。
  *
- * 重点盯三处历史上真会踩的坑：
- *  1. `allow_writeable_chroot=YES` —— 缺了会因「chroot 根不可写」直接拒启；
+ * 重点盯四处历史上真会踩的坑（第 1 条在 2026-10-31 被真机实测反转）：
+ *  1. **关闭** `chroot_local_user` —— 开它会因 proot 的路径伪造与 chroot
+ *     冲突，导致「能登录、列不出文件、RETR 全 550」；
  *  2. `-obackground=NO` —— 缺了 UI 状态与进程状态永久错位；
- *  3. `pasv_min_port`/`pasv_max_port` —— 缺了客户端登录成功但看不到文件。
+ *  3. `pasv_min_port`/`pasv_max_port` —— 缺了客户端登录成功但看不到文件；
+ *  4. `mkdir -p /var/run/vsftpd/empty` —— 缺了每个连接都 `500 OOPS`。
  */
 class FtpConfigTest {
 
@@ -121,11 +123,81 @@ class FtpServerScriptTest {
     }
 
     @Test
-    fun `config enables writeable chroot`() {
-        // ★ 本类最重要的断言：缺了这一条 vsftpd 直接拒启。
+    fun `config disables chroot because proot cannot honour it`() {
+        // ## 这条断言的方向被颠倒过（2026-10-31 真机实测）
+        //
+        // 旧断言要求 `chroot_local_user=YES` + `allow_writeable_chroot=YES`。
+        // 那是**普通 Linux 上的正解**，在 proot 下却让 FTP 完全不可用：
+        //
+        // - 登录成功（230）、被动模式握手成功（227）、数据连接也能建立；
+        // - 但 LIST 返回 `226 Transfer done (but failed to open directory)`；
+        // - RETR / SIZE 一律 `550`。
+        //
+        // 根因：`chroot()` 会改进程自己的根目录视图，而 proot 的路径伪造
+        // 依赖固定的 host↔guest 映射，两者冲突 → 之后所有 openat 都失败。
+        //
+        // 对照实验：同一个 rootfs、同一被动段，用不做 chroot 的 Python
+        // 最小 FTP，LIST/RETR 全部正常。所以变量只有 chroot。
+        //
+        // 现在用 `local_root` 代替它：登录后仍落在家目录，
+        // 但不锁根 —— 代价是能看到 rootfs 其他路径，换来 FTP 真的能用。
         val s = FtpServerScript.installScript(cfg)
-        assertTrue(s.contains("allow_writeable_chroot=YES"))
-        assertTrue(s.contains("chroot_local_user=YES"))
+        assertTrue(
+            "proot 下必须关闭 chroot，否则所有目录操作失败",
+            s.contains("chroot_local_user=NO"),
+        )
+        assertTrue(
+            "allow_writeable_chroot 在关闭 chroot 后已无意义，不应残留",
+            !s.contains("allow_writeable_chroot"),
+        )
+        assertTrue(
+            "没有 chroot 时靠 local_root 把用户落到家目录",
+            s.contains("local_root=${cfg.homeDir}"),
+        )
+    }
+
+    @Test
+    fun `install script creates secure_chroot_dir`() {
+        // ## 为什么这条必须存在（2026-10-31 真机实测）
+        //
+        // vsftpd 默认 `secure_chroot_dir=/var/run/vsftpd/empty`。该目录在
+        // 普通发行版由包安装脚本 + init 创建；proot 里没有 init，
+        // postinst 的 invoke-rc.d 被 block，于是目录不存在。
+        //
+        // 表现极隐蔽：服务能起、端口能听、登录也返回 230，
+        // 但每个新连接被立刻否掉：
+        //
+        //   500 OOPS: vsftpd: not found: directory given in
+        //              'secure_chroot_dir':/var/run/vsftpd/empty
+        //
+        // vsftpd 在处理任何命令之前先 chroot 到那里（它的沙箱设计），
+        // 目录不在就 OOPS。所以安装脚本必须自己建。
+        val s = FtpServerScript.installScript(cfg)
+        assertTrue(
+            "必须创建 secure_chroot_dir，否则每个连接都被 500 OOPS 拒绝",
+            s.contains("mkdir -p /var/run/vsftpd/empty"),
+        )
+    }
+
+    @Test
+    fun `config does not pin pasv_address to 0_0_0_0`() {
+        // ## 0.0.0.0 会被原样回给客户端（2026-10-31 真机实测）
+        //
+        // 旧配置写 `pasv_address=0.0.0.0`，注释说「让 vsftpd 自动取本地 IP」。
+        // 实测它把这串原样发出：
+        //
+        //   227 Entering Passive Mode (0,0,0,0,8,85)
+        //
+        // 客户端拿 0.0.0.0 去连数据端口必然失败，而这个失败发生在数据连接
+        // 阶段，表现是「能登录、列目录卡住」，很难指向配置。
+        //
+        // 不设该项时 vsftpd 用控制连接的本地地址应答（实测 127.0.0.1 或
+        // 真实网卡地址），手机换网络也不需要改配置。
+        val s = FtpServerScript.installScript(cfg)
+        assertTrue(
+            "pasv_address 不能写 0.0.0.0（会被原样发给客户端）",
+            !s.contains("pasv_address=0.0.0.0"),
+        )
     }
 
     @Test
