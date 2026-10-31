@@ -45,8 +45,19 @@ class WiringGuardTest {
         )
     }
 
+
     private fun read(relative: String): String = source(relative).readText()
 
+    /**
+     * `ChatTab` 必须把模型池四个参数传进 `ChatScreen`。
+     *
+     * 少任何一个的后果：
+     *  - 缺 `models` → 底栏模型弹窗永远显示「还没有模型」；
+     *  - 缺 `activeModelIndex` → 选中态永远停在第 0 个；
+     *  - 缺 `onSelectModelIndex` → 点模型没反应（回调为 null 时列表退化为展示）；
+     *  - 缺 `onRemoveAttachment` → 待发图片角标删不掉。
+     */
+    @Test
     /**
      * `ChatTab` 必须把模型池四个参数传进 `ChatScreen`。
      *
@@ -69,6 +80,7 @@ class WiringGuardTest {
         }
     }
 
+
     /**
      * `ChatScreen` 必须把模型池继续透传给 `ChatSettingsBar`。
      *
@@ -88,6 +100,7 @@ class WiringGuardTest {
         }
     }
 
+
     /**
      * 附件面板必须接 `onDismiss`（浮层版的「点外部关闭」）。
      *
@@ -99,6 +112,7 @@ class WiringGuardTest {
         val text = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatScreen.kt")
         assertTrue("ChatScreen 未向 AttachmentPanel 传 onDismiss", text.contains("onDismiss = { if (attachmentPanelOpen)"))
     }
+
 
     /**
      * 记忆空间：仓库、路由、页面、`:app` 四层必须都接上 `spaces` / 创建入口。
@@ -125,6 +139,7 @@ class WiringGuardTest {
         val app = read("app/src/main/java/dev/praxis/ui/PraxisApp.kt")
         assertTrue("PraxisApp 未收集 memorySpaces", app.contains("settingsRepository.memorySpaces.collectAsState"))
     }
+
 
     /**
      * `spaceId` 列不得带 `DEFAULT`。
@@ -155,6 +170,7 @@ class WiringGuardTest {
             hits.isEmpty(),
         )
     }
+
 
     /**
      * 真终端接线：终端页必须拿到 `ptyPort`，且 `addTab` 要触发开会话。
@@ -197,6 +213,7 @@ class WiringGuardTest {
         )
     }
 
+
     /**
      * 恢复路径必须还原工具身份，否则重启后工具卡片退化为纯文本。
      *
@@ -232,53 +249,6 @@ class WiringGuardTest {
     }
 
 
-    /**
-     * 底栏三个浮层必须共用同一套尺寸与抬起量。
-     *
-     * ## 它防的是什么
-     *
-     * 模型选择 / 功能 / 附件（图片·拍照·记忆…）是**同一块板的三种内容**：
-     * 用户点不同按钮时，卡片应该原地换内容，而不是换位置、换宽窄。
-     *
-     * 这三处曾经各写各的：
-     *   - 功能弹窗  bottom=96 / end=8  / width=280 / max=420
-     *   - 模型选择  bottom=44 / end=12 / width=260 / max=380
-     *   - 附件面板  bottom=44 / end=12 / widthIn(max=420)+fillMaxWidth
-     *
-     * 结果就是截图上看到的：点开附件面板，卡片**明显更宽、更矮**，底边
-     * 与功能面板不在一条线上。
-     *
-     * 这类偏差**编译器与 lint 都不报**，页面上也“能看”，只是不像同一套 UI。
-     * 只能靠源码断言钉住。
-     */
-    @Test
-    fun bottomSheets_shareSameSizeAndLift() {
-        val settings = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatSettingsBar.kt")
-        val attachment = read("feature/chat/src/main/java/dev/praxis/feature/chat/AttachmentPanel.kt")
-
-        // 三处都必须出现这一组值（功能弹窗 + 模型选择 → settings；附件 → attachment）。
-        val expected = listOf(".padding(bottom = 96.dp, end = 8.dp)", ".width(280.dp)")
-        expected.forEach { needle ->
-            assertTrue(
-                "ChatSettingsBar 缺少统一尺寸 $needle（两个弹窗都要有，出现次数=${countOf(settings, needle)}）",
-                countOf(settings, needle) >= 2,
-            )
-            assertTrue(
-                "AttachmentPanel 缺少统一尺寸 $needle",
-                attachment.contains(needle),
-            )
-        }
-        // 附件面板不允许再出现 fillMaxWidth（会把宽度撑回满屏）。
-        assertTrue(
-            "AttachmentPanel 的 Card 不应使用 fillMaxWidth（宽度由 width(280.dp) 决定）",
-            !attachment.contains(".widthIn(max = 420.dp)
-                        .fillMaxWidth()"),
-        )
-    }
-
-    private fun countOf(haystack: String, needle: String): Int =
-        haystack.split(needle).size - 1
-
 
     /**
      * 底栏三个浮层必须共用同一套尺寸与抬起量。
@@ -319,13 +289,26 @@ class WiringGuardTest {
         // 附件面板不允许再出现 fillMaxWidth（会把宽度撑回满屏）。
         assertTrue(
             "AttachmentPanel 的 Card 不应使用 fillMaxWidth（宽度由 width(280.dp) 决定）",
-            !attachment.contains(".widthIn(max = 420.dp)
-                        .fillMaxWidth()"),
+            !attachment.contains(".fillMaxWidth()"),
         )
     }
 
+
     private fun countOf(haystack: String, needle: String): Int =
         haystack.split(needle).size - 1
+
+
+    /**
+     * 底栏三个浮层必须共用同一套尺寸与抬起量。
+     *
+     * ## 它防的是什么
+     *
+     * 模型选择 / 功能 / 附件（图片·拍照·记忆…）是**同一块板的三种内容**：
+     * 用户点不同按钮时，卡片应该原地换内容，而不是换位置、换宽窄。
+     *
+     * 这三处曾经各写各的：
+     *   - 功能弹窗  bottom=96 / end=8  / width=280 / max=420
+
 
 
     /**
@@ -358,6 +341,7 @@ class WiringGuardTest {
         }
     }
 
+
     /**
      * 模型池必须是**二级折叠**，不能直接平铺在分区里。
      *
@@ -376,6 +360,7 @@ class WiringGuardTest {
             bar.contains("FoldableContent(visible = showModelList)"),
         )
     }
+
 
 
     /**
@@ -415,6 +400,7 @@ class WiringGuardTest {
     }
 
 
+
     /**
      * 主对话必须吃 `FunctionSlot.CHAT` 的覆盖。
      *
@@ -451,6 +437,7 @@ class WiringGuardTest {
         )
     }
 
+
     /**
      * 底栏胶囊显示的模型名必须与运行时用的是同一个。
      *
@@ -474,6 +461,7 @@ class WiringGuardTest {
         )
     }
 
+
     /**
      * 摘要模型的回落链必须跟随主对话（CHAT 覆盖）。
      */
@@ -489,6 +477,7 @@ class WiringGuardTest {
             app.contains("forSummary,"),
         )
     }
+
 
 
     /**
@@ -526,6 +515,7 @@ class WiringGuardTest {
             settings.contains("customHeaders = advanced.customHeaders"),
         )
     }
+
 
     /**
      * 请求队列（限流 + 并发）必须真的在发请求前生效。
@@ -563,6 +553,7 @@ class WiringGuardTest {
         )
     }
 
+
     /**
      * 进阶配置必须能存也能读回来。
      *
@@ -589,94 +580,6 @@ class WiringGuardTest {
         assertTrue("路由必须保存并发上限", route.contains("repository.setMaxConcurrentRequests(maxConcurrentRequests)"))
     }
 
-    /**
-     * 模型管理页必须真的画出这两个分区。
-     */
-    @Test
-    fun modelScreen_hasCustomHeadersAndQueueSections() {
-        val screen = read("feature/settings/src/main/java/dev/praxis/feature/settings/ai/ModelScreen.kt")
-        assertTrue("必须有「自定义请求头」分区", screen.contains("title = \"自定义请求头\""))
-        assertTrue("必须有「请求队列」分区", screen.contains("title = \"请求队列\""))
-        assertTrue(
-            "三个新参数必须进 onSave 回调",
-            screen.contains("requestLimitPerMinute = rpmDraft.toIntOrNull() ?: 0"),
-        )
-        assertTrue(
-            "dirty 判据必须包含进阶配置（否则按钮一直显示「已保存」）",
-            screen.contains("!= advanced.requestLimitPerMinute"),
-        )
-    }
-
-
-    /**
-     * 自定义请求头必须真的写进 HTTP 请求。
-     *
-     * ## 它防的是什么
-     *
-     * 设置页有个「自定义请求头」分区，能填能存 —— 但如果 provider 不读它，
-     * 那就是个纯装饰：用户填了中转站要求的 `X-Api-Key`，请求照样 401，
-     * 而且**没有任何错误提示**指向「头没发出去」。
-     *
-     * 这类「存了不用」的假控件看不出来：编译过、lint 过、单测过、
-     * 运行时也不报错，只是不生效。
-     */
-    @Test
-    fun customHeaders_are_actually_sent() {
-        val provider = read("app/src/main/java/dev/praxis/data/ai/OpenAiCompatProvider.kt")
-        assertTrue(
-            "OpenAiCompatProvider 必须接收 customHeaders",
-            provider.contains("private val customHeaders"),
-        )
-        assertTrue(
-            "必须把 customHeaders 逐条 addHeader 到请求上",
-            provider.contains("customHeaders.forEach"),
-        )
-        assertTrue(
-            "必须有头名合法性校验（避免 OkHttp 抛 IllegalArgumentException）",
-            provider.contains("isValidHeaderName"),
-        )
-        // SettingsBackedProvider 必须把读到的头传下去 —— 少这一步，
-        // provider 支持了也白搭。
-        val settings = read("app/src/main/java/dev/praxis/data/ai/SettingsBackedProvider.kt")
-        assertTrue(
-            "SettingsBackedProvider 必须把 advanced.customHeaders 传给 provider",
-            settings.contains("customHeaders = advanced.customHeaders"),
-        )
-    }
-
-    /**
-     * 请求队列（限流 + 并发）必须真的在发请求前生效。
-     *
-     * ## 为什么这条特别重要
-     *
-     * 限流器写了但没接进请求路径，是「看起来做了、其实完全没做」的典型。
-     * 用户填了「每分钟 10 次」，程序照样一秒发 20 个 —— 然后 429。
-     */
-    /**
-     * 进阶配置必须能存也能读回来。
-     *
-     * ## 存的三个字段缺一不可
-     *
-     * 少任何一个，那个设置项就是「改了没反应」。
-     */
-    @Test
-    fun advancedSettings_roundTrip() {
-        val repo = read("core/data/src/main/kotlin/dev/praxis/core/data/settings/SettingsRepository.kt")
-        assertTrue("必须有读取流", repo.contains("val modelAdvancedSettings: Flow<ModelAdvancedSettings>"))
-        assertTrue("必须能写请求头", repo.contains("suspend fun setCustomHeaders"))
-        assertTrue("必须能写 RPM", repo.contains("suspend fun setRequestLimitPerMinute"))
-        assertTrue("必须能写并发上限", repo.contains("suspend fun setMaxConcurrentRequests"))
-        // 请求头里可能含令牌，必须走加密路径（与 apiKey 同一口径）。
-        assertTrue(
-            "请求头必须加密存储（值里可能是中转站令牌）",
-            repo.contains("val encrypted = cipher?.encrypt(serialized)"),
-        )
-        // 路由必须把 UI 草稿写进仓库。
-        val route = read("feature/settings/src/main/java/dev/praxis/feature/settings/ai/ModelRoute.kt")
-        assertTrue("路由必须保存请求头", route.contains("repository.setCustomHeaders(customHeaders)"))
-        assertTrue("路由必须保存 RPM", route.contains("repository.setRequestLimitPerMinute(requestLimitPerMinute)"))
-        assertTrue("路由必须保存并发上限", route.contains("repository.setMaxConcurrentRequests(maxConcurrentRequests)"))
-    }
 
     /**
      * 模型管理页必须真的画出这两个分区。
@@ -695,6 +598,7 @@ class WiringGuardTest {
             screen.contains("!= advanced.requestLimitPerMinute"),
         )
     }
+
 
 
     /**
@@ -721,6 +625,7 @@ class WiringGuardTest {
         )
     }
 
+
     /**
      * 功能位必须能用模型选择器，而不是只能手打模型 ID。
      */
@@ -746,6 +651,7 @@ class WiringGuardTest {
         )
     }
 
+
     /**
      * 单值选择弹窗必须存在且点击即选中。
      */
@@ -757,6 +663,7 @@ class WiringGuardTest {
         // 与多选弹窗同一套退场处理：常驻 + visible。
         assertTrue("必须用带动画的 Dialog", dlg.contains("MiuixAnimatedDialog("))
     }
+
 
     /**
      * 折叠/弹出必须有动画，不能直接 if 硬切。
@@ -774,6 +681,7 @@ class WiringGuardTest {
         )
     }
 
+
     /**
      * 贴边浮层（AttachmentsPanel）必须有进出场动画。
      */
@@ -785,68 +693,6 @@ class WiringGuardTest {
     }
 
 
-    /**
-     * 「容器是否在跑」必须能从端口层问出来，而不是只靠 ViewModel 字段。
-     *
-     * ## 它防的是什么（2026-10-30）
-     *
-     * `running` 原本只读 ViewModel 的私有 `shellSession`。ViewModel 随页面
-     * 销毁后字段就没了，而 proot 进程还在跑 —— 用户「启动 → 退出环境页
-     * → 再进来」看到的是「未启动」。界面与事实相反，用户会再点一次启动，
-     * 于是同一个 rootfs 上跑两个 proot，apt 锁与 /tmp 开始互相踩。
-     */
-    @Test
-    fun linuxEnv_runningStateSurvivesViewModelRecreation() {
-        val port = read("feature/settings/src/main/java/dev/praxis/feature/settings/env/LinuxEnvViewModel.kt")
-        assertTrue(
-            "端口必须提供「查已有活会话」的能力",
-            port.contains("fun liveSession(env: LinuxEnvironment)"),
-        )
-        assertTrue(
-            "refresh 必须从端口层接管已有会话",
-            port.contains("shellSession = runCatching { port.liveSession(env) }.getOrNull()"),
-        )
-        assertTrue(
-            "start 必须先去重，不能无条件起第二个 proot",
-            port.contains("runCatching { port.liveSession(env) }.getOrNull()?.let { existing ->"),
-        )
-        // 实现侧：会话要能区分「交互 shell」与「sshd/frpc/vsftpd」。
-        val impl = read("app/src/main/java/dev/praxis/data/linux/ProotEnvPort.kt")
-        assertTrue("会话必须带「是否交互 shell」标记", impl.contains("isShellSession"))
-        assertTrue("必须实现 liveSession", impl.contains("override fun liveSession("))
-    }
-
-    /**
-     * 终端开会话失败时必须说出来，不能静默降级成宿主 shell。
-     *
-     * ## 这个缺陷的表现最有欺骗性
-     *
-     * 降级到 `ShellCommandRunner` 后终端**完全可用**：能敲 `ls`、有输出、
-     * `uname` 也正常。但它跑的是宿主自己的 sh，不在下载好的 Linux 里。
-     * 用户只能说「终端接的是 shell」，而看不到任何报错。
-     */
-    @Test
-    fun terminal_reportsContainerSessionFailure() {
-        val port = read("feature/terminal/src/main/java/dev/praxis/feature/terminal/PtySessionPort.kt")
-        assertTrue("端口必须暴露失败原因", port.contains("val lastError: String?"))
-
-        val adapter = read("app/src/main/java/dev/praxis/data/linux/ProotPtySessionAdapter.kt")
-        assertTrue(
-            "适配器必须留住 create 抛出的异常原因",
-            adapter.contains("lastError = created.exceptionOrNull()?.let"),
-        )
-
-        val vm = read("feature/terminal/src/main/java/dev/praxis/feature/terminal/TerminalViewModel.kt")
-        assertTrue(
-            "会话没起来时必须把原因写到终端屏幕",
-            vm.contains("[当前不是 Linux 容器]"),
-        )
-        assertTrue(
-            "必须明确告知命令会在宿主环境执行",
-            vm.contains("宿主环境"),
-        )
-    }
-
 
     /**
      * 「容器是否在跑」必须能从端口层问出来，而不是只靠 ViewModel 字段。
@@ -878,6 +724,7 @@ class WiringGuardTest {
         assertTrue("会话必须带「是否交互 shell」标记", impl.contains("isShellSession"))
         assertTrue("必须实现 liveSession", impl.contains("override fun liveSession("))
     }
+
 
     /**
      * 终端开会话失败时必须说出来，不能静默降级成宿主 shell。
