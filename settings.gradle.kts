@@ -84,3 +84,17 @@ include(":ui:provision")
 include(":feature:chat")
 include(":feature:settings")
 include(":feature:terminal")
+
+// ── 预览（浏览器实时预览管线）───────────────────────────
+//
+// ## 它不进 APK
+//
+// `:preview` 只被它自己的 unit test 使用，`:app` 不依赖它，
+// 所以 `assembleDebug` 的产物与它无关，APK 体积零变化。
+//
+// ## 它为什么必须依赖 feature 模块
+//
+// 预览的对象就是真实的 Composable（`ChatScreen` / `ModelScreen` …），
+// 不是复制品。任何「另写一份简化版 UI 用于预览」的做法都会立刻漂移 ——
+// 预览里对不上，就没有意义。
+include(":preview")

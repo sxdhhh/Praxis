@@ -61,6 +61,26 @@ okhttp = "4.12.0"
 junit = "4.13.2"
 kyantBackdrop = "2.0.1"
 kyantShapes = "1.2.1"
+# 布局渲染引擎（浏览器预览管线）。
+#
+# ## 为什么是 Paparazzi 而不是 compose-preview-renderer
+#
+# Paparazzi 在 **JVM 单元测试**里直接调 layoutlib 渲染 Compose，不需要
+# 模拟器、不需要 adb、不需要 AGP 的 preview 基建。产出是纯 PNG 文件，
+# 可以被任意 dev server 拿去喂浏览器 —— 这正是「浏览器实时预览」需要的东西。
+#
+# ## 为什么版本选 2.0.0-alpha05.1
+#
+# 1.x 依赖的是 layoutlib 的老坐标（`app.cash.paparazzi:layoutlib-native-*`），
+# 2.0 改成直接吃 `com.android.tools.layoutlib:layoutlib:16.2.3`。
+# 项目 compileSdk=37 / AGP 9.4.1，只有 2.0 这条线能跟上。
+#
+# ## ⚠️ 它只能在 x86_64 上跑
+#
+# layoutlib 的 native 渲染库只发布 x86_64（实测 linux / linux-aarch64 /
+# osx-aarch64 等分类器全部 404）。本机是 aarch64，所以渲染这一步
+# **必须放在 CI 的 ubuntu-latest（x86_64）上执行**，本地只负责看图和触发。
+paparazzi = "2.0.0-alpha05.1"
 # XZ：Kali rootfs 是 .tar.xz，而 Android 的 toybox `-J` 只是转发外部
 # `xz` 命令（系统里没有）。用纯 Java 实现。
 xz = "1.10"
@@ -174,6 +194,14 @@ kyant-backdrop = { module = "io.github.kyant0:backdrop", version.ref = "kyantBac
 kyant-shapes = { module = "io.github.kyant0:shapes", version.ref = "kyantShapes" }
 
 junit = { module = "junit:junit", version.ref = "junit" }
+
+# 预览渲染：`app.cash.paparazzi:paparazzi` 提供 Paparazzi 类与
+# `paparazzi` 扩展。渲染产物落在 `build/reports/paparazzi/images/`。
+paparazzi = { module = "app.cash.paparazzi:paparazzi", version.ref = "paparazzi" }
+# layoutlib 本体（渲染引擎 + Android 框架桩）。Paparazzi 内部会用到，
+# 但显式声明一次能让依赖解析在 CI 上更早暴露「平台不支持」这类问题，
+# 而不是等到跑测试时才崩在 UnsatisfiedLinkError。
+layoutlib = { module = "com.android.tools.layoutlib:layoutlib", version = "16.2.3" }
 
 timber = { module = "com.jakewharton.timber:timber", version.ref = "timber" }
 material-kolor = { module = "com.materialkolor:material-kolor-android", version.ref = "materialKolor" }

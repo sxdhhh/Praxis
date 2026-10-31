@@ -1,0 +1,102 @@
+name: preview
+
+# UI 预览渲染
+#
+# ## 为什么单独一个 workflow
+#
+# `build.yml` 的目标是「产出一个能装的 APK」，跑一次十几分钟。
+# 改一行 UI 颜色就为它排一次全量构建，反馈太慢。这里只做一件事：
+# 用 Paparazzi 把界面渲染成 PNG，跑完 3~5 分钟，产物是一包图片。
+#
+# ## 为什么必须是 ubuntu-latest
+#
+# layoutlib（Android 的渲染引擎）的 native 库只发布 x86_64。
+# 开发机是 aarch64，本地跑必然 `UnsatisfiedLinkError`。
+# GitHub 的 ubuntu-latest 是 x86_64，这是唯一能跑它的地方。
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      # 只在 UI 相关路径变化时跑。改了 core/ 的数据层不需要重渲界面。
+      - 'feature/**'
+      - 'ui/**'
+      - 'preview/**'
+      - 'gradle/libs.versions.toml'
+      - '.github/workflows/preview.yml'
+
+concurrency:
+  # 连推两次时只保留最新那个 —— 预览图只要最新的，中间版本没有价值。
+  group: preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 与 build.yml 同一口径：platforms;android-37 在 canary 通道，
+      # 且包名要带 minor。失败不阻断（后面的 Gradle 会自己再试一次）。
+      - name: Install Android SDK platform 37
+        continue-on-error: true
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-37" >/dev/null 2>&1 || \
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            --channel=3 "platforms;android-37.0" >/dev/null 2>&1 || true
+
+      - name: Tune Gradle memory for CI
+        run: |
+          {
+            echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=2g"
+            echo "kotlin.daemon.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=1g"
+          } >> gradle.properties
+
+      - name: Write local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      # ## 为什么只跑 :preview 的测试
+      #
+      # 渲染全部界面就在这里。跑全量 `test` 会把 :app 的 31 条
+      # WiringGuard 断言也带上 —— 那些在 build.yml 的 verify job 里已经跑过。
+      - name: Render previews
+        run: |
+          ./gradlew :preview:testDebugUnitTest \
+            --tests 'dev.praxis.preview.*' \
+            --stacktrace
+
+      - name: List rendered images
+        if: always()
+        run: |
+          dir=preview/build/reports/paparazzi/images
+          if [ -d "$dir" ]; then
+            ls -lh "$dir"
+          else
+            echo "::warning::没有渲染出任何图片（Paparazzi 可能失败）"
+          fi
+
+      # 无论成功失败都传：失败时的 HTML 报告能直接看出崩在哪一步。
+      - name: Upload previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-previews
+          path: |
+            preview/build/reports/paparazzi/images
+            preview/build/reports/tests
+          retention-days: 14
+          if-no-files-found: warn
