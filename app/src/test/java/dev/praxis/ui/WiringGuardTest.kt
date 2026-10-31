@@ -744,4 +744,47 @@ class WiringGuardTest {
             vm.contains("宿主环境"),
         )
     }
+
+
+    /**
+     * 滚动条与消息导航浮条不许抢同一条竖轴。
+     *
+     * ## 它防的是什么（2026-10-31）
+     *
+     * 这俩组件原本都用 `Alignment.CenterEnd`，靠
+     * `ScrollThumbRail(... padding(bottom = 96.dp))` 往下挪来错开。
+     * 96 是拍出来的数：屏幕一矮、或导航胶囊展开，回底按钮就压在
+     * 胶囊上，底部还露出半截半透明残影 —— 截图里那根「诡异的滑条」。
+     *
+     * 正确形态是：导航浮条留在右缘垂直中点（它的语义位置就是
+     * 「我在整段对话的哪里」），滚动条贴右下角（它属于底部操作区）。
+     * 两者物理上不再可能重叠，也不需要任何魔法 padding。
+     *
+     * 这条断言盯的就是那个 `padding(bottom = 96.dp)` 不许回来。
+     */
+    @Test
+    fun scrollRail_doesNotShareAxisWithNavigator() {
+        val screen = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatScreen.kt")
+        val railCall = screen.substringAfter("ScrollThumbRail(").substringBefore(")")
+        assertTrue(
+            "滚动条必须贴右下角（BottomEnd），不能与导航浮条同用 CenterEnd",
+            railCall.contains("Alignment.BottomEnd"),
+        )
+        assertTrue(
+            "不许再用 padding(bottom = 96.dp) 这种拍出来的错位值",
+            !railCall.contains("padding(bottom = 96.dp)"),
+        )
+
+        // 组件侧：轨道与圆点必须尺寸分明，否则圆点会嵌进轨道里像一块脏点。
+        val rail = read("ui/design/src/main/java/dev/praxis/ui/design/component/ScrollThumbRail.kt")
+        assertTrue(
+            "圆点必须比轨道宽（否则分辨不出当前位置）",
+            rail.contains("private val RAIL_WIDTH = 4.dp") &&
+                rail.contains("private val DOT_SIZE = 8.dp"),
+        )
+        assertTrue(
+            "轨道高度必须随可用空间自适应，不能写死 96.dp",
+            rail.contains("constraints.hasBoundedHeight"),
+        )
+    }
 }
