@@ -24,12 +24,27 @@ package dev.praxis.core.linux
  *
  * ## proot 下 vsftpd 的三个必须处理的坑
  *
- * ### 1. 必须开 `allow_writeable_chroot`
+ * ### 1. 必须**关闭** chroot（2026-10-31 真机实测后反转）
  *
- * vsftpd 拒绝让用户 chroot 到一个**可写**目录（安全设计），报
- * `500 OOPS: vsftpd: refusing to run with writable root inside chroot()`。
- * 而我们的根就是用户家目录，必须可写 —— 否则 FTP 只能下载不能上传，
- * 那这个功能就没意义。
+ * 这条曾经写成「必须开 `allow_writeable_chroot`」——那是普通 Linux 的正解，
+ * 在 proot 下却是让 FTP 彻底不可用的原因。
+ *
+ * 现象：登录成功（230）、被动握手成功（227）、数据连接也能建立，
+ * 但一到目录操作就全废：
+ *
+ * ```
+ * 150 Here comes the directory listing.
+ * 226 Transfer done (but failed to open directory).   ← 列不出东西
+ * SIZE/RETR → 550
+ * ```
+ *
+ * 根因：proot 靠 ptrace 拦截路径系统调用来伪造根目录，映射是固定的
+ * host↔guest 对应；而 `chroot()` 会改进程自己的根视图，两者冲突，
+ * 之后所有 `openat` 都算错路径。
+ *
+ * 所以现在是 `chroot_local_user=NO` + `local_root=<家目录>`。
+ * 代价是用户能上跳出家目录，但换来 FTP 真的能用 —— 在「用户自己的容器、
+ * proot 本就没有真实安全边界」的前提下这是对的取舍。
  *
  * ### 2. 不能用 PAM（与 sshd 同一个原因）
  *
@@ -43,6 +58,15 @@ package dev.praxis.core.linux
  * 所以必须用被动模式，并**固定一段端口**（否则每次协商一个随机端口，
  * 用户没法在路由器/防火墙里放行）。这与 Operit 的
  * `setPassivePorts("2128-2136")` 是同一个判断，端口段也沿用它的默认值。
+ *
+ * 另外**不要**设 `pasv_address=0.0.0.0`：实测它会把 `0.0.0.0` 原样发给
+ * 客户端，客户端因此连不上数据端口。不设该项时 vsftpd 用控制连接的本地
+ * 地址应答，才是对的。
+ *
+ * ### 4. 还要自己建 `secure_chroot_dir`
+ *
+ * `/var/run/vsftpd/empty` 在普通发行版由包脚本 + init 创建。proot 里没有
+ * init，目录不存在时每个连接都被 `500 OOPS` 拒掉（而服务看起来是「在跑」）。
  *
  * ## 端口为什么不能是 21
  *
@@ -188,6 +212,28 @@ object FtpServerScript {
         )
         appendLine(writePamConfig())
         appendLine(writeConfig(cfg))
+        // ## 必须手动建 `secure_chroot_dir`（2026-10-31 真机实测）
+        //
+        // vsftpd 默认 `secure_chroot_dir=/var/run/vsftpd/empty`，这个目录
+        // 在普通发行版里由 **包安装脚本 + init 系统** 创建。proot 里没有
+        // init，`postinst` 的 `invoke-rc.d` 又是被 block 的，于是目录不存在。
+        //
+        // 后果极其隐蔽：服务**能启动、端口能监听、登录也能成功**，
+        // 但每个新连接都被立刻拒绝：
+        //
+        // ```
+        // 500 OOPS: vsftpd: not found: directory given in
+        //            'secure_chroot_dir':/var/run/vsftpd/empty
+        // ```
+        //
+        // 因为 vsftpd 在 fork 出会话进程后、处理任何命令之前就先做 chroot
+        // 到那个目录（这是它的沙箱设计），目录不在就直接 OOPS。
+        //
+        // 同理 `/var/log` 也要在 —— `xferlog_file` 指向那里，
+        // 目录不在时传输日志会静默丢失（不报错，只是没日志）。
+        appendLine("mkdir -p /var/run/vsftpd/empty")
+        appendLine("chmod 755 /var/run/vsftpd/empty")
+        appendLine("mkdir -p /var/log")
         // Ubuntu 的 vsftpd 包自带 init.d 脚本与 systemd unit，
         // 但 proot 里没有 systemd —— 若它们被触发会立即失败。
         // 我们不启动系统服务，只用 `-obackground=NO` 前台跑（见 [runArgs]）。
@@ -280,10 +326,63 @@ object FtpServerScript {
         // 上传文件的权限位。022 = 组/其他不可写，属主可写，与 sshd 场景一致。
         append("'local_umask=022' ")
         // ── chroot ──
-        // 把用户锁在家目录里。不设则能看到整个 rootfs（含 /etc/shadow）。
-        append("'chroot_local_user=YES' ")
-        // ★ 关键：见 FtpConfig 类 KDoc 第 1 条。不设则 chroot 因「根可写」直接拒启。
-        append("'allow_writeable_chroot=YES' ")
+        //
+        // ## ⚠️ 必须关闭 chroot（2026-10-31 真机实测后改）
+        //
+        // 旧配置是 `chroot_local_user=YES` + `allow_writeable_chroot=YES`，
+        // 那是**普通 Linux 上的标准做法**，但在 proot 下是致命错误：
+        // 所有目录操作都会失败，而报错极具误导性。
+        //
+        // ### 现象（真机复现，aarch64 / Ubuntu 24.04 / vsftpd 3.0.5）
+        //
+        // 登录、控制通道、被动模式握手全部正常：
+        //
+        // ```
+        // 230 Login successful.
+        // 227 Entering Passive Mode (127,0,0,1,8,80).
+        // 数据连接 → 建立成功
+        // ```
+        //
+        // 但一到列目录就废：
+        //
+        // ```
+        // 150 Here comes the directory listing.
+        // 226 Transfer done (but failed to open directory).     ← 关键
+        // 空列表
+        //
+        // SIZE hello.txt → 550 Could not get file size.
+        // RETR hello.txt → 550 Failed to open file.
+        // ```
+        //
+        // `150` 说明数据连接已经通了、vsftpd 愿意发数据；真正失败的是
+        // 它内部去 `opendir()` 那一刻。
+        //
+        // ### 根因
+        //
+        // proot 是靠 **ptrace 拦截路径相关系统调用**来伪造根目录的：
+        // 你看到 `/home/ubuntu`，真实路径是
+        // `/data/data/<pkg>/files/linux/shared/home/ubuntu`，每次 open/stat
+        // 都由 proot 现场翻译。
+        //
+        // 而 `chroot()` 会**改变进程自己的根目录视图**。proot 的翻译逻辑
+        // 建立在一个固定的 host↔guest 路径映射上，进程根一变，映射就对不上了 ——
+        // 后续的 `openat` 算出来的路径落在 proot 认知之外，于是返回失败。
+        //
+        // 本机用 Python 写了一个等价的最小 FTP（不做 chroot）做对照：
+        // 同一个 rootfs、同一个被动端口段，`LIST` 与 `RETR` 全部成功。
+        // 所以网络、被动模式、proot 的数据连接都没有问题，
+        // **唯一变量就是 chroot**。
+        //
+        // ### 关闭之后的代价
+        //
+        // 用户能看到 chroot 之外的路径（通过 `CDUP` 上跳）。在「这是用户
+        // 自己的容器、而且 proot 本来就没有真正的安全边界」这个前提下，
+        // 这个代价是可接受的 —— 换来的是 FTP **真的能用**。
+        //
+        // 用 `local_root` 代替 chroot：把登录后的初始目录定在家目录，
+        // 功能上满足「进来就在自己家」的预期。
+        append("'chroot_local_user=NO' ")
+        append("'local_root=${shellQuote(cfg.homeDir)}' ")
         // ── PAM ──
         // 指向我们的极简配置（见 writePamConfig）。
         append("'pam_service_name=vsftpd.praxis' ")
@@ -293,9 +392,26 @@ object FtpServerScript {
         append("'pasv_enable=YES' ")
         append("'pasv_min_port=$lo' ")
         append("'pasv_max_port=$hi' ")
-        // 被动模式回给客户端的地址。写 `0.0.0.0` 让 vsftpd 自动取本地 IP ——
-        // **不能**写死具体 IP：手机切 Wi-Fi / 热点时 IP 会变。
-        append("'pasv_address=0.0.0.0' ")
+        // 被动模式回给客户端的地址。
+        //
+        // ## ⚠️ 不写这一项（2026-10-31 真机实测后改）
+        //
+        // 旧写法是 `pasv_address=0.0.0.0`，注释说「让 vsftpd 自动取本地 IP」。
+        // 实测那是错的 —— vsftpd 会把这串**原样回给客户端**：
+        //
+        // ```
+        // 227 Entering Passive Mode (0,0,0,0,8,85)
+        // ```
+        //
+        // 客户端拿到 0.0.0.0 之后去连数据端口，必然失败。而这个失败发生在
+        // 数据连接阶段，表现是「能登录、列目录卡住」，很难指向配置。
+        //
+        // 不设这一项时 vsftpd 会用**控制连接的本地地址**作为 PASV 应答
+        // （实测返回 `127,0,0,1` 或真实网卡地址），这才是对的。
+        //
+        // 若要给公网/NAT 后的客户端用，正确做法是填**真实可达 IP**，
+        // 而不是 0.0.0.0。这里不填，让它跟着实际连接走 ——
+        // 手机切 Wi-Fi / 热点换 IP 时不需要改配置。
         // ── 传输编码 ──
         // UTF-8：中文文件名必须。不设则中文名显示乱码，且上传会失败。
         append("'utf8_filesystem=YES' ")
