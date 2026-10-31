@@ -143,7 +143,7 @@ class ProotTerminalSessionPort(
         //    窗口大小按手机常见列数给（80x24 会让 top 错位）。
         val pty = dev.praxis.core.terminal.Pty.start(
             command = argv.toTypedArray(),
-            environment = ptyEnvironment(),
+            environment = ptyEnvironment(env),
             workingDir = context.filesDir,
             rows = 60,
             cols = 80,
@@ -624,14 +624,38 @@ class ProotTerminalSessionPort(
      *   不指的话会尝试写 `/tmp`（安卓上不可写），表现为 proot 静默失败。
      * - **不能有 `LD_LIBRARY_PATH`**：继承 Android 的库路径会让容器里的
      *   程序去加载 bionic 库，`curl` 会报 `cannot locate symbol "EVP_MD_CTX_create"`。
+     *
+     * ## 为什么必须显式给 `PROOT_LOADER`（2026-10-31 修）
+     *
+     * 这条环境是**全新的**（`execve` 语义），所以 proot 拿不到父进程的任何
+     * 变量，也拿不到 App 进程里已经设好的 `PROOT_LOADER` —— 除非这里显式给。
+     *
+     * 不给的后果是 proot 只能按它编译期写死的路径去找 loader：
+     *
+     * ```
+     * proot error: execve("/bin/sh"): No such file or directory
+     * ```
+     *
+     * 而这条错误实际含义是「loader 没找到」，不是「/bin/sh 不存在」。
+     * 真机实测（2026-10-31）：同样的 rootfs、同样的 proot 二进制，
+     * 只加这一行就恢复正常 —— 这解释了截图里
+     * 「proot 进程启动后立即退出」的真正原因：
+     *
+     * 1. PTY 分支缺 `PROOT_LOADER` → proot 秒退 → `Pty` 存活探测失败；
+     * 2. 降级到管道分支，那个分支的 `applyEnv` 又缺 `PATH`
+     *    → 容器里的 `ls` / `id` 全部 `not found`。
+     *
+     * 两个缺陷叠加，就是用户截图里那一整屏报错。
      */
-    private fun ptyEnvironment(): Map<String, String> = buildMap {
+    private fun ptyEnvironment(env: LinuxEnvironment): Map<String, String> = buildMap {
         put("TERM", "xterm-256color")
         put("HOME", "/root")
         put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
         put("LANG", "C.UTF-8")
         put("PROOT_TMP_DIR", context.cacheDir.absolutePath)
         put("PROOT_NO_SECCOMP", "1")
+        // ★ 缺它 proot 起不来。与 applyEnv 保持一致，两条路径共用同一个查法。
+        prootLoaderFileFor(env)?.let { put("PROOT_LOADER", it.absolutePath) }
     }
 
     /**
@@ -655,15 +679,87 @@ class ProotTerminalSessionPort(
         }
     }
 
-    /** 给子进程设环境变量（必须清掉 Android 的库路径）。 */
+    /**
+     * 给子进程设环境变量（必须清掉 Android 的库路径）。
+     *
+     * ## 为什么这里必须显式给 PATH（2026-10-31 修，真机复现）
+     *
+     * 上一版只设了 `PROOT_TMP_DIR` / `PROOT_NO_SECCOMP` / `HOME` / `TERM`，
+     * 没设 `PATH`。注释当时写着「ProcessBuilder 自带父进程环境副本，
+     * 只需增删」—— 这句话对了一半，代价却是致命的：
+     *
+     * `ProcessBuilder.environment()` 是**父进程环境的副本**，所以
+     * Android 的 PATH 被原样继承下来：
+     *
+     * ```
+     * PATH=/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:
+     *      /system/bin:/system/xbin:/data/adb/ksu/bin
+     * ```
+     *
+     * proot 会把这个环境**再原样带进容器**（`ProotCommand.loginArgs` 里
+     * 那条注释「proot 会把父进程的环境原样带进容器」说的就是这件事）。
+     * 于是容器里的 shell 拿着全 Android 路径去找 binutils —— 一个都找不到：
+     *
+     * ```
+     * # ls
+     * /bin/sh: 1: ls: not found
+     * ```
+     *
+     * 真机实测（2026-10-31，aarch64 / SDK 37）：
+     *
+     * | 环境 | 结果 |
+     * |---|---|
+     * | 只设 4 个变量（旧写法） | `ls: not found`、`id: not found`，几乎全部命令失败 |
+     * | 加上容器 PATH | `ls` / `id` / `uname` 全部正常 |
+     *
+     * 其余参数（`-v 0` / `--kill-on-exit` / 全部 `-b` 挂载 / `-w /root`）
+     * 逐项验证过，**均无影响**。唯一原因就是 PATH。
+     *
+     * ## 为什么是「覆盖」而不是「追加」
+     *
+     * 追加（`$PATH:/usr/bin:...`）会把 Android 的路径留在前面，
+     * 容器里若碰巧有同名程序（比如 busybox 的 `ls`）会优先命中宿主的，
+     * 行为不可预测。容器必须有自己**完整且自洽**的 PATH，
+     * 和 [ptyEnvironment] 保持逐字一致 —— 两条路径的环境不同，
+     * 就会出现「真机 PTY 能用、降级后全崩」这种只在部分设备复现的缺陷。
+     */
     private fun applyEnv(pb: ProcessBuilder, env: LinuxEnvironment) {
         val e = pb.environment()
-        e["PROOT_TMP_DIR"] = context.cacheDir.absolutePath
-        e["PROOT_NO_SECCOMP"] = "1"
+        // ★ 必须先清空再重建：父进程环境里的 Android 路径一条都不能留下。
+        e.clear()
         e["HOME"] = "/root"
         e["TERM"] = "xterm-256color"
-        e.remove("LD_LIBRARY_PATH")
-        e.remove("LD_PRELOAD")
+        // 与 ptyEnvironment() 逐字一致。这两份一旦分叉，就会出现
+        // 「PTY 分支正常、管道分支全崩」——而管道分支只在部分设备上走得到，
+        // 极难复现（本次就是 aarch64 + libpty 可用时一直没暴露）。
+        e["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        e["LANG"] = "C.UTF-8"
+        e["PROOT_TMP_DIR"] = context.cacheDir.absolutePath
+        e["PROOT_NO_SECCOMP"] = "1"
+        // 引导器：不设的话容器一条命令都跑不起来（真机实测 execve ENOENT）。
+        // PTY 分支通过 ptyEnvironment() 传入，这里同样要传 ——
+        // 之前漏了，靠 proot 自己找默认路径，换个 ROM 就失败。
+        prootLoaderFileFor(env)?.let { e["PROOT_LOADER"] = it.absolutePath }
+        // LD_LIBRARY_PATH / LD_PRELOAD 已随 clear() 一并清掉：
+        // 留着会让容器里的程序去加载 bionic，curl 报
+        // `cannot locate symbol "EVP_MD_CTX_create"`。
+    }
+
+    /**
+     * 找 `libproot-loader.so`。
+     *
+     * ## 为什么要在这里再找一次
+     *
+     * [LinuxEnvPort] 那边有一条同名的查找（设置页路径用），但
+     * `ProotTerminalSessionPort` 与它之间只共享 `LinuxEnvironment` 这个
+     * 数据对象，**不共享查找逻辑**。之前直接依赖「proot 会自己找到」，
+     * 在部分 ROM 上（nativeLibraryDir 布局不同）就会失败。
+     */
+    private fun prootLoaderFileFor(env: LinuxEnvironment): File? {
+        val dir = env.prootBinary.parentFile ?: return null
+        return listOf("libproot-loader.so", "libproot-loader")
+            .map { File(dir, it) }
+            .firstOrNull { it.isFile }
     }
 
     private companion object {
