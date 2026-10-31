@@ -101,7 +101,7 @@ fun FunctionModelRoute(
     // 别家后，拉到的仍是主服务商的列表。
     var pickerSlot by remember { mutableStateOf<FunctionSlot?>(null) }
     var pickingModels by remember {
-        mutableStateOf<List<dev.praxis.core.ai.AiModelOption>>(emptyList()),
+        mutableStateOf<List<dev.praxis.core.ai.AiModelOption>>(emptyList())
     }
     var picking by remember { mutableStateOf(false) }
     var pickError by remember { mutableStateOf<String?>(null) }
