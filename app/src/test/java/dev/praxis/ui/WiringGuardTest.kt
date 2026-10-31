@@ -276,10 +276,17 @@ class WiringGuardTest {
                 attachment.contains(needle),
             )
         }
-        // 附件面板不允许再出现 fillMaxWidth（会把宽度撑回满屏）。
+        // 附件面板的**卡片本身**不允许再出现 fillMaxWidth（会把宽度撑回满屏）。
+        //
+        // 判据不能写成「全文不含 fillMaxWidth()」：格子内部的
+        // `Modifier.fillMaxWidth()` 是正常用法（铺满卡片宽度），
+        // 只有 Card 自己的修饰符链里出现才意味着尺寸被撑回满屏。
+        // 这里按「width(280.dp) 之后紧跟 fillMaxWidth」判，正是当年
+        // 写错时的形态。
+        val cardBlock = attachment.substringAfter(".padding(bottom = 96.dp, end = 8.dp)")
         assertTrue(
             "AttachmentPanel 的 Card 不应使用 fillMaxWidth（宽度由 width(280.dp) 决定）",
-            !attachment.contains(".fillMaxWidth()"),
+            !cardBlock.substringBefore(".heightIn(").contains(".fillMaxWidth()"),
         )
     }
 
@@ -566,9 +573,13 @@ class WiringGuardTest {
         val screen = read("feature/settings/src/main/java/dev/praxis/feature/settings/ai/ModelScreen.kt")
         assertTrue("必须有「自定义请求头」分区", screen.contains("title = \"自定义请求头\""))
         assertTrue("必须有「请求队列」分区", screen.contains("title = \"请求队列\""))
+        // `onSave` 是函数类型，Kotlin 禁止具名实参，所以这三项只能按位置传。
+        // 断言跟着检查位置实参的写法：`rpmDraft` / `concurrencyDraft` 必须
+        // 出现在 onSave(...) 的参数列表里。
         assertTrue(
-            "三个新参数必须进 onSave 回调",
-            screen.contains("requestLimitPerMinute = rpmDraft.toIntOrNull() ?: 0"),
+            "请求队列的两个参数必须进 onSave 回调",
+            screen.contains("rpmDraft.toIntOrNull() ?: 0") &&
+                screen.contains("concurrencyDraft.toIntOrNull() ?: 0"),
         )
         assertTrue(
             "dirty 判据必须包含进阶配置（否则按钮一直显示「已保存」）",
