@@ -267,6 +267,41 @@ fun ModelScreen(
     // 密钥不回填（只显示打码结果）：回填明文等于把它摆到界面上。
     var apiKey by remember { mutableStateOf("") }
 
+    // ── 进阶配置草稿（自定义请求头 + 请求队列）────────────────────────
+    //
+    // 与上面几组同一个约定：`remember(advanced)` 让保存成功后草稿回到
+    // 已保存值。少了这一层，用户保存完再进来看到的是自己上次的输入，
+    // 而不是库里真正的值 —— 那种「看着像没保存」的错觉最难排查。
+    //
+    // 请求头草稿至少留一行空框：删到空列表会让整块区域消失，
+    // 用户找不到「添加一行」的入口。
+    var headersExpanded by remember { mutableStateOf(false) }
+    var headerRows by remember(advanced) {
+        mutableStateOf(
+            advanced.customHeaders.ifEmpty { listOf<CustomHeader>("" to "") }
+        )
+    }
+    // 0 在库里表示「不限」，界面上必须表现为空框而不是「0」——
+    // 写 0 会让用户以为「每分钟不许请求」。
+    var rpmDraft by remember(advanced) {
+        mutableStateOf(
+            if (advanced.requestLimitPerMinute > 0) {
+                advanced.requestLimitPerMinute.toString()
+            } else {
+                ""
+            }
+        )
+    }
+    var concurrencyDraft by remember(advanced) {
+        mutableStateOf(
+            if (advanced.maxConcurrentRequests > 0) {
+                advanced.maxConcurrentRequests.toString()
+            } else {
+                ""
+            }
+        )
+    }
+
     // 地址被改过（与所选服务商的默认值不同）→ 标「已自定义」。
     // 这不是装饰：中转站用户改了地址后，需要确认"我确实覆盖了预设"。
     val endpointCustomized = provider.defaultEndpoint.isNotBlank() &&
@@ -1066,11 +1101,18 @@ fun ModelScreen(
                                     thinkingEffort,
                                     // 自定义头传**整份列表**：只传增量的话，
                                     // 删掉的行永远删不掉（库里是覆盖写）。
-                                    customHeaders = headerRows
+                                    //
+                                    // ## 为什么这里不能用具名实参
+                                    //
+                                    // `onSave` 是**函数类型**，不是具名函数。
+                                    // Kotlin 对函数类型的调用禁止具名实参
+                                    // （Named arguments are prohibited for
+                                    // function types），只能按声明顺序位置传参。
+                                    headerRows
                                         .map { it.first.trim() to it.second }
                                         .filter { it.first.isNotEmpty() },
-                                    requestLimitPerMinute = rpmDraft.toIntOrNull() ?: 0,
-                                    maxConcurrentRequests = concurrencyDraft.toIntOrNull() ?: 0,
+                                    rpmDraft.toIntOrNull() ?: 0,
+                                    concurrencyDraft.toIntOrNull() ?: 0,
                                 )
                                 // 保存后清空密钥草稿，避免它一直留在内存里。
                                 apiKey = ""

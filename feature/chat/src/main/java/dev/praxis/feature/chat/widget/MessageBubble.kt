@@ -112,7 +112,6 @@ fun ChatMessageItem(
             onRetry = onRetry,
             onLongPress = onLongPress,
             images = images,
-            showLabel = showLabel,
         )
         ChatDisplayStyle.Cursor -> CursorMessage(
             kind = kind,
