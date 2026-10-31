@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    `:preview` 的清单。
+
+    ## 为什么需要 `uses-sdk tools:overrideLibrary`
+
+    与 `:feature:chat` 的清单同一口径：miuix 的 8 个 AAR 声明的 minSdk
+    比本项目的 28 更高，manifest merger 会因此报错。这条 override 让
+    merger 放行 —— 它在真机上不影响任何行为（实际运行仍受 minSdk 28 约束，
+    而不是 miuix 声称的下限）。
+
+    ## 为什么本模块没有 src/main 代码还需要这个清单
+
+    Android library 模块即使只有测试代码，AGP 也要一个清单来跑
+    manifest merger 与 `processDebugResources`。缺了它 Paparazzi
+    初始化时拿不到包名与资源表。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.core,top.yukonga.miuix.kmp.ui,top.yukonga.miuix.kmp.blur,top.yukonga.miuix.kmp.shader,top.yukonga.miuix.kmp.icons,top.yukonga.miuix.kmp.preference,top.yukonga.miuix.kmp.nav" />
+</manifest>
