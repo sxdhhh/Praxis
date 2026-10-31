@@ -58,16 +58,6 @@ class WiringGuardTest {
      *  - 缺 `onRemoveAttachment` → 待发图片角标删不掉。
      */
     @Test
-    /**
-     * `ChatTab` 必须把模型池四个参数传进 `ChatScreen`。
-     *
-     * 少任何一个的后果：
-     *  - 缺 `models` → 底栏模型弹窗永远显示「还没有模型」；
-     *  - 缺 `activeModelIndex` → 选中态永远停在第 0 个；
-     *  - 缺 `onSelectModelIndex` → 点模型没反应（回调为 null 时列表退化为展示）；
-     *  - 缺 `onRemoveAttachment` → 待发图片角标删不掉。
-     */
-    @Test
     fun chatTab_passesModelPoolToChatScreen() {
         val text = read("app/src/main/java/dev/praxis/ui/tab/ChatTab.kt")
         for (name in listOf(
@@ -296,19 +286,6 @@ class WiringGuardTest {
 
     private fun countOf(haystack: String, needle: String): Int =
         haystack.split(needle).size - 1
-
-
-    /**
-     * 底栏三个浮层必须共用同一套尺寸与抬起量。
-     *
-     * ## 它防的是什么
-     *
-     * 模型选择 / 功能 / 附件（图片·拍照·记忆…）是**同一块板的三种内容**：
-     * 用户点不同按钮时，卡片应该原地换内容，而不是换位置、换宽窄。
-     *
-     * 这三处曾经各写各的：
-     *   - 功能弹窗  bottom=96 / end=8  / width=280 / max=420
-
 
 
     /**
