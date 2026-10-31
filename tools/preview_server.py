@@ -262,6 +262,20 @@ PAGE = """<!doctype html>
   .card .meta { padding: 10px 12px; font-size: 13px; }
   .card .meta small { opacity: .6; display: block; margin-top: 2px; }
   .empty { opacity: .7; padding: 40px 0; text-align: center; }
+  /* 空态清单：还没渲染时，至少说清「本该有哪几屏」 */
+  .expected { margin-top: 28px; text-align: left; display: inline-block; }
+  .expected h2 { font-size: 13px; font-weight: 600; opacity: .55; margin: 0 0 10px; letter-spacing: .02em; }
+  .expected ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+  .expected li { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
+  .expected code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; padding: 1px 6px; border-radius: 5px;
+    background: #00000010; white-space: nowrap;
+  }
+  @media (prefers-color-scheme: dark) {
+    .expected code { background: #ffffff14; }
+  }
+  .expected span { opacity: .65; }
   dialog {
     border: none; padding: 0; background: transparent;
     max-width: 96vw; max-height: 96vh;
@@ -284,8 +298,22 @@ PAGE = """<!doctype html>
 <pre id="detail" hidden></pre>
 <div class="grid" id="grid"></div>
 <div class="empty" id="empty" hidden>
-  还没有渲染产物。在 x86_64 机器上跑 <code>./gradlew :preview:testDebugUnitTest</code>，
-  或让 CI 的 preview workflow 产出后下载到 <code>preview/build/reports/paparazzi/images/</code>。
+  <div>还没有渲染产物。</div>
+  <div class="expected">
+    <h2>这套管线覆盖的界面</h2>
+    <ul>
+      <li><code>chat-empty</code><span>空对话，首启态</span></li>
+      <li><code>chat-conversation</code><span>真实多轮 + 流式中</span></li>
+      <li><code>chat-conversation-dark</code><span>同上，深色</span></li>
+      <li><code>chat-scroll-affordance</code><span>长列表，看滚动条与回底按钮</span></li>
+      <li><code>model-settings</code><span>模型设置页</span></li>
+    </ul>
+  </div>
+  <div style="margin-top:22px;font-size:13px">
+    在一台 x86_64 机器上跑 <code>./gradlew :preview:testDebugUnitTest</code>，<br>
+    或让 CI 的 <b>preview</b> workflow 产出后，把 <code>images/</code> 放进<br>
+    <code>preview/build/reports/paparazzi/images/</code> —— 刷新即可，不用重启。
+  </div>
 </div>
 <dialog id="viewer"><img id="viewerImg" alt=""></dialog>
 <script>

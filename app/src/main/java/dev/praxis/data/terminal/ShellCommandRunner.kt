@@ -2,6 +2,7 @@ package dev.praxis.data.terminal
 
 import dev.praxis.feature.terminal.CommandRunner
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -66,14 +67,35 @@ class ShellCommandRunner(
 
     override suspend fun run(command: String, onOutput: (String) -> Unit): Int =
         withContext(Dispatchers.IO) {
-            val builder = ProcessBuilder("sh", "-c", command)
+            // ## 为什么用绝对路径 `/system/bin/sh`（2026-10-31 修）
+            //
+            // 旧写法是 `ProcessBuilder("sh", "-c", command)` —— `"sh"` 是
+            // **相对名字**，靠 PATH 解析。这带来两个真机问题：
+            //
+            // 1. 解析失败时直接 `IOException: Cannot run program "sh"`，
+            //    终端一条命令都执行不了；
+            // 2. 即使解析成功，子进程的 cwd 默认是 App 的私有目录
+            //    （`/data/data/<pkg>`），而宿主 `sh` 以 `shell` 身份运行、
+            //    **读不了那个目录**。于是 `ls` 报：
+            //
+            //    ```
+            //    $ ls
+            //    ls: .: Permission denied       ← 退出码 1
+            //    ```
+            //
+            //    用户看到的是「ls 坏了」，实际是「当前目录不可读」。
+            //    这条现象在截图里出现过，和容器起不来是**两个独立的缺陷**：
+            //    容器失败后降级到这里，又撞上 cwd 不可读，于是两个错误叠在一起。
+            //
+            // 绝对路径消除问题 1；cwd 交给调用方用 [workingDir] 指定
+            // （默认落到 `/`，那是对 `shell` 用户一定可读的少数目录之一）。
+            val shell = if (File(SYSTEM_SH).isFile) SYSTEM_SH else "sh"
+            val builder = ProcessBuilder(shell, "-c", command)
                 // 合并两个流：终端里 stdout/stderr 本就混排，分开读会打乱顺序。
                 .redirectErrorStream(true)
-
-            if (workingDir != null) {
-                builder.directory(java.io.File(workingDir))
-            }
-
+            // ★ 默认 cwd 必须是 `shell` 可读的目录。
+            // 不指定时 Java 会用「父进程的 cwd」= App 私有目录 → Permission denied。
+            builder.directory(File(workingDir ?: DEFAULT_WORKING_DIR))
             val process = builder.start()
             current = process
             try {
@@ -106,6 +128,21 @@ class ShellCommandRunner(
 
         /** 超时时返回的伪退出码（真实退出码不会用 124 之外的负数约定，这里刻意用 -1 区分）。 */
         const val TIMEOUT_EXIT_CODE = 124
+
+        /** Android 的 sh 绝对路径。用它消灭「靠 PATH 解析」的失败模式。 */
+        private const val SYSTEM_SH = "/system/bin/sh"
+
+        /**
+         * 默认工作目录。
+         *
+         * ## 为什么是 `/` 而不是 `context.filesDir`
+         *
+         * 子进程以 App 自己的 uid 运行，但 `/data/data/<pkg>` 的权限是 0700，
+         * 而 Android 的 `sh` 在某些 ROM 上会降权到 `shell` 用户 —— 此时
+         * 连 `ls .` 都读不了，报 `Permission denied`。
+         * `/` 是对所有 uid 都可读的少数目录之一，作为兜底最安全。
+         */
+        private const val DEFAULT_WORKING_DIR = "/"
 
         private const val READ_BUFFER_SIZE = 4096
 
