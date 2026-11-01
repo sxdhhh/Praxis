@@ -107,10 +107,19 @@ data class LinuxEnvironment(
      */
     val sharedTmp: Boolean = false,
 ) {
-    /** `ubuntu.sources` 的位置（24.04 起的 deb822 格式）。 */
+    /** `ubuntu.sources` 的位置（24.04 起的 deb822 格式）。换源只写这一个。 */
     val sourcesFile: String get() = "/etc/apt/sources.list.d/ubuntu.sources"
 
-    /** 旧版 `sources.list`。22.04 用这个；两个都写覆盖两种情况。 */
+    /**
+     * 旧版 `sources.list`。
+     *
+     * ## 它只用来「挪走」，不再用来「写入」（2026-11-01 修）
+     *
+     * 旧注释写着「两个都写覆盖两种情况」，但 apt 根本不给这个方便：
+     * 两个文件里的同一套源会被**同时加载**，于是每次 update 都警告
+     * `configured multiple times`。现在换源只写 [sourcesFile]，
+     * 这个路径交给 `ProotCommand` 改名退役（见那里的 `retireLegacySources`）。
+     */
     val legacySourcesFile: String get() = "/etc/apt/sources.list"
 
     /** 容器是否已经解压好。 */
@@ -236,6 +245,96 @@ object ProotCommand {
 
     /** 容器内必须存在的挂载点（bind 目标先得有）。 */
     val REQUIRED_MOUNTS: List<String> = listOf("/dev", "/proc", "/sys", "/tmp")
+
+    /** 打包进 APK 的 loader 文件名；运行时会被改名成 [LOADER_RUNTIME_NAME]。 */
+    const val LOADER_FILE_NAME: String = "libproot-loader.so"
+
+    /**
+     * loader 在宿主上的运行时文件名。
+     *
+     * ## 为什么要改名（2026-11-01 修「proot 进程启动后立即退出」）
+     *
+     * proot 在 `execve` 任何 guest 程序之前，要把 loader `mmap` 进被跟踪进程。
+     * loader 的位置在 proot 实现里是**按「proot 自己的路径」推导**的：
+     * 取 `/proc/self/exe` 的目录，找同目录下的 `proot-loader`；
+     * 那个文件不在时才去看 `PROOT_LOADER` 环境变量。
+     *
+     * 我们的 loader 打包名是 `libproot-loader.so`（Android 只允许 `lib*.so`
+     * 进 `nativeLibraryDir`），与 proot 默认找的 `proot-loader` **对不上**。
+     * 于是即便 `PROOT_LOADER` 设对了，proot 仍会先拿一个不存在的兄弟文件去
+     * `open`，失败即秒退，报错还是那句误导性的
+     * `execve("/bin/sh"): No such file or directory`。
+     *
+     * 所以启动前把它解压到 `filesDir/proot/bin/proot-loader`（按这个运行名），
+     * 再让 proot 以该目录为「自己的目录」启动 —— 见 [launchArgs]。
+     */
+    const val LOADER_RUNTIME_NAME: String = "proot-loader"
+
+    /**
+     * proot 进程可能使用的可执行文件名（按优先级）。
+     *
+     * [launchArgs] 会把 `<stagedDir>/proot`（通常是 `filesDir/proot/bin/proot`）
+     * 放在前面、`libproot.so` 作为兜底。
+     * 于是同一个进程在不同设备上可能叫这两个名字中的任意一个，而
+     * `ProotEnvPort` 的「容器是否在跑」探测要按进程名找它，必须两个都认。
+     */
+    val PROOT_EXECUTABLE_NAMES: List<String> = listOf("proot", "libproot.so")
+
+    /**
+     * 起一个 proot 进程时该用的 argv —— **整个仓库只有这一份实现**。
+     *
+     * ## 为什么要单独一个函数（2026-11-01）
+     *
+     * 起 proot 有两套完全不同的进程启动器：`ProcessBuilder`（设置页、AI 工具）
+     * 与 `forkpty`（终端页）。两条路径各拼一份 argv 的后果，历史上已经出现过：
+     * 一条分支设了 `PROOT_LOADER`、另一条忘了，于是「真机 PTY 能用、降级后全崩」。
+     * 所以 argv 的生成收在核心层，两条启动器都调它。
+     *
+     * ## argv[0] 为什么优先用别名路径
+     *
+     * 详见 [LOADER_RUNTIME_NAME]：proot 是按 `/proc/self/exe` 的**目录**找 loader 的。
+     * `/proc/self/exe` 在内核里记的是真正被 exec 的文件（永远是
+     * `.../lib/arm64/libproot.so`），符号链接改不了它，唯一的手段是让 proot
+     * **从另一个目录以 `proot` 这个名字起跑** —— 那里放好 loader 即可。
+     *
+     * ## ⚠️ 别名目录必须从外面传进来，不能靠 `executable.parentFile`
+     *
+     * 最初这里写的是 `File(executable.parentFile, "proot")`，看起来天经地义：
+     * 「跟 proot 放一起」。但 `executable` 是 `nativeLibraryDir` 下的
+     * `libproot.so`，而 **`nativeLibraryDir` 在 Android 上是只读的**
+     * （`/data/app/<pkg>/lib/arm64`），根本建不了别名文件。
+     *
+     * 所以别名放在可写目录（`filesDir/proot/bin/`），由 [stagedDir] 传进来。
+     * 这个不一致曾经让「修 proot 秒退」的整个改动**静默失效** ——
+     * 铺文件的逻辑把别名建在 filesDir，而这里还在找 nativeLibraryDir，
+     * 两边路径对不上，永远走 fallback，现象与没修一模一样。
+     *
+     * @param executable 真正要 exec 的文件（`nativeLibraryDir/libproot.so`）
+     * @param environment 环境变量。只有给了 `PROOT_LOADER` 才启用别名优先：
+     *   没给说明调用方走的是旧路径，行为必须与旧代码逐字一致。
+     * @param arguments proot 自己的参数（如 [loginArgs] 的返回值）
+     * @param stagedDir 别名所在的**可写**目录；null 表示调用方没有铺过文件，
+     *   直接走原名起跑。
+     * @return 按优先级排列的 argv 候选，至少一个。调用方要**按顺序尝试**：
+     *   别名路径的父目录若没建成、或该设备不允许在那里建可执行文件，
+     *   必须还能退回用 `libproot.so` 原名起跑。
+     */
+    fun launchArgs(
+        executable: File,
+        environment: Map<String, String>,
+        arguments: List<String>,
+        stagedDir: File? = null,
+    ): List<List<String>> {
+        val primary = executable.absolutePath
+        val first = listOf(primary) + arguments
+        if (environment["PROOT_LOADER"].isNullOrBlank()) return listOf(first)
+        if (executable.name != "libproot.so") return listOf(first)
+        // 别名必须在**可写**目录里建（nativeLibraryDir 只读），由调用方传进来。
+        val dir = stagedDir ?: return listOf(first)
+        val alias = File(dir, "proot").absolutePath
+        if (alias == primary) return listOf(first)
+        return listOf(listOf(alias) + arguments, first)
+    }
 
     /**
      * 启动一个**交互式**登录 shell 的完整参数。
@@ -486,15 +585,23 @@ object ProotCommand {
     /**
      * 换源命令。
      *
-     * ## 为什么两个文件都要写
+     * ## 只写**一个**文件，另一个必须退役（2026-11-01 修）
      *
-     * | 版本 | 实际生效的文件 |
-     * |---|---|
-     * | 24.04 (noble) | `/etc/apt/sources.list.d/ubuntu.sources`（**deb822 新格式**） |
-     * | 22.04 (jammy) | `/etc/apt/sources.list`（传统单行格式） |
+     * 旧实现同时写 deb822 的 `ubuntu.sources` 与传统格式的 `sources.list`，
+     * 注释里的理由是「22.04 读前者、24.04 读后者，只写一个就会出现
+     * 『换源后 apt 还在连官方』」。
      *
-     * 只写一个就会出现「换源后 apt 还在连官方」—— 因为另一个文件仍在生效。
-     * 所以：**先注释掉旧文件里的内容，再写目标文件**，两个版本都覆盖。
+     * 真机否定了这个判断。Ubuntu 24.04 **两个文件都读**，同一套源被声明两遍：
+     *
+     *     W: Target Translations (multiverse/i18n/Translation-en) is configured
+     *        multiple times in /etc/apt/sources.list:4
+     *        and /etc/apt/sources.list.d/ubuntu.sources:1
+     *
+     * 于是旧写法的两个后果同时发生：换源确实生效了（源是同一套），
+     * 但每次 update 都要多跑一遍并刷这条警告。
+     *
+     * 现在的做法：写 deb822 → 把 `sources.list` 改名退役（见 [retireLegacySources]）。
+     * 「另一个文件仍在生效」的问题不会回来了：改名之后 apt 根本不扫描它。
      *
      * ## 为什么 arm64 必须用 ports
      *
@@ -506,44 +613,75 @@ object ProotCommand {
         // `Failed to fetch`，看不出是「源写错」还是「网络不通」。
         if (env.distro == LinuxDistro.Kali) return kaliMirrorScript(env)
         val mirror = env.mirror
-        // 备份文件固定为 `<sources>.praxis-bak`，规则：**只在不存在时创建**
-        // （即只保留最原始那一版）。用显式 `[ -f ]` 判断，而不是靠 `cp -n`。
-        //
-        // ## 为什么不用 `cp -n`
-        //
-        // `-n` 的行为是「目标存在就跳过」，第一次换源时确实建了备份；
-        // **第二次**换源（清华 → 阿里云）时备份已存在 → 跳过。
-        // 结果看起来一样，但语义是「第一次的原始」这个副作用，而不是写明规则。
-        // 显式判断让「备份=最原始那版」成为写出来的约定，后人不会误解。
-        val backup = buildString {
-            appendLine("if [ ! -f ${env.sourcesFile}.praxis-bak ]; then")
-            appendLine("  cp ${env.sourcesFile} ${env.sourcesFile}.praxis-bak 2>/dev/null || true")
-            appendLine("fi")
-            appendLine("if [ ! -f ${env.legacySourcesFile}.praxis-bak ]; then")
-            appendLine("  cp ${env.legacySourcesFile} ${env.legacySourcesFile}.praxis-bak 2>/dev/null || true")
-            appendLine("fi")
-        }
-
-        if (!mirror.changesSources) {
-            // 选了「官方」：把两个文件都改回官方（可能是从国内镜像切回来）。
-            return buildString {
-                appendLine("set -e")
-                append("$backup")
-                appendLine("# 恢复官方源")
-                appendLine(writeDeb822(env, UbuntuMirror.Official))
-                appendLine(writeLegacy(env, UbuntuMirror.Official))
-                appendLine("apt-get update")
-            }
-        }
+        val backup = backupSourcesScript(env)
+        val label = if (mirror.changesSources) "换源：${mirror.label}" else "恢复官方源"
 
         return buildString {
             appendLine("set -e")
-            append("$backup")
-            appendLine("# 换源：${mirror.label}")
+            append(backup)
+            appendLine("# $label")
             appendLine(writeDeb822(env, mirror))
-            appendLine(writeLegacy(env, mirror))
+            // ★ 必须把传统格式的源**挪走**，不能留着。
+            //   原因见 [retireLegacySources]。
+            appendLine(retireLegacySources(env))
             appendLine("apt-get update")
         }
+    }
+
+    /**
+     * 备份当前的两个源文件。
+     *
+     * 规则：**只在不存在时创建**（即只保留最原始那一版）。用显式 `[ -f ]`
+     * 判断，而不是靠 `cp -n`。
+     *
+     * ## 为什么不用 `cp -n`
+     *
+     * `-n` 的行为是「目标存在就跳过」，第一次换源时确实建了备份；
+     * **第二次**换源（清华 → 阿里云）时备份已存在 → 跳过。
+     * 结果看起来一样，但语义是「第一次的原始」这个副作用，而不是写明规则。
+     * 显式判断让「备份=最原始那版」成为写出来的约定，后人不会误解。
+     */
+    private fun backupSourcesScript(env: LinuxEnvironment): String = buildString {
+        appendLine("if [ ! -f ${env.sourcesFile}.praxis-bak ]; then")
+        appendLine("  cp ${env.sourcesFile} ${env.sourcesFile}.praxis-bak 2>/dev/null || true")
+        appendLine("fi")
+        appendLine("if [ ! -f ${env.legacySourcesFile}.praxis-bak ]; then")
+        appendLine("  cp ${env.legacySourcesFile} ${env.legacySourcesFile}.praxis-bak 2>/dev/null || true")
+        appendLine("fi")
+    }
+
+    /**
+     * 把传统格式的 `/etc/apt/sources.list` 挪出 apt 的扫描范围。
+     *
+     * ## 为什么必须挪走，而不是「留着也无害」（2026-11-01 修）
+     *
+     * 旧实现的判断是「deb822 文件优先，传统 sources.list 留着无害」，
+     * 于是把**两个文件写成同一套源**。真机实测否定了这个判断：Ubuntu 24.04
+     * 会**同时**读两个文件，同一套源被声明两遍，于是发出警告：
+     *
+     *     W: Target Translations (multiverse/i18n/Translation-en) is configured
+     *        multiple times in /etc/apt/sources.list:4
+     *        and /etc/apt/sources.list.d/ubuntu.sources:1
+     *
+     * 这不只是刷屏：每一次 `apt update` 都会为目标索引重复下载与重复
+     * 解析，而用户看到的是「换过源了，apt 还在抱怨配置」。
+     *
+     * ## 为什么是改名而不是删除
+     *
+     * 删掉就真的没了。这台机器上的 rootfs 可能正是用户自己折腾过的环境，
+     * 而换源脚本恰恰是「用户要求改配置」的那一步 —— 改配置不该让它不可逆。
+     * 改名为 `*.praxis-disabled`（apt 只认 `.list` / `.sources` / `.sources.list`
+     * 这几种后缀，别的文件名一律不扫）既让它彻底失效，又留了一条退路。
+     *
+     * 挪走之后，这个文件对「22.04 用传统格式」的情形**依然是备份**：
+     * 上面 [backupSourcesScript] 已经在改名之前把它存成 `.praxis-bak` 了。
+     */
+    private fun retireLegacySources(env: LinuxEnvironment): String = buildString {
+        appendLine("# 传统格式源会让同一套源被声明两遍（apt 会报 configured multiple times）。")
+        appendLine("# 改名而不是删除：可逆，且改名后 apt 不再扫描它。")
+        appendLine("if [ -f ${env.legacySourcesFile} ]; then")
+        appendLine("  mv -f ${env.legacySourcesFile} ${env.legacySourcesFile}.praxis-disabled")
+        appendLine("fi")
     }
 
     /**
@@ -698,8 +836,24 @@ object ProotCommand {
     }
 
     /**
-     * 写传统 `sources.list`（22.04 生效；24.04 上也留着无害，因为 deb822 文件优先）。
+     * 写 22.04 用的传统格式 `sources.list`。
+     *
+     * ## ⚠️ 这个函数**没有调用点**，而且是故意留着的（2026-11-01）
+     *
+     * 上一版它被 `switchMirrorScript` 直接调用，和 `writeDeb822` 一起把
+     * 同一套源写进两个文件 —— 那就是真机警告
+     * `Target Translations (...) is configured multiple times` 的来源。
+     *
+     * 现在换源只写一个文件（见 [retireLegacySources]）。函数留下是因为
+     * 「22.04 要不要改成只写传统格式」这件事还没有真机证据：本项目的
+     * `UbuntuRelease` 目前只有 noble / jammy 两个成员，而实际内置镜像与
+     * 用户环境都是 24.04（deb822 生效）。在有 jammy 的实测之前，
+     * 不凭猜测改成另一套写法。
+     *
+     * 唯一的使用方式是显式调用；如果将来给 jammy 单独分流，
+     * 记得同时回归 [retireLegacySources]（两条分支只能留一个源文件）。
      */
+    @Suppress("unused")
     private fun writeLegacy(env: LinuxEnvironment, mirror: UbuntuMirror): String {
         val suite = env.release.suite
         return buildString {

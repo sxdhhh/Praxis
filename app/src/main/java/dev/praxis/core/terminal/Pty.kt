@@ -63,9 +63,53 @@ open class Pty(
      * 读到 EOF 时给子进程发 SIGHUP）。只 `process.destroy()` 的话，
      * 子进程里的 shell 可能仍然以为终端还在，卡在 `read()` 上不退出。
      * 顺序必须是「关 fd → destroy」。
+     *
+     * ## ⚠️ 实现顺序与上一段是反的，而且是有意的（2026-11-01 核对）
+     *
+     * 先 `process.destroy()`（给子进程发 SIGTERM）再关 fd：`forkpty` 出来的
+     * 子进程不是 Java `Process`，这里的 `destroy` 实际是
+     * `android.os.Process.sendSignal(pid, 15)` —— 立刻返回，不会等。
+     * 反过来（先关 fd）会让读线程立刻收到 EOF、泵线程在子进程还没死的时候
+     * 就打出「会话进程已退出」，退出码却是 `waitFor` 等出来的 -1。两条都不算错，
+     * 但对**用户可见的日志**来说，先发信号再关流更不容易出现自相矛盾的两行。
      */
     fun destroy() {
         runCatching { process.destroy() }
+        releaseStreams()
+    }
+
+    /**
+     * 关掉 master fd 的读写流。
+     *
+     * ## 调用方必须知道（2026-11-01 修「read interrupted by close() on another thread」）
+     *
+     * 在**别人的线程**上 close 一个正在 `read()` 的 `FileInputStream`，读线程会拿到
+     * `IOException("read interrupted by close() on another thread")` 并抛出来。
+     * 如果读线程把任何异常都当成「会话出了问题」报给界面，用户就会在容器正常
+     * 结束（点了关闭、shell 执行了 exit）时看到一句红字 —— 这正是截图里的现象。
+     *
+     * 所以规则是：
+     *  1. 读线程正常读到 EOF 时，**由它自己**调 [closeMasterIfOwner] 关 fd；
+     *  2. 别处要关会话时调 [destroy]，但读线程必须把异常**当成正常结束**处理
+     *     （见 `ProotTerminalSessionPort` 的泵线程）。
+     *
+     * 这两条合起来让「谁关都行、但不会互相伤害」。
+     */
+    fun releaseStreams() {
+        runCatching { stdout.close() }
+        runCatching { stdin.close() }
+    }
+
+    /**
+     * 由**读线程自己**在读完（EOF）后关闭 master fd。
+     *
+     * 与 [releaseStreams] 的区别只有一点：它假设当前线程就是那个在读的线程，
+     * 因此不会再触发 `read interrupted by close() on another thread`。
+     *
+     * 之所以要在 EOF 后主动关：master fd 不关，内核里的 PTY 主从对不会释放，
+     * 每次开关标签页都会漏一对 fd —— 用户跑一天下来 `Too many open files`。
+     */
+    fun closeMasterIfOwner() {
         runCatching { stdout.close() }
         runCatching { stdin.close() }
     }
