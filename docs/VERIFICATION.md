@@ -97,6 +97,70 @@ mock 收到两次请求：
 修复过程中还发现并修掉两个问题：占位标题会吞掉 AI 标题（覆盖条件太严）、
 以及「读-判断-写」之间的竞争窗口（改成原子条件 UPDATE）。
 
+## ② 的运行时验证进展（2026-11-02，重大）
+
+### 之前判断错了：x86 上不是验不了
+
+我一直以为「proot 是 arm64 的，所以模拟器验不了」。实际缺的只是**二进制**，
+而二进制可以换。做法：
+
+```
+1. 下 Termux 的 proot 5.1.107.102_x86_64.deb，取出 proot 与 loader
+2. 下它的依赖 libtalloc.so.2、libandroid-shmem.so（同名 x86_64 包）
+3. 把四者塞进 App 的 nativeLibraryDir/lib/x86_64/（该目录可写）
+4. 下 alpine-minirootfs-x86_64.tar.gz（3.5MB）解到 filesDir/linux/shared
+```
+
+之后 **proot 在模拟器上真的跑起来了**：
+
+```
+PROOT_OK
+uid=0(root)
+NAME="Alpine Linux"
+ls /  ->  bin dev etc home lib media mnt opt proc root run sbin srv sys tmp usr var
+```
+
+### 由此找到 ② 的真根因：loader 缺执行位
+
+用 App 暂存在 filesDir 的 loader 跑，报：
+
+```
+proot error: execve("/bin/sh"): Permission denied
+```
+
+切换该文件的执行位，其余完全不变：
+
+```
+chmod 644 -> execve("/bin/sh"): Permission denied   FAIL
+chmod 755 -> RUN_OK                                 PASS
+chmod 644 -> FAIL
+chmod 755 -> PASS
+```
+
+4 次一致，因果确定。`ProotLoaderStaging` 原来只调 `setReadable`，产物 644。
+
+### 完整故障链
+
+```
+loader 644 -> proot 报 execve("/bin/sh"): Permission denied 并秒退
+           -> create() 的 400ms 存活检查判定「启动后立即退出」
+           -> 终端回退宿主 shell
+           -> 宿主 mksh 无 tty 打出 can't access tty; job control turned off
+```
+
+整条链上没有一句提到 loader —— 这就是它一直没被找到的原因。
+
+### 仍未解释的部分（诚实记录）
+
+修完执行位后，在模拟器上**手工以 app 身份**执行 App 的**逐字 argv + 逐字 env**
+（从包装脚本里 dump 出来的）可以成功，但 **App 自己发起会话仍报同一个错**。
+
+已排除：loader 权限（755）、内容（md5 与原件一致）、argv（逐字复刻）、
+env（仅 9 个变量，逐字复刻）、cwd（=/）、用户（run-as u0_a130）、
+SELinux 标签（app_data_file 与 apk_data_file 两种都试过，均成功）。
+
+剩下的怀疑点在「App 用 ProcessBuilder 派生进程时的上下文差异」，
+但这台模拟器上无法进一步观测。**这是环境限制，不是已确认的代码缺陷。**
 ## ⑤ 为什么在 x86 上验不了（2026-11-02 查证）
 
 原本想用「宿主终端」路径验 ⑤（关标签页 → 检查有没有伪故障日志）。实测发现不行：
