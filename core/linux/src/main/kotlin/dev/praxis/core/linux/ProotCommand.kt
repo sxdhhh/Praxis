@@ -469,10 +469,55 @@ object ProotCommand {
         // ⚠️ 环境变量**不通过 `env` 命令传**，而是交给 proot 的 `-b` 之外的另一条路：
         // proot 会把父进程的环境原样带进容器，所以由调用方在 ProcessBuilder 的
         // environment() 里 set（见 :app 的 ProotCommandRunner）。
-        // 这里只决定「进去跑什么」—— 一个登录 bash。
-        args += listOf("/bin/bash", "-l")
+        // 这里只决定「进去跑什么」—— 一个登录 shell。
+        //
+        // ## ⚠️ 不能硬编码 `/bin/bash`（2026-11-02 真机线索）
+        //
+        // 用户报的 ② 里有这一句：
+        //
+        // ```
+        // /bin/sh: can't access tty; job control turned off
+        // ls: Permission denied
+        // ```
+        //
+        // `can't access tty` 是 **busybox/宿主 sh** 的措辞，不是 bash 的。
+        // 它出现在这里只有一种解释：容器里**没有 `/bin/bash`**，proot 的
+        // execve 落到别处，用户看到的是宿主 shell 在报错 —— 这正是
+        // 「终端退回宿主 shell」的机制。
+        //
+        // 而 Ubuntu base 与 Kali NetHunter minimal 的净 rootfs 都可能只带
+        // `/bin/sh`（dash 或 busybox），bash 是 `apt install bash` 才有的。
+        // 旧实现硬编码 `/bin/bash -l`，在那种镜像上等于**一次都起不来**。
+        //
+        // 修法：按 rootfs 里**实际存在**的 shell 选，bash 优先（`-l` 登录语义、
+        // 用户习惯的 PATH 与别名都来自它），没有就退 `sh`。
+        args += listOf(loginShell(env), "-l")
 
         return args
+    }
+
+    /**
+     * 选 rootfs 里**实际存在**的登录 shell，bash 优先。
+     *
+     * ## 为什么必须探测而不是写死（见 [loginArgs] 里那段说明）
+     *
+     * 用户真机报的 ② 含 `/bin/sh: can't access tty` —— 那是宿主 sh 的措辞，
+     * 说明容器里没有 `/bin/bash`，proot 的 execve 落到别处去了。
+     * Ubuntu base 与 Kali NetHunter minimal 的净 rootfs 都可能只带 `/bin/sh`。
+     *
+     * ## 顺序
+     * bash 在前：`-l` 的登录语义（PATH、别名、/etc/profile.d）与用户预期一致。
+     * `sh` 兜底：至少能进去敲命令，比「一次都起不来」好得多。
+     *
+     * ## 都探测不到时仍返回 bash
+     *
+     * 那种情况说明 rootfs 根本没解好或路径不对，报错信息应当指向
+     * 「找不到 bash」这个真实问题，而不是被这里掩盖成别的样子。
+     */
+    internal fun loginShell(env: LinuxEnvironment): String {
+        val candidates = listOf("/bin/bash", "/usr/bin/bash", "/bin/sh", "/usr/bin/sh")
+        val found = candidates.firstOrNull { File(env.rootfsDir, it.removePrefix("/")).isFile }
+        return found ?: "/bin/bash"
     }
 
     /**
@@ -487,9 +532,13 @@ object ProotCommand {
         extraBinds: List<String> = emptyList(),
     ): List<String> {
         val login = loginArgs(env, extraBinds)
-        // 去掉尾部的 `/bin/bash` `-l`，换成 `sh -c`。
+        // 去掉尾部的「登录 shell + -l」，换成 `sh -c`。
         // 用 index 计算而不是 `filter`：`-l` 也可能出现在别处。
+        // 尾两元素恒为 (shell, "-l") —— shell 可能是 bash 也可能是 sh（见 [loginShell]），
+        // 但个数固定，所以 dropLast(2) 仍然正确。
         val head = login.dropLast(2)
+        // 执行单条命令用 `/bin/sh` 而不是登录 shell：POSIX 语义更可预测，
+        // 且 sh 在净 rootfs 里一定存在（bash 不保证，见 [loginShell]）。
         return head + listOf("/bin/sh", "-c", command)
     }
 
@@ -516,7 +565,7 @@ object ProotCommand {
     ): List<String> {
         require(program.isNotEmpty()) { "program must not be empty" }
         val login = loginArgs(env, extraBinds)
-        // 去掉尾部的 `/bin/bash` `-l`。
+        // 去掉尾部的「登录 shell + -l」（个数恒为 2，见 [loginShell]）。
         return login.dropLast(2) + program
     }
 

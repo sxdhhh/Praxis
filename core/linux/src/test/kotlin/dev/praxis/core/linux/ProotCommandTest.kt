@@ -1,6 +1,7 @@
 package dev.praxis.core.linux
 
 import java.io.File
+import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -373,6 +374,125 @@ class ProotCommandTest {
             assertTrue("有 /bin/sh 就该算已安装", notYet.isInstalled)
         } finally {
             tmp.deleteRecursively()
+        }
+    }
+
+    // ── 登录 shell 的选择（2026-11-02，② 的真机线索）────────────────
+
+    /**
+     * rootfs 里有 bash 时用 bash（`-l` 的登录语义与用户预期一致）。
+     */
+    @Test
+    fun `有 bash 时登录 shell 用 bash`() {
+        val rootfs = Files.createTempDirectory("rf").toFile()
+        try {
+            File(rootfs, "bin").mkdirs()
+            File(rootfs, "bin/bash").writeText("")
+            val env = LinuxEnvironment(rootfsDir = rootfs, prootBinary = File("/x/libproot.so"))
+            assertEquals("/bin/bash", ProotCommand.loginShell(env))
+        } finally {
+            rootfs.deleteRecursively()
+        }
+    }
+
+    /**
+     * rootfs 里**只有 sh** 时退回 sh。
+     *
+     * ## 这条对应 ② 的真机现象
+     *
+     * 用户报的报错里有一句：
+     * ```
+     * /bin/sh: can't access tty; job control turned off
+     * ```
+     * `can't access tty` 是 busybox/宿主 sh 的措辞，不是 bash 的。出现它说明
+     * 容器里没有 `/bin/bash`，proot 的 execve 落到别处，用户看到的是宿主
+     * shell —— 这正是「终端退回宿主 shell」。
+     *
+     * Ubuntu base 与 Kali NetHunter minimal 的净 rootfs 都可能只带 `/bin/sh`。
+     * 旧实现硬编码 `/bin/bash -l`，在那种镜像上**一次都起不来**。
+     */
+    @Test
+    fun `只有 sh 的 rootfs 退回 sh`() {
+        val rootfs = Files.createTempDirectory("rf").toFile()
+        try {
+            File(rootfs, "bin").mkdirs()
+            File(rootfs, "bin/sh").writeText("")
+            val env = LinuxEnvironment(rootfsDir = rootfs, prootBinary = File("/x/libproot.so"))
+            assertEquals("只有 sh 时必须退回 sh，否则容器一次都起不来", "/bin/sh", ProotCommand.loginShell(env))
+        } finally {
+            rootfs.deleteRecursively()
+        }
+    }
+
+    /**
+     * `/usr/bin/bash` 也能被认出来（有些镜像把 bash 装在 usr 下）。
+     */
+    @Test
+    fun `usr_bin_bash 也可用`() {
+        val rootfs = Files.createTempDirectory("rf").toFile()
+        try {
+            File(rootfs, "usr/bin").mkdirs()
+            File(rootfs, "usr/bin/bash").writeText("")
+            val env = LinuxEnvironment(rootfsDir = rootfs, prootBinary = File("/x/libproot.so"))
+            assertEquals("/usr/bin/bash", ProotCommand.loginShell(env))
+        } finally {
+            rootfs.deleteRecursively()
+        }
+    }
+
+    /**
+     * 一个 shell 都探测不到时仍返回 `/bin/bash`。
+     *
+     * 那种情况说明 rootfs 没解好或路径不对，报错应当指向「找不到 bash」
+     * 这个真实问题，而不是被这里掩盖成别的样子。
+     */
+    @Test
+    fun `都探测不到时回退到 bash 以便报错指向真问题`() {
+        val rootfs = Files.createTempDirectory("rf").toFile()
+        try {
+            val env = LinuxEnvironment(rootfsDir = rootfs, prootBinary = File("/x/libproot.so"))
+            assertEquals("/bin/bash", ProotCommand.loginShell(env))
+        } finally {
+            rootfs.deleteRecursively()
+        }
+    }
+
+    /**
+     * 登录 argv 的尾部必须是「探测到的 shell + -l」。
+     */
+    @Test
+    fun `loginArgs 尾部用的是探测到的 shell`() {
+        val rootfs = Files.createTempDirectory("rf").toFile()
+        try {
+            File(rootfs, "bin").mkdirs()
+            File(rootfs, "bin/sh").writeText("")
+            val env = LinuxEnvironment(rootfsDir = rootfs, prootBinary = File("/x/libproot.so"))
+            val login = ProotCommand.loginArgs(env)
+            assertEquals("/bin/sh", login[login.size - 2])
+            assertEquals("-l", login.last())
+        } finally {
+            rootfs.deleteRecursively()
+        }
+    }
+
+    /**
+     * `execArgs` 仍以 `/bin/sh -c` 收尾（不跟登录 shell 走）。
+     *
+     * 执行单条命令用 POSIX sh 语义更可预测，且 sh 在净 rootfs 里一定存在。
+     */
+    @Test
+    fun `execArgs 恒以 sh -c 收尾`() {
+        val rootfs = Files.createTempDirectory("rf").toFile()
+        try {
+            File(rootfs, "bin").mkdirs()
+            File(rootfs, "bin/bash").writeText("")
+            val env = LinuxEnvironment(rootfsDir = rootfs, prootBinary = File("/x/libproot.so"))
+            val args = ProotCommand.execArgs(env, "echo hi")
+            assertEquals("/bin/sh", args[args.size - 3])
+            assertEquals("-c", args[args.size - 2])
+            assertEquals("echo hi", args.last())
+        } finally {
+            rootfs.deleteRecursively()
         }
     }
 }
