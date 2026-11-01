@@ -45,6 +45,10 @@ Kotlin 编译器则一定拒绝。构建禁令下没有编译器，只能靠字�
 import os
 import sys
 
+# 复用 kt_lexer 的剥离实现，与 check_kt_files / check_kt_balance 同一口径。
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from kt_lexer import strip_noncode  # noqa: E402
+
 Q = chr(34)
 SQ = chr(39)
 BS = chr(92)
@@ -198,6 +202,31 @@ def _iter_targets(argv):
                 yield p
 
 
+def check_escaped_backticks(src):
+    '''找出**代码区**里被反斜杠转义的反引号。
+
+    ## 为什么必须有这一项（2026-11-01 血的教训）
+
+    我往测试文件里写 Kotlin 反引号函数名时，生成脚本把「反斜杠 + 反引号」
+    原样写进了文件，而 Kotlin 要求反引号标识符直接写、不转义。
+    Kotlin 于是报 `Function declaration must have a name`（90 条级联错误），
+    而**现有静态校验一条都没报**：括号平衡、字面量闭合都正常。
+    结果是带着坏代码推上去跑了一轮 CI 才发现。
+
+    注释里提到这种写法是合法的（文档本身就在说明转义），所以要剥掉注释
+    与字符串再判 —— 与其它检查同一套口径。
+    '''
+    code = strip_noncode(src)
+    out = []
+    needle = chr(92) + chr(96)
+    idx = code.find(needle)
+    while idx >= 0:
+        line = src.count(chr(10), 0, idx) + 1
+        out.append((line, "代码区出现反斜杠转义的反引号（Kotlin 反引号标识符不该转义）"))
+        idx = code.find(needle, idx + 1)
+    return out
+
+
 def main(argv):
     paths = list(_iter_targets(argv))
     if not paths:
@@ -212,6 +241,7 @@ def main(argv):
             bad += 1
             continue
         errs = check(src)
+        errs.extend(check_escaped_backticks(src))
         if errs:
             bad += 1
             for line, msg in errs:
