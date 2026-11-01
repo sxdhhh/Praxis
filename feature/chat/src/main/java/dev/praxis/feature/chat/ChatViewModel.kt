@@ -1123,38 +1123,6 @@ class ChatViewModel(
      * 3. **空结果不覆盖**：模型偶尔返回空串（被安全过滤 / 只输出了思考块）。
      *    覆盖成空标题会让侧边栏出现一条没有名字的会话。
      */
-    /**
-     * 会话创建时写的**占位标题**。这些值可以被 AI 标题覆盖。
-     *
-     * ## 为什么必须有这张表（2026-11-02 真机实测，⑧ 的最后一道坎）
-     *
-     * 上一版的覆盖条件是「当前标题 == fallbackTitle」——只防「用户手动改名被盖掉」。
-     * 但 `fallbackTitle` 是**本次发送**才算出来的（用户原文压平后截断），而会话的
-     * 初始标题是别处写的占位值：
-     *
-     * ```
-     * 侧边栏「＋新建对话」  → ensureSession(newId, "新对话")
-     * 侧边栏补齐当前会话    → ensureSession(currentSessionId, "当前对话")
-     * ```
-     *
-     * 这两条路径建出来的会话，标题永远不等于 fallbackTitle —— 于是条件恒成立、
-     * `return` 恒执行。模拟器实测证据：
-     *
-     * ```
-     * mock 收到两次请求（标题生成 + 正文对话）→ 说明生成链路是通的
-     * 但库里 sessions.title 仍是「新对话」            → 说明结果被丢弃了
-     * ```
-     *
-     * 这正是用户报的「对话没有 AI 生成题目」。前面几层（端口、接线、触发点）都修好了，
-     * 卡在最后这个「覆盖前提」上。
-     *
-     * ## 为什么不是「无条件覆盖」
-     *
-     * 用户的**手动改名**必须保住。占位值是我们自己写的，不承载任何用户意图，
-     * 所以只放行这一小撮已知占位值，其它一律不碰。
-     */
-    private fun isPlaceholderTitle(title: String): Boolean =
-        title in PLACEHOLDER_TITLES
 
     private suspend fun ChatPersistence.generateTitleIfPossible(
         fallbackTitle: String,
@@ -1172,14 +1140,24 @@ class ChatViewModel(
         }
         val cleaned = SessionTitle.sanitize(SessionTitle.stripThinking(generated))
         if (cleaned.isBlank()) return
-        // 只有当前标题仍是「可覆盖的占位」时才写回（防止盖掉用户手动改名）。
-        val current = runCatching {
-            listSessions().firstOrNull { it.id == sessionId }?.title
-        }.getOrNull()
-        if (current != null && current != fallbackTitle && !isPlaceholderTitle(current)) {
-            return
-        }
-        runCatching { updateSessionTitle(sessionId, cleaned) }
+        // ## 覆盖判断必须是**原子的**（2026-11-02，⑧ 的竞争条件）
+        //
+        // 旧的写法是「先 listSessions 读当前标题 -> 判断 -> 再 updateSessionTitle」。
+        // 三步之间没有原子性，而 `generator.generate()` 刚跑完一次真实网络请求
+        // （几秒）—— 用户完全可能在这几秒里手动改名。
+        //
+        // 命中窗口时的表现是：用户改的名字**自己变回去了**。这比「不生成标题」
+        // 更让人困惑：他明确做过一个动作，结果被系统悄悄撤销。
+        //
+        // 现在把「允许覆盖的两个前提」交给存储层做**单条条件 UPDATE**（见
+        // `ChatPersistence.updateSessionTitleIfMatches`），判断与写入同一条语句，
+        // 中间插不进别人的写。
+        //
+        // 允许覆盖的两种标题：
+        //   1. 仍等于本次算出的兜底值  —— 没人动过；
+        //   2. 仍是占位值（新对话 / 当前对话）—— 是我们自己写的，不承载用户意图。
+        val allowed = listOf(fallbackTitle) + PLACEHOLDER_TITLES.toList()
+        runCatching { updateSessionTitleIfMatches(sessionId, cleaned, allowed) }
     }
 
     /**

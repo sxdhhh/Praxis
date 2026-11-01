@@ -276,4 +276,46 @@ class ChatTitleTriggerTest {
             repo.titles["s5"],
         )
     }
+
+    /**
+     * AI 标题生成期间用户手动改名 —— 用户的名字必须赢。
+     *
+     * ## 这条测的是 ⑧ 的竞争条件（2026-11-02）
+     *
+     * 旧的覆盖判断是「先 listSessions 读当前标题 → 判断 → 再 updateSessionTitle」。
+     * 三步之间没有原子性，而 generate() 是一次真实网络请求（几秒）。用户完全
+     * 可能在这几秒里手动改名 —— 旧实现会让刚改的名字被 AI 覆盖。
+     *
+     * 表现是「我改的名字自己变回去了」：用户明确做过一个动作，结果被系统悄悄
+     * 撤销。这比不生成标题更让人困惑。
+     *
+     * 现在判断下沉到存储层的单条条件 UPDATE，中间插不进别人的写。
+     * 这里用一个「生成期间会改标题」的仓储模拟那次抢跑。
+     */
+    @Test
+    fun `生成期间用户改名时以用户的名字为准`() = runTest {
+        val repo = FakePersistence().apply { titles["s6"] = "新对话" }
+        val vm = ChatViewModel(
+            provider = SilentProvider(),
+            model = "test",
+            chatRepository = repo,
+            sessionId = "s6",
+            titleGenerator = ChatTitleGenerator {
+                // 模拟「网络请求期间用户手动改名」：生成还没返回时用户已经改了。
+                repo.titles["s6"] = "我改的名字"
+                "AI 想覆盖的名字"
+            },
+            persistDispatcher = testDispatcher,
+        )
+
+        vm.onInputChange("随便说点什么")
+        vm.send()
+        advanceUntilIdle()
+
+        assertEquals(
+            "用户手动改的名字不能被 AI 覆盖 —— 这是原子条件更新的意义所在",
+            "我改的名字",
+            repo.titles["s6"],
+        )
+    }
 }
