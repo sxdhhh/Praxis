@@ -270,14 +270,6 @@ object ProotCommand {
      */
     const val LOADER_RUNTIME_NAME: String = "proot-loader"
 
-    /**
-     * proot 进程的可执行文件名。
-     *
-     * 别名方案废弃后只剩一个名字（见 [launchArgs] 的 KDoc）；
-     * 仍保留成 List 是因为 `ProotEnvPort` 的「容器是否在跑」探测
-     * 按进程名匹配，未来如果再引入新的可执行名，加在这里即可。
-     */
-    val PROOT_EXECUTABLE_NAMES: List<String> = listOf("libproot.so")
 
     /**
      * 起一个 proot 进程时该用的 argv —— **整个仓库只有这一份实现**。
