@@ -1404,17 +1404,24 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
         // 与 [exec] 同一条规则：别名路径优先，秒退则用原名再起一次。
         // 交互 shell 秒退时同样一个命令都没执行，重起是安全的；
         // 而「真的起不来」两种方式都会 400ms 内死掉，多试一次的代价可忽略。
-        var process: Process? = null
+        // ## 变量名不能和后面的 `val process` 撞
+        //
+        // 这里原写作 `var process: Process? = null` 循环后再 `val process = process`，
+        // Kotlin 报 Conflicting declarations（同一作用域同名）。
+        // 用 `started` 承接循环内的结果，最后再解包成不可空的 `process`。
+        var started: Process? = null
         for (argv in prootArgvCandidates(env, args)) {
             val pb = ProcessBuilder(argv).redirectErrorStream(true)
             applyEnv(pb, env)
-            process = pb.start()
-            val started = process ?: break
-            val alive = runCatching { started.waitFor(400, TimeUnit.MILLISECONDS) }.getOrDefault(false)
-            // waitFor 返回 true = 已经退出（没活下来），换下一个候选。
-            if (!alive) break
+            val candidate = pb.start()
+            started = candidate
+            // waitFor 返回 true 表示**已经退出**（没活下来），换下一个候选。
+            val diedEarly = runCatching {
+                candidate.waitFor(400, TimeUnit.MILLISECONDS)
+            }.getOrDefault(false)
+            if (!diedEarly) break
         }
-        val process = process
+        val process = started
             ?: throw IllegalStateException("无法启动 proot 进程：${env.prootBinary.absolutePath}")
         // ## 交互 shell 会话要打标记（2026-10-30）
         //
@@ -1446,9 +1453,18 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
         }
     }
 
+    // ## 只能有一个 companion object（2026-11-01 修）
+    //
+    // 合并时一度出现两个 companion（一个公开、一个 private），Kotlin 直接报
+    // `Only one companion object is allowed per class`，连带把写在第二个里的
+    // PROOT_ARGV_FALLBACK_LIMIT 变成未解析引用，exec 侧整个编译不过。
+    // 常量统一放这里，别再单开一个。
     companion object {
         /** 超时伪退出码。用 124 与 coreutils `timeout` 的约定保持一致。 */
         const val TIMEOUT_EXIT_CODE = 124
+
+        /** 候选 argv 最多试几个（见 [ProotCommand.launchArgs]）。 */
+        const val PROOT_ARGV_FALLBACK_LIMIT: Int = 2
     }
 
     /** 停止所有会话（App 退出前调用）。 */
@@ -1620,11 +1636,6 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
      * @return 可用的 loader 路径；解压或改名任一步失败返回 null
      */
     private fun stageProotLoader(): File? = ProotLoaderStaging.stage(context)
-
-    private companion object {
-        /** 候选 argv 最多试几个（见 [ProotCommand.launchArgs]）。 */
-        const val PROOT_ARGV_FALLBACK_LIMIT: Int = 2
-    }
 }
 /**
  * rootfs 镜像的压缩格式。
