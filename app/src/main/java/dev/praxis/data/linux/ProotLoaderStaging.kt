@@ -44,10 +44,7 @@ internal object ProotLoaderStaging {
      */
     fun stage(context: Context): File? = runCatching {
         val nativeDir = context.applicationInfo.nativeLibraryDir
-        // 打包名（短横线）与历史别名（下划线）都认，与旧实现保持同一套探测。
-        val packaged = listOf(ProotCommand.LOADER_FILE_NAME, "libproot_loader.so")
-            .map { File(nativeDir, it) }
-            .firstOrNull { it.isFile }
+        val packaged = pickPackagedLoader(nativeDir)
             ?: return@runCatching null
 
         val binDir = File(context.filesDir, "proot/bin")
@@ -74,8 +71,32 @@ internal object ProotLoaderStaging {
         loader
     }.getOrNull()
 
+    /**
+     * 在 `nativeLibraryDir` 里挑出**实际存在的** loader 打包文件；都没有返回 null。
+     *
+     * ## 为什么两个名字都要认（2026-11-02 抽出来可测）
+     *
+     * 现行打包名是 `libproot-loader.so`（短横线）。历史上还有过
+     * `libproot_loader.so`（下划线）这个别名 —— 早期构建产物里有它，
+     * 用户手机上装的旧包也可能带它。两个名字都认，是为了让「升级 App
+     * 但 loader 打包名改过」的设备不至于直接拿不到 loader。
+     *
+     * ## 为什么返回 null 是正确的「不修」结果
+     *
+     * 拿不到 loader 时调用方会退回旧行为（直接用 nativeLibraryDir 里的
+     * proot 本体）。此时容器要么照常起来，要么报错信息与修之前完全一致 ——
+     * **修一个坑不该制造新的坑**。抛异常反而是错的：那会让终端页整页崩。
+     */
+    internal fun pickPackagedLoader(nativeDir: String): File? =
+        listOf(ProotCommand.LOADER_FILE_NAME, LEGACY_LOADER_FILE_NAME)
+            .map { File(nativeDir, it) }
+            .firstOrNull { it.isFile }
+
     /** 目标缺失、长度不符、或比源文件旧 —— 三种情况都要重拷。 */
-    private fun stale(dest: File, source: File): Boolean =
+    internal fun stale(dest: File, source: File): Boolean =
         !dest.isFile || dest.length() != source.length() ||
             dest.lastModified() < source.lastModified()
+
+    /** 历史打包名（下划线），见 [pickPackagedLoader]。 */
+    internal const val LEGACY_LOADER_FILE_NAME: String = "libproot_loader.so"
 }
