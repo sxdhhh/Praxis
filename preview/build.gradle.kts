@@ -1,6 +1,19 @@
 plugins {
     id("praxis.android.library")
     alias(libs.plugins.kotlin.compose)
+    // ## 为什么必须应用 Paparazzi 的 Gradle 插件（2026-11-01 补）
+    //
+    // 只加 `testImplementation(libs.paparazzi)` 是**不够**的。运行时
+    // Paparazzi 的 detectEnvironment() 会读这几个系统属性：
+    //
+    //     paparazzi.project.dir / paparazzi.build.dir
+    //     paparazzi.artifacts.cache.dir / paparazzi.test.resources
+    //
+    // 它们由本插件在 test task 上注入。缺了插件，System.getProperty 返回
+    // null，Paths.get(null) 抛 NPE，5 个预览用例全挂在 <init>。
+    // 注释里那句「显式声明 layoutlib 能让依赖解析更早暴露问题」是对的，
+    // 但它替代不了插件。
+    alias(libs.plugins.paparazzi)
 }
 
 android {
