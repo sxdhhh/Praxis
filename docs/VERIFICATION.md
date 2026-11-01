@@ -97,7 +97,60 @@ mock 收到两次请求：
 修复过程中还发现并修掉两个问题：占位标题会吞掉 AI 标题（覆盖条件太严）、
 以及「读-判断-写」之间的竞争窗口（改成原子条件 UPDATE）。
 
-## ② 的运行时验证进展（2026-11-02，重大）
+## ② 已修复：App 端到端进容器（2026-11-02 最终验证）
+
+用新 APK + x86_64 proot 真实二进制（**无任何包装脚本**）在 API 30 模拟器上验证：
+
+### 证据一：终端不再回退宿主 shell
+
+点「新建会话」后，终端里**没有** `[当前不是 Linux 容器]` 那段提示 ——
+说明 `port.open()` 返回了有效会话，`create()` 的 400ms 存活检查通过。
+
+### 证据二：proot 进程真的在跑
+
+```
+12334 12300 u0_a130 libproot.so  libproot.so --link2symlink --kill-on-exit -0 -v 0 \
+   -b /dev -b /proc -b /sys ... -w /root \
+   -r /data/user/0/dev.praxis.debug/files/linux/shared /bin/sh -i
+12338 12300 u0_a130 sh
+```
+
+两个 `libproot.so` 进程常驻，各带一个 `sh` 子进程 —— 容器内 shell。
+
+### 证据三：loader 确实被 execve
+
+```
+readlink /proc/12338/exe
+  -> /data/app/~~...==/dev.praxis.debug-...==/lib/x86_64/libproot-loader.so
+```
+
+容器内 `sh` 进程的 `exe` 指向 **nativeLibraryDir 里的 loader** —— 这直接证明
+proot 是 `execve` 那个 loader 的，也就解释了为什么它必须待在可执行目录。
+
+### 证据四：没有伪故障日志
+
+`logcat -s ProotTermSession` 在会话建立后**零输出** —— 既没有「读取中断」，
+也没有「已结束」。会话是健康的。
+
+### 关于 `can't access tty`
+
+模拟器上终端仍会打印 `can't access tty; job control turned off`。这是**预期**的：
+`libpty.so` 只有 arm64 版本，x86 模拟器加载不了，于是走管道降级分支，
+`/bin/sh -i` 拿不到 tty。**真机上有 libpty，走 PTY 分支，不会出现这句。**
+
+### 三层根因回顾
+
+| 层 | 缺陷 | 验证方式 |
+|---|---|---|
+| 一 | loader 缺执行位（644） | chmod 644/755 来回切 4 次，4 次一致 |
+| 二 | 动态依赖找不到（名字 + 目录双错） | 修复前后：`CANNOT LINK` -> `REAL_BINARY_OK` |
+| 三 | loader 在 filesDir，不可 execve | PROOT_LOADER 指向两处对比；最终 App 进容器 |
+
+### 仍未覆盖
+
+真实 Kali/Ubuntu rootfs、arm64 真机、PTY 分支的实际表现。上面的验证用的是
+x86_64 proot + Alpine minirootfs，走的是管道降级分支。
+## ② 的早期排查记录（保留，作为过程档案）
 
 ### 之前判断错了：x86 上不是验不了
 
