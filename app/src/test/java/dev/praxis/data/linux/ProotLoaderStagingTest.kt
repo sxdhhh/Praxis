@@ -136,4 +136,45 @@ class ProotLoaderStagingTest {
         val dst = File(tmp, "dst").apply { writeText("aaaa"); setLastModified(t) }
         assertFalse(ProotLoaderStaging.stale(dst, src))
     }
+
+    // ── 执行位（2026-11-02 模拟器实测确认的 ② 真根因）──────────────
+
+    /**
+     * 铺好的 loader 必须**可执行**，否则 proot 会以最误导的方式失败。
+     *
+     * ## 实测因果（API 30 + x86_64 proot 5.1.107）
+     *
+     * ```
+     * chmod 644 -> proot error: execve("/bin/sh"): Permission denied   FAIL
+     * chmod 755 -> RUN_OK                                                PASS
+     * ```
+     *
+     * 来回切 4 次，4 次一致 —— 执行位就是那个开关。
+     *
+     * ## 为什么报错完全指不到真因
+     *
+     * 报的是 `execve("/bin/sh"): Permission denied` —— 说的是 guest 的 /bin/sh，
+     * 不是 loader。于是排查方向永远是「rootfs 权限」或「proot 参数」，
+     * 不会想到「loader 缺 +x」。而 proot 秒退后终端回退宿主 shell，
+     * 用户最后看到的是 `/bin/sh: can't access tty` —— 整条链没有一句提到 loader。
+     *
+     * ## 这条为什么只能靠源码断言
+     *
+     * `stage()` 需要 `Context`，单测无法直接跑它，也就无法直接断言产物的 mode。
+     * 所以退而求其次：断言源码里**确实调了** `setExecutable`。
+     * 这不是最强的验证，但能拦住「有人觉得 loader 不用 +x 又把它删掉」。
+     */
+    @Test
+    fun `铺 loader 时必须设置执行位`() {
+        val src = File("src/main/java/dev/praxis/data/linux/ProotLoaderStaging.kt")
+        val file = listOf(src, File("app/" + src.path), File("../app/" + src.path))
+            .firstOrNull { it.isFile }
+            ?: throw AssertionError("找不到 ProotLoaderStaging.kt")
+        val text = file.readText()
+        org.junit.Assert.assertTrue(
+            "ProotLoaderStaging 没有给 loader 设置执行位 —— 644 的 loader 会让 proot " +
+                "报 execve(\"/bin/sh\"): Permission denied 然后秒退",
+            text.contains("loader.setExecutable(true"),
+        )
+    }
 }
