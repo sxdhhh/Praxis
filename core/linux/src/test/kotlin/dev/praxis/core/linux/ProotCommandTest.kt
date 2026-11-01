@@ -223,11 +223,29 @@ class ProotCommandTest {
         assertTrue(args.contains("/data/local/tmp"))
     }
 
+    /**
+     * 交互 shell 的 argv 形状是 `(shell, "-l")`，非交互是 `/bin/sh -c <cmd>`。
+     *
+     * ## 为什么这里**不再断言具体是 `/bin/bash`**（2026-11-02 修正）
+     *
+     * 本类的 `env.rootfsDir` 是个不存在的路径（`/data/app/praxis/files/...`），
+     * 所以 `loginShell(env)` 走的是**探测不到任何 shell 时的回退分支**，
+     * 恰好也返回 `/bin/bash`。
+     *
+     * 于是原断言 `assertEquals("/bin/bash", ...)` 是**靠回退通过的**：
+     * 它并不证明「rootfs 里有 bash 时会优先选 bash」，把实现改坏（比如永远回退）
+     * 它照样绿。这正是本项目多次踩过的「测试与旧行为对齐而非验证正确行为」。
+     *
+     * 具体选哪个 shell 由 `loginShell` 的四条测试覆盖（真建临时 rootfs）；
+     * 这里只固定 argv 的**形状**契约：尾两元素恒为 `(shell, "-l")`。
+     */
     @Test
-    fun `交互 shell 是 bash -l，非交互是 sh -c`() {
+    fun `交互 shell 以 -l 收尾，非交互是 sh -c`() {
         val login = ProotCommand.loginArgs(env)
-        assertEquals("/bin/bash", login[login.size - 2])
         assertEquals("-l", login.last())
+        // 尾部倒数第二项必须是某个 shell 的路径（具体哪个见 loginShell 的测试）。
+        val shell = login[login.size - 2]
+        assertTrue("倒数第二项应是 shell 路径，实际是 $shell", shell.endsWith("sh"))
 
         val exec = ProotCommand.execArgs(env, "apt-get update")
         assertEquals("/bin/sh", exec[exec.size - 3])
