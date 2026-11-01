@@ -119,15 +119,30 @@ jobs:
       # **本地 proot 省内存**定的（见该文件的注释），不是给 CI 的。
       # 18 个模块 + Compose 编译器插件生成大量合成类，768m Metaspace 不够。
       #
-      # runner 有 7GB+，直接给 4g 堆 / 2g Metaspace。用 GRADLE_OPTS 覆盖，
-      # 不改仓库里的 gradle.properties（那会影响本地构建）。
+      # runner 有 7GB+，直接给 4g 堆 / 2g Metaspace。
+      # 只在 CI 这一次性 checkout 里改，不提交回仓库 —— 本地 proot 仍然用
+      # gradle.properties 里的 2g / 768m（那个值是为省宿主内存定的）。
+      #
+      # ## 为什么不能整个替换 gradle.properties（2026-11-01 修）
+      #
+      # 原来的写法是「写一份 gradle.properties.ci 再 mv 覆盖」。那会把仓库里
+      # 其余配置一并抹掉 —— android.useAndroidX、android.nonTransitiveRClass、
+      # org.gradle.parallel / caching / configuration-cache、
+      # kotlin.compiler.execution.strategy=in-process 全部消失。
+      # 其中缺 useAndroidX 会让 AGP 直接拒绝构建。
+      #
+      # 改成只替换 jvmargs 这一行、再追加两项，原有内容不动。
       - name: Tune Gradle memory for CI
         run: |
-          echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=2g -XX:+UseParallelGC -Dfile.encoding=UTF-8" >> gradle.properties.ci
-          cat gradle.properties.ci
-          # 同时给 Kotlin daemon 单独的堆（它不总是继承 Gradle 的）
-          echo "kotlin.daemon.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=1g" >> gradle.properties.ci
-          mv gradle.properties.ci gradle.properties
+          sed -i 's|^org\.gradle\.jvmargs=.*|org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=2g -XX:+UseParallelGC -Dfile.encoding=UTF-8|' gradle.properties
+          {
+            echo "kotlin.daemon.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=1g"
+          } >> gradle.properties
+          echo "--- gradle.properties (CI) ---"
+          cat gradle.properties
+          # 守一道：缺 useAndroidX 时 AGP 会拒绝构建，早点报比编译阶段炸好
+          grep -q '^android.useAndroidX=true' gradle.properties \
+            || { echo "::error::gradle.properties 丢了 android.useAndroidX"; exit 1; }
 
       # local.properties 不进仓库（含本机 SDK 路径），CI 里现造一份。
       - name: Write local.properties
@@ -212,15 +227,30 @@ jobs:
       # **本地 proot 省内存**定的（见该文件的注释），不是给 CI 的。
       # 18 个模块 + Compose 编译器插件生成大量合成类，768m Metaspace 不够。
       #
-      # runner 有 7GB+，直接给 4g 堆 / 2g Metaspace。用 GRADLE_OPTS 覆盖，
-      # 不改仓库里的 gradle.properties（那会影响本地构建）。
+      # runner 有 7GB+，直接给 4g 堆 / 2g Metaspace。
+      # 只在 CI 这一次性 checkout 里改，不提交回仓库 —— 本地 proot 仍然用
+      # gradle.properties 里的 2g / 768m（那个值是为省宿主内存定的）。
+      #
+      # ## 为什么不能整个替换 gradle.properties（2026-11-01 修）
+      #
+      # 原来的写法是「写一份 gradle.properties.ci 再 mv 覆盖」。那会把仓库里
+      # 其余配置一并抹掉 —— android.useAndroidX、android.nonTransitiveRClass、
+      # org.gradle.parallel / caching / configuration-cache、
+      # kotlin.compiler.execution.strategy=in-process 全部消失。
+      # 其中缺 useAndroidX 会让 AGP 直接拒绝构建。
+      #
+      # 改成只替换 jvmargs 这一行、再追加两项，原有内容不动。
       - name: Tune Gradle memory for CI
         run: |
-          echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=2g -XX:+UseParallelGC -Dfile.encoding=UTF-8" >> gradle.properties.ci
-          cat gradle.properties.ci
-          # 同时给 Kotlin daemon 单独的堆（它不总是继承 Gradle 的）
-          echo "kotlin.daemon.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=1g" >> gradle.properties.ci
-          mv gradle.properties.ci gradle.properties
+          sed -i 's|^org\.gradle\.jvmargs=.*|org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=2g -XX:+UseParallelGC -Dfile.encoding=UTF-8|' gradle.properties
+          {
+            echo "kotlin.daemon.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=1g"
+          } >> gradle.properties
+          echo "--- gradle.properties (CI) ---"
+          cat gradle.properties
+          # 守一道：缺 useAndroidX 时 AGP 会拒绝构建，早点报比编译阶段炸好
+          grep -q '^android.useAndroidX=true' gradle.properties \
+            || { echo "::error::gradle.properties 丢了 android.useAndroidX"; exit 1; }
 
       - name: Write local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
