@@ -278,6 +278,15 @@ data conn: OK                             ← 数据连接也建起来了
 代价是客户端能 `CDUP` 跳出家目录——在「用户自己的容器、proot 本就无真实安全边界」
 的前提下，这个取舍是对的。
 
+> ⚠️ **记忆库里存的是旧结论，别被它带偏。**
+> `docs/memories/PRAXIS-only.md` 里能搜到「`allow_writeable_chroot=YES` 必须开」
+> 的段落 —— 那是 2026-10-24 建 `FtpServer.kt` 时的判断，10-31 真机实测后已反转。
+> 记忆库 README 说「与本文档冲突时以原始记录为准」，**这一条是例外**：
+> 原始记录写于反转之前。判断标准是「代码与测试怎么说」——
+> `FtpServer.kt` 发出 `chroot_local_user=NO`，`FtpServerTest` 还专门断言
+> `allow_writeable_chroot` 不得残留。要以那份为准。
+> 一般规律：记忆库是**时间切片**，同一问题可能有多个版本，取最新的那次实测。
+
 #### (2) 不能设 `pasv_address=0.0.0.0`
 
 它会把这串**原样发给客户端**：
