@@ -144,4 +144,41 @@ class TerminalExtractSelectionTest {
         val out = extractSelectionText(lines, sel(0, 0, 1, 19))
         assertTrue("全选必须包含两行内容", out.contains("aaa") && out.contains("bbb"))
     }
+
+    /**
+     * 选区整体越界（输出被裁剪后行数变少）时必须返回空，不能把末尾行当选中内容。
+     *
+     * ## 这条测的是「行为不能被改成夹取」（2026-11-02）
+     *
+     * 终端缓冲区会随输出增长裁剪尾部空行，行数会变，所以选区端点可能落在
+     * 当前 `lines` 之外。当前实现是**显式判空**（起点超过最后一行即返回空串）。
+     *
+     * 之所以要固定这条：曾经考虑过「把端点 coerceIn 到最后一行」的写法。
+     * 那会让复制出来的是第 N 行，而它与用户选的毫无关系 —— 用户点「复制」
+     * 本意是拿走自己选的那段，拿到一段陌生文字比复制失败糟得多：
+     * 他不会知道自己拿到的是错的。
+     */
+    @Test
+    fun `选区整体越界时返回空而不是末尾行`() {
+        val lines = listOf(line("only"), line("three"), line("lines"))
+        val out = extractSelectionText(lines, sel(50, 0, 60, 5))
+        assertEquals(
+            "选区已落在裁剪区外，不能把最后一行当作用户选的内容复制出去",
+            "",
+            out,
+        )
+    }
+
+    /**
+     * 终点越界但起点仍在范围内时，取到裁剪区末尾为止。
+     *
+     * 用户从中间一行一直拖到底、之后又有输出被裁掉 —— 他选的内容确实
+     * 延伸到了当时的末尾，取到现在的最后一行是合理近似。
+     */
+    @Test
+    fun `终点越界时取到末尾为止`() {
+        val lines = listOf(line("aaa"), line("bbb"))
+        val out = extractSelectionText(lines, sel(0, 0, 99, 5))
+        assertEquals("aaa\nbbb", out)
+    }
 }
