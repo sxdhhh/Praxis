@@ -879,18 +879,20 @@ class ProotTerminalSessionPort(
     }
 
     /**
-     * loader 路径。
+     * loader 路径 —— 直接取 `nativeLibraryDir` 里的原件。
      *
-     * ## 为什么不再自己按 `env.prootBinary.parentFile` 找（2026-11-01 改）
+     * ## 三条弯路都走完了（2026-11-02 定案）
      *
-     * 旧实现是在 `nativeLibraryDir` 里找 `libproot-loader.so`。**文件确实在**，
-     * 所以它一直"看起来没问题"；但 proot 拿这个路径去装载时依然失败 ——
-     * 因为 loader 必须与 proot **同目录且叫 `proot-loader`**，
-     * 而 `nativeLibraryDir` 里两个条件都不满足（详见
-     * `ProotCommand.LOADER_RUNTIME_NAME`）。
+     * 1. 直接按 `env.prootBinary.parentFile` 找：错，proot 推导 loader 时不看那里；
+     * 2. 拷到 `filesDir/proot/bin/proot-loader` 改名：错，`filesDir` 不可执行；
+     * 3. 造一个 `proot` 别名让它「从自己的目录找」：错，`filesDir` 里连 exec 都不许。
      *
-     * 现在统一走 [ProotLoaderStaging]：设置页与终端页用同一个目录、同一套文件名。
-     * 返回 null 表示铺不起来，此时不设 `PROOT_LOADER`，行为退回旧样子。
+     * 真因是 proot 会 **`execve`** loader，而 Android 10+ 的 `untrusted_app`
+     * 对 `app_data_file`（`filesDir`）**没有 execute 权限**，只对 `apk_data_file`
+     * （`nativeLibraryDir`）有。所以 loader 必须原地用，详见
+     * `ProotCommand.LOADER_FILE_NAME`。
+     *
+     * 返回 null 表示 APK 里没有 loader，此时不设 `PROOT_LOADER`，行为退回旧样子。
      */
     private fun prootLoaderFileFor(): File? = ProotLoaderStaging.stage(context)
 

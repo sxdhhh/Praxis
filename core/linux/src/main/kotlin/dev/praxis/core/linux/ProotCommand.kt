@@ -246,29 +246,29 @@ object ProotCommand {
     /** 容器内必须存在的挂载点（bind 目标先得有）。 */
     val REQUIRED_MOUNTS: List<String> = listOf("/dev", "/proc", "/sys", "/tmp")
 
-    /** 打包进 APK 的 loader 文件名；运行时会被改名成 [LOADER_RUNTIME_NAME]。 */
-    const val LOADER_FILE_NAME: String = "libproot-loader.so"
-
     /**
-     * loader 在宿主上的运行时文件名。
+     * 打包进 APK 的 loader 文件名。
      *
-     * ## 为什么要改名（2026-11-01 修「proot 进程启动后立即退出」）
+     * ## 名字不用改、也不用拷（2026-11-02 定案，推翻此前两版做法）
      *
-     * proot 在 `execve` 任何 guest 程序之前，要把 loader `mmap` 进被跟踪进程。
-     * loader 的位置在 proot 实现里是**按「proot 自己的路径」推导**的：
-     * 取 `/proc/self/exe` 的目录，找同目录下的 `proot-loader`；
-     * 那个文件不在时才去看 `PROOT_LOADER` 环境变量。
+     * 此前以为 proot 只按运行名 `proot-loader` 在**自己所在目录**找 loader，
+     * 于是先后尝试过「拷到 filesDir 改名」与「造 proot 别名」。**两者都错**：
      *
-     * 我们的 loader 打包名是 `libproot-loader.so`（Android 只允许 `lib*.so`
-     * 进 `nativeLibraryDir`），与 proot 默认找的 `proot-loader` **对不上**。
-     * 于是即便 `PROOT_LOADER` 设对了，proot 仍会先拿一个不存在的兄弟文件去
-     * `open`，失败即秒退，报错还是那句误导性的
-     * `execve("/bin/sh"): No such file or directory`。
+     * 1. `PROOT_LOADER` 给的是**完整路径**时，文件名随便叫，不必叫 `proot-loader`；
+     * 2. 更关键的是 proot 会 **`execve`** 这个 loader。而 `filesDir`（`app_data_file`）
+     *    在 `untrusted_app` 下**没有 `execute` 权限**（Android 10+ 的 W^X），
+     *    `setExecutable` 改不动 SELinux。只有 `nativeLibraryDir`（`apk_data_file`）可执行。
      *
-     * 所以启动前把它解压到 `filesDir/proot/bin/proot-loader`（按这个运行名），
-     * 再让 proot 以该目录为「自己的目录」启动 —— 见 [launchArgs]。
+     * 实测对比（同一台模拟器、同一份逐字节相同的 loader、权限都 755）：
+     *
+     * | `PROOT_LOADER` 指向 | 结果 |
+     * |---|---|
+     * | `filesDir/proot/bin/proot-loader` | `execve("/bin/sh"): Permission denied` |
+     * | `nativeLibraryDir/libproot-loader.so` | 正常进容器，出现 `~ #` |
+     *
+     * 所以 loader **就放在 nativeLibraryDir 里原地用**，见 [ProotLoaderStaging.stage]。
      */
-    const val LOADER_RUNTIME_NAME: String = "proot-loader"
+    const val LOADER_FILE_NAME: String = "libproot-loader.so"
 
 
     /**
