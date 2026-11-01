@@ -213,3 +213,9 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+# Paparazzi 的 Gradle 插件。**必须应用**：它在 test task 上注入
+# paparazzi.project.dir / paparazzi.build.dir / paparazzi.test.resources
+# 等系统属性，Paparazzi.detectEnvironment() 全靠它们定位 layoutlib 与资源。
+# 不应用时构造函数里 Paths.get(null) 直接 NPE —— 表现是「测试编译过了但
+# 5 个用例全挂在 ScreenPreviewTest.<init>」。（2026-11-01 实测）
+paparazzi = { id = "app.cash.paparazzi", version.ref = "paparazzi" }
