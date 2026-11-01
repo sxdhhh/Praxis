@@ -1123,6 +1123,39 @@ class ChatViewModel(
      * 3. **空结果不覆盖**：模型偶尔返回空串（被安全过滤 / 只输出了思考块）。
      *    覆盖成空标题会让侧边栏出现一条没有名字的会话。
      */
+    /**
+     * 会话创建时写的**占位标题**。这些值可以被 AI 标题覆盖。
+     *
+     * ## 为什么必须有这张表（2026-11-02 真机实测，⑧ 的最后一道坎）
+     *
+     * 上一版的覆盖条件是「当前标题 == fallbackTitle」——只防「用户手动改名被盖掉」。
+     * 但 `fallbackTitle` 是**本次发送**才算出来的（用户原文压平后截断），而会话的
+     * 初始标题是别处写的占位值：
+     *
+     * ```
+     * 侧边栏「＋新建对话」  → ensureSession(newId, "新对话")
+     * 侧边栏补齐当前会话    → ensureSession(currentSessionId, "当前对话")
+     * ```
+     *
+     * 这两条路径建出来的会话，标题永远不等于 fallbackTitle —— 于是条件恒成立、
+     * `return` 恒执行。模拟器实测证据：
+     *
+     * ```
+     * mock 收到两次请求（标题生成 + 正文对话）→ 说明生成链路是通的
+     * 但库里 sessions.title 仍是「新对话」            → 说明结果被丢弃了
+     * ```
+     *
+     * 这正是用户报的「对话没有 AI 生成题目」。前面几层（端口、接线、触发点）都修好了，
+     * 卡在最后这个「覆盖前提」上。
+     *
+     * ## 为什么不是「无条件覆盖」
+     *
+     * 用户的**手动改名**必须保住。占位值是我们自己写的，不承载任何用户意图，
+     * 所以只放行这一小撮已知占位值，其它一律不碰。
+     */
+    private fun isPlaceholderTitle(title: String): Boolean =
+        title in PLACEHOLDER_TITLES
+
     private suspend fun ChatPersistence.generateTitleIfPossible(
         fallbackTitle: String,
         userText: String,
@@ -1139,11 +1172,13 @@ class ChatViewModel(
         }
         val cleaned = SessionTitle.sanitize(SessionTitle.stripThinking(generated))
         if (cleaned.isBlank()) return
-        // 只有当前标题仍是兜底值时覆盖（防止盖掉用户手动改名）。
+        // 只有当前标题仍是「可覆盖的占位」时才写回（防止盖掉用户手动改名）。
         val current = runCatching {
             listSessions().firstOrNull { it.id == sessionId }?.title
         }.getOrNull()
-        if (current != null && current != fallbackTitle) return
+        if (current != null && current != fallbackTitle && !isPlaceholderTitle(current)) {
+            return
+        }
         runCatching { updateSessionTitle(sessionId, cleaned) }
     }
 
@@ -3502,3 +3537,24 @@ private const val CONTINUE_HINT: String =
  *    再多用户也不会在一轮里问，而是分几轮。
  */
 private const val MAX_ATTACHMENTS = 4
+
+/**
+ * 会话创建时写入的**占位标题**，可被 AI 生成的标题覆盖。
+ *
+ * ## 为什么需要这张表（2026-11-02 模拟器实测，⑧ 的最后一环）
+ *
+ * 覆盖条件原本只认「当前标题 == fallbackTitle」，而 fallbackTitle 是**本次发送**
+ * 才从用户原文算出来的。可两张创建入口写的是固定占位值：
+ *
+ * ```
+ * 侧边栏「＋新建对话」 → ensureSession(newId, "新对话")
+ * 侧边栏补齐当前会话   → ensureSession(currentSessionId, "当前对话")
+ * ```
+ *
+ * 于是「新对话」这种会话的标题永远不等于 fallbackTitle，生成结果被静默丢弃。
+ * 实测证据：mock 服务收到两次请求（标题生成 + 正文），说明链路全通；
+ * 但库里 sessions.title 仍是「新对话」—— 结果死在这道判断上。
+ *
+ * 只放行这两个我们**自己写的**占位值：用户手动改名仍然是不可覆盖的。
+ */
+private val PLACEHOLDER_TITLES: Set<String> = setOf("新对话", "当前对话")
