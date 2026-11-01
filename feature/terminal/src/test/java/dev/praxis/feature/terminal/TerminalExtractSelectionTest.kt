@@ -1,5 +1,8 @@
 package dev.praxis.feature.terminal
 
+// CellStyle 定义在 :core:terminal（不是本模块），必须显式 import ——
+// 漏了它 CI 直接报 Unresolved reference 'CellStyle'（2026-11-02 踩过）。
+import dev.praxis.core.terminal.CellStyle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
