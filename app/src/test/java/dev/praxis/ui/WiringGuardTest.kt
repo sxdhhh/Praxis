@@ -883,5 +883,140 @@ class WiringGuardTest {
                 .contains("it.trim() == \"apt-get update\""),
         )
     }
+
+
+    /**
+     * AI 生成会话标题：**能力、接线、触发点**三者必须同时在位。
+     *
+     * ## 为什么单独立一条护栏（2026-11-02）
+     *
+     * 用户报告「对话没有 AI 生成题目」。排查发现整条链路的每一块都单独存在、
+     * 单独能跑、单独有测试：
+     *
+     *  - `SessionTitle`（清洗/兜底/提示词）—— 有 `SessionTitleTest`；
+     *  - `SettingsBackedTitleGenerator` —— 在 `:app`，构造好、也注入了；
+     *  - `ChatViewModel.generateTitleIfPossible` —— 写好了，还带三条防御。
+     *
+     * 断的是**触发点**：那个调用被写在 `launchPersist { … }` 里面，
+     * 而它内部是一次真实网络请求 —— 于是它要等「三次写库都成功」才轮到执行，
+     * 实际结果是**一个标题都没生成过**。零件全绿，链路是断的。
+     *
+     * 单测测的都是零件，没有一条能拦住这种断法。所以这里直接对源码断言：
+     * 触发点必须长成「独立协程 + 首条消息闸门」那个形状。
+     *
+     * ## 断言为什么写成整段文本而不是单个标识符
+     *
+     * 只断言「文件里有 generateTitleIfPossible」是拦不住回归的 —— 旧代码里也有，
+     * 只是位置错了。所以这里断言归一化空白后的**结构片段**：
+     * `if (isFirstUserMessage) { persistScope.launch {`。
+     * 换回 `launchPersist {` 就会红。
+     */
+    @Test
+    fun chatTitleGenerator_isWiredAndActuallyTriggered() {
+        val vm = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatViewModel.kt")
+        val flat = vm.replace(Regex("\\s+"), " ")
+
+        // 1) 端口在（ViewModel 能拿到生成器）。
+        assertTrue(
+            "ChatViewModel 缺 titleGenerator 端口",
+            vm.contains("private val titleGenerator: ChatTitleGenerator? = null"),
+        )
+
+        // 2) 触发点：必须是自己起协程的独立路径，且只在首条用户消息时触发。
+        assertTrue(
+            "标题生成的触发点结构不对 —— 它必须是 `if (isFirstUserMessage) { " +
+                "persistScope.launch {`。若这张断言红了，多半是有人又把它挪回 " +
+                "`launchPersist { … }`：那样它会等写库全部成功才执行，" +
+                "表现就是「一个标题都不生成」。",
+            flat.contains("if (isFirstUserMessage) { persistScope.launch {"),
+        )
+        assertTrue(
+            "触发点没有真正调用生成器",
+            flat.contains("repo.generateTitleIfPossible(fallbackTitle, text)"),
+        )
+
+        // 3) 接线：`:app` 必须真的把实现传进来（传 null 等于没接）。
+        val app = read("app/src/main/java/dev/praxis/ui/PraxisApp.kt")
+        assertTrue(
+            "PraxisApp 没有给 ChatViewModel 传 titleGenerator —— 端口为 null 时 " +
+                "generateTitleIfPossible 第一行就 return，标题永远不会生成。",
+            app.contains("titleGenerator = dev.praxis.data.ai.SettingsBackedTitleGenerator("),
+        )
+
+        // 4) 实现本身必须还在（别只留个空壳引用）。
+        val impl = read("app/src/main/java/dev/praxis/data/ai/SettingsBackedTitleGenerator.kt")
+        assertTrue(
+            "SettingsBackedTitleGenerator 缺 generate 实现",
+            impl.contains("override suspend fun generate("),
+        )
+    }
+
+
+    /**
+     * 终端选择：长按拖动 → 选择态 → 操作条 → 写剪贴板，四段必须同时在位。
+     *
+     * ## 为什么单独立一条护栏（2026-11-02）
+     *
+     * 用户原话是「终端无法长按复制、无法全选」，排查后确认 `TerminalScreen.kt`
+     * 里**根本没有选择能力** —— 不是坏了，是从没写过。于是补了一套：
+     *
+     *  - 格子坐标的选择模型 [TerminalSelection]（有 10 条单测）；
+     *  - `detectDragGesturesAfterLongPress` 起选 + `withFocus` 扩选；
+     *  - 选择态才出现的 `TerminalSelectionBar`（复制 / 全选 / 完成）；
+     *  - 复制走 `clipboard.setText`。
+     *
+     * 光有 [TerminalSelection] 这个类是不够的 —— 那正是「能力在、接线不在」的
+     * 经典形态。所以这里对**触发点与落地动作**逐段断言。
+     *
+     * ## 为什么锚 `detectDragGesturesAfterLongPress` 而不是「有没有 selection 变量」
+     *
+     * 只断言「文件里有 selection」太弱：一个声明了却没人用的状态变量照样能让它变绿。
+     * 真正的用户可见行为是「长按 → 出现选择 → 能复制」，所以直接锚手势入口
+     * 与「写剪贴板」这两个首尾动作。
+     */
+    @Test
+    fun terminalSelection_isWiredFromGestureToClipboard() {
+        val screen = read("feature/terminal/src/main/java/dev/praxis/feature/terminal/TerminalScreen.kt")
+        val flat = screen.replace(Regex("\\s+"), " ")
+
+        // 1) 长按手势入口。
+        assertTrue(
+            "TerminalScreen 没有长按手势，长按选不中任何东西",
+            flat.contains("detectDragGesturesAfterLongPress("),
+        )
+        // 2) 按下即起选。
+        assertTrue(
+            "长按后没有创建选择（onDragStart 未设 selection）",
+            flat.contains("onDragStart = { offset ->") &&
+                flat.contains("selection = TerminalSelection("),
+        )
+        // 3) 拖动扩选。
+        assertTrue(
+            "拖动没有扩选（onDrag 未调用 withFocus）",
+            flat.contains("selection = cur.withFocus("),
+        )
+        // 4) 操作条只在选择态出现。
+        assertTrue(
+            "选择操作条没有按「有选择才显示」渲染",
+            flat.contains("if (activeSelection != null) {") &&
+                flat.contains("TerminalSelectionBar("),
+        )
+        // 5) 复制真的写进剪贴板（这是用户要的最终效果）。
+        assertTrue(
+            "「复制」没有写剪贴板 —— 用户会以为复制成功了",
+            flat.contains("clipboard.setText(AnnotatedString(text))"),
+        )
+        // 6) 全选：从 (0,0) 选到末行末列。
+        assertTrue(
+            "「全选」没有把整个缓冲区纳入选择",
+            flat.contains("onSelectAll = {") &&
+                flat.contains("selection = TerminalSelection(0, 0, lastRow, lastCol)"),
+        )
+        // 7) 取文本用格子坐标模型（不是按像素或按整行硬拼）。
+        assertTrue(
+            "复制取文本没有走 extractSelectionText",
+            flat.contains("extractSelectionText(state.active.lines, activeSelection.normalized)"),
+        )
+    }
 }
 
