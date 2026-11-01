@@ -924,20 +924,6 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
     }
 
     /**
-     * 一个硬链接条目：`linkName` 是这条的名字，`targetName` 是它指向的路径。
-     *
-     * `tar -tv` 对硬链接的输出形如：
-     *
-     * ```
-     * -rw-r--r-- root/root   0 2026-10-24 08:57 ./alias.txt link to ./real.txt
-     * ```
-     *
-     * 注意**大小是 0**（硬链接条目在 tar 里不重复存内容），
-     * 所以不能靠「大小是否为 0」判断，只能认 ` link to ` 这个分隔串。
-     */
-    private data class HardLinkEntry(val linkName: String, val targetName: String)
-
-    /**
      * 列出 tarball 里的硬链接条目。
      *
      * ## 为什么用 `tar -tvf` 而不是自己解析 tar 头
@@ -974,19 +960,7 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
             BufferedReader(InputStreamReader(p.inputStream)).use { reader ->
                 while (true) {
                     val line = reader.readLine() ?: break
-                    // 只认硬链接行。`link to` 前后都有空格，避免误伤文件名里
-                    // 恰好含 "linkto" 的普通文件。
-                    val marker = " link to "
-                    val at = line.indexOf(marker)
-                    if (at <= 0) continue
-                    // 这一行里「权限 + 属主 + 长度 + 时间」之后才是文件名，
-                    // 形如 `... 08:57 ./alias.txt link to ./real.txt`。
-                    // 用标记切分：左段取最后一个空格后的部分 = 链接名。
-                    val linkName = line.substring(0, at).trim().substringAfterLast(' ')
-                    val targetName = line.substring(at + marker.length).trim()
-                    if (linkName.isNotEmpty() && targetName.isNotEmpty()) {
-                        entries += HardLinkEntry(linkName, targetName)
-                    }
+                    parseHardLinkLine(line)?.let { entries += it }
                 }
             }
             p.waitFor(2, TimeUnit.MINUTES)
@@ -1465,6 +1439,52 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
 
         /** 候选 argv 最多试几个（见 [ProotCommand.launchArgs]）。 */
         const val PROOT_ARGV_FALLBACK_LIMIT: Int = 2
+
+        /**
+         * 从 `tar -tv` 的一行里认出硬链接条目；不是硬链接返回 null。
+         *
+         * ## 为什么抽成静态纯函数（2026-11-02）
+         *
+         * 这段解析决定「哪些条目会被 `--exclude` 跳过」—— 判错一个名字，
+         * 那个文件就不会被解出来，而 tar 的退出码仍可能是 0。**错了不会响**。
+         * 它原先是内联在 `ProcessBuilder` 读循环里的实例逻辑，既没法单测，
+         * 也没必要依赖 Context。抽到 companion 后可以直接拿真实 `tar -tv`
+         * 的输出喂断言。
+         *
+         * ## 判据为什么是 ` link to `（前后各一个空格）
+         *
+         * 硬链接行形如：
+         * ```
+         * -rw-r--r-- root/root   0 2026-10-24 08:57 ./alias.txt link to ./real.txt
+         * ```
+         * 不认「大小是 0」——空普通文件大小同样是 0。
+         * 前后带空格是为了不误伤文件名里恰好含 `linkto` 的普通文件。
+         *
+         * 链接名取「标记左侧最后一个空格之后的部分」：左边还带着权限、属主、
+         * 时间和大小，整段当文件名会让 `--exclude` 一个都匹配不上。
+         */
+        internal fun parseHardLinkLine(line: String): HardLinkEntry? {
+            val marker = " link to "
+            val at = line.indexOf(marker)
+            // at <= 0：要么没有标记，要么标记就在行首（那样左边取不到文件名）。
+            if (at <= 0) return null
+            val linkName = line.substring(0, at).trim().substringAfterLast(' ')
+            val targetName = line.substring(at + marker.length).trim()
+            if (linkName.isEmpty() || targetName.isEmpty()) return null
+            return HardLinkEntry(linkName, targetName)
+        }
+
+        /**
+         * 一个硬链接条目：`linkName` 是这条的名字，`targetName` 是它指向的路径。
+         *
+         * `tar -tv` 对硬链接的输出形如：
+         * ```
+         * -rw-r--r-- root/root   0 2026-10-24 08:57 ./alias.txt link to ./real.txt
+         * ```
+         * 注意**大小是 0**（硬链接条目在 tar 里不重复存内容），
+         * 所以不能靠「大小是否为 0」判断，只能认 ` link to ` 这个分隔串。
+         */
+        internal data class HardLinkEntry(val linkName: String, val targetName: String)
     }
 
     /** 停止所有会话（App 退出前调用）。 */
