@@ -12,8 +12,11 @@ import dev.praxis.feature.chat.ChatState
 import dev.praxis.feature.chat.ChatBubble
 import dev.praxis.feature.chat.BubbleRole
 import dev.praxis.ui.theme.PraxisTheme
-import dev.praxis.ui.theme.ThemeMode
-import dev.praxis.ui.theme.ThemeSettings
+// ThemeSettings / ThemeMode 定义在 core:model，不在 ui:theme。
+// 曾误写成 `dev.praxis.ui.theme.ThemeSettings` 导致 preview 模块编译失败
+// （Unresolved reference），而 build workflow 不编译 preview，所以肉眼难发现。
+import dev.praxis.core.model.settings.ThemeMode
+import dev.praxis.core.model.settings.ThemeSettings
 import org.junit.Rule
 import org.junit.Test
 
