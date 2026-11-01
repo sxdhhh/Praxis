@@ -82,23 +82,26 @@ class ProotLaunchArgsTest {
     }
 
     /**
-     * `PROOT_EXECUTABLE_NAMES` 与 `launchArgs` 必须指向同一个名字。
+     * 没有「proot 别名」这个概念了：候选里不该出现 `proot` 这个文件名。
      *
-     * `ProotEnvPort` 靠它按进程名判断「容器在不在跑」。两者一旦分叉，
-     * 表现是「容器明明起来了，设置页却显示未运行」。
+     * ## 这条替代了原来的 `PROOT_EXECUTABLE_NAMES` 断言（2026-11-02）
+     *
+     * 原先有个 `PROOT_EXECUTABLE_NAMES = listOf("libproot.so")` 常量，
+     * KDoc 写着「`ProotEnvPort` 的『容器是否在跑』探测按进程名匹配」。
+     * 但清理时查证：那段探测**早已不存在** —— 运行状态来自内存里的
+     * `shellSession?.isAlive`（见 `LinuxEnvViewModel`），不看进程名。
+     * 那个常量成了只有测试引用的孤儿，留着会误导后人以为它在起作用。
+     *
+     * 删掉常量，把真正要守的东西留在这里：**别名方案不能回来**。
      */
     @Test
-    fun `进程名清单与执行名一致`() {
+    fun `候选里不出现 proot 这个文件名`() {
+        val out = ProotCommand.launchArgs(prootBinary, args)
+        val all = out.flatten()
         assertTrue(
-            "PROOT_EXECUTABLE_NAMES 必须包含 libproot.so：" +
-                ProotCommand.PROOT_EXECUTABLE_NAMES,
-            ProotCommand.PROOT_EXECUTABLE_NAMES.contains("libproot.so"),
-        )
-        // 别名已删除，不该再有人按 "proot" 这个进程名去找容器。
-        assertTrue(
-            "别名已废弃，进程名清单里不该再有 proot：" +
-                ProotCommand.PROOT_EXECUTABLE_NAMES,
-            !ProotCommand.PROOT_EXECUTABLE_NAMES.contains("proot"),
+            "launchArgs 里出现了名为 proot 的可执行文件 —— 别名方案在 Android 10+ " +
+                "上必然 Permission denied，不该回来：" + all,
+            all.none { it.endsWith("/proot") },
         )
     }
 }
