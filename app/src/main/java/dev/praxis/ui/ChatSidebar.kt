@@ -126,7 +126,21 @@ fun ChatSidebar(
     LaunchedEffect(open, reloadTick, currentSessionId) {
         if (!open) return@LaunchedEffect
         // 上层已经把 sessionId 切到别的会话了：删除流程结束，清掉标记。
-        if (justDeletedId != null && currentSessionId != justDeletedId) justDeletedId = null
+        //
+        // ## 为什么标记还有「超时自清」的兜底（2026-11-02）
+        //
+        // 正常路径：删除 → onDeleteCurrentSession → 上层切 sessionId → 这里清标记。
+        // 但如果上层那次切换**失败或被吞掉**（协程取消、写库异常被 runCatching 吃掉），
+        // sessionId 会一直等于 justDeletedId，标记就永远不清 —— 之后这个 id
+        // 即使被重新创建，侧边栏也不会为它补行，表现是「列表里少一条」。
+        //
+        // 所以打开抽屉时再检一次：只要该 id **已经不在列表里**，
+        // 说明删除确实生效了，标记就没必要留着（它原本只为挡住「补行」）。
+        if (justDeletedId != null) {
+            val deleted = justDeletedId!!
+            val stillListed = sessions.any { it.id == deleted }
+            if (!stillListed && currentSessionId != deleted) justDeletedId = null
+        }
         // ## 先补当前会话的行，再列（2026-10-22 修，第 6 项）
         //
         // 默认会话 id 是字面量 `"main"`（`PraxisApp` 里 `rememberSaveable` 的初值），

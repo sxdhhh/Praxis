@@ -1084,5 +1084,62 @@ class WiringGuardTest {
                 .contains("nativeLibraryDir"),
         )
     }
+
+
+    /**
+     * ⑦ 删当前对话：`justDeletedId` 必须挡住「补行」，且必须能自清。
+     *
+     * ## 背景（2026-11-02，模拟器 + 直读数据库实测）
+     *
+     * 用户报「处于当前对话时无法删除该对话」。真因是侧边栏里那段「补齐当前
+     * 会话的行」的守卫：删除是异步的（先删库、再让上层切 sessionId），
+     * 中间有个窗口 sessionId 仍等于已删的 id；而删除后 reloadTick++ 会重跑
+     * 那段守卫，它看到「列表里没有 currentSessionId」就 ensureSession 把刚删
+     * 的行**又插回去**。实测证据：删完当前会话后 sessions 表里仍有那条。
+     *
+     * ## 这条护栏守两件事
+     *
+     * 1. **挡住**：补行条件里必须有 `currentSessionId != justDeletedId`。
+     *    少了它，「当前对话删不掉」立刻复发。
+     * 2. **能自清**：标记不能永远留着。若上层那次切换失败（协程取消 /
+     *    写库异常被 runCatching 吃掉），sessionId 会一直等于 justDeletedId，
+     *    之后这个 id 即使被重新创建，侧边栏也不会为它补行 ——
+     *    表现变成「列表里莫名少一条」。
+     *
+     * 这两条是一对：只做第 1 条会留下永久标记，只做第 2 条则删不掉。
+     */
+    @Test
+    fun chatSidebar_deleteCurrentSessionGuardIsCorrect() {
+        val sidebar = read("app/src/main/java/dev/praxis/ui/ChatSidebar.kt")
+        val flat = sidebar.replace(Regex("\\s+"), " ")
+
+        // 1) 补行守卫必须排除刚删掉的 id。
+        assertTrue(
+            "补行条件里缺 `currentSessionId != justDeletedId` —— " +
+                "这正是「当前对话删不掉」的复发点：删除后列表刷新会把刚删的行插回去",
+            flat.contains("sessions.none { it.id == currentSessionId } && currentSessionId != justDeletedId"),
+        )
+
+        // 2) 删除处必须打标记。
+        assertTrue(
+            "删除处没有记 justDeletedId，补行守卫就无从判断",
+            flat.contains("justDeletedId = session.id"),
+        )
+
+        // 3) 标记必须能自清（否则永久挡住该 id 的补行）。
+        assertTrue(
+            "justDeletedId 缺少自清逻辑 —— 上层切换失败时它会永久留着，" +
+                "之后该 id 被重新创建也不会补行，表现是「列表里少一条」",
+            flat.contains("if (justDeletedId != null) {") &&
+                flat.contains("if (!stillListed && currentSessionId != deleted) justDeletedId = null"),
+        )
+
+        // 4) LaunchedEffect 的 key 必须带 currentSessionId，否则切换后不会重跑。
+        assertTrue(
+            "LaunchedEffect 的 key 缺 currentSessionId —— 上层切走后这个 effect 不会重跑，" +
+                "标记永远清不掉",
+            flat.contains("LaunchedEffect(open, reloadTick, currentSessionId) {"),
+        )
+    }
 }
 
