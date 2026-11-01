@@ -34,6 +34,15 @@ on:
       - 'third_party/**'
       - 'gradle/**'
       - 'build-plugins/**'
+      # ## 为什么必须带上 preview/**（2026-11-01 补）
+      #
+      # verify job 要跑 `testDebugUnitTest`，那会把 :preview 的测试源码
+      # 一起编译。但 preview/** 原来不在这个清单里 —— 于是改了 preview
+      # 不会触发 CI，而 build job 的 assembleDebug 又不编译测试源码。
+      # 结果就是 preview 里的编译错误可以一直躺着：本地看不到（禁令下
+      # 不编译）、CI 也不跑。ScreenPreviewTest.kt 用 1.x 的
+      # `roundedCorners` 参数就是这样拖到 2026-11-01 才被发现的。
+      - 'preview/**'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
       - 'gradle.properties'

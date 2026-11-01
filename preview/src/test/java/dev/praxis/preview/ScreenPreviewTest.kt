@@ -2,6 +2,7 @@ package dev.praxis.preview
 
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
+import androidx.compose.runtime.Composable
 import com.android.resources.Density
 import com.android.resources.ScreenOrientation
 import dev.praxis.core.model.settings.ApiProvider
@@ -56,9 +57,14 @@ class ScreenPreviewTest {
             screenHeight = 891,
             density = Density.XXHIGH,
             orientation = ScreenOrientation.PORTRAIT,
-            // 圆角给 0：窗口边界不参与 UI 布局，留着只会在图片四角
-            // 留下一圈透明 —— 浏览器里看会以为渲染失败。
-            roundedCorners = false,
+            // 不设 screenRound（DeviceConfig 里默认 null = 不加圆角限定符）：
+            // 窗口边界不参与 UI 布局，设成圆角只会在图片四角留一圈透明 ——
+            // 浏览器里看会以为渲染失败。
+            //
+            // 注意：1.x 时代这里写的是 `roundedCorners = false`；
+            // 2.0.0-alpha05.1 的 DeviceConfig 没有那个参数了（改成
+            // `screenRound: ScreenRound? = null`），照抄旧写法会让
+            // :preview:compileDebugUnitTestKotlin 直接编译失败。
         ),
         // ## 为什么 showSystemUi = false
         //
@@ -136,7 +142,12 @@ class ScreenPreviewTest {
                 dev.praxis.feature.settings.ai.ModelScreen(
                     settings = sampleModelSettings(),
                     apiKeyMasked = "sk-••••••••••••••••3f2a",
-                    onSave = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+                    // onSave 是 12 个参数：baseUrl / model / modelIndex / apiKey /
+                    // provider / temperature / contextLimit / compactThreshold /
+                    // thinkingEffort / customHeaders / requestLimitPerMinute /
+                    // maxConcurrentRequests。多写一个下划线就会报
+                    // Argument type mismatch。
+                    onSave = { _, _, _, _, _, _, _, _, _, _, _, _ -> },
                 )
             }
         }
@@ -147,6 +158,10 @@ class ScreenPreviewTest {
     // 全部是纯内存对象，不碰网络、不碰数据库、不碰 Android Context。
     // 这也是预览能跑在纯 JVM 上的前提。
 
+    // 必须标 @Composable：它内部调用 ChatScreen（一个 Composable）。
+    // 漏了会报 "Functions which invoke @Composable functions must be marked
+    // with the @Composable annotation"。
+    @Composable
     private fun PreviewChatScreen(state: ChatState) {
         ChatScreen(
             state = state,
