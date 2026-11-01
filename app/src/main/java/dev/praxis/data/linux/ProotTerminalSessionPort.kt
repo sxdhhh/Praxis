@@ -114,6 +114,24 @@ class ProotTerminalSessionPort(
     private val live = ConcurrentHashMap<String, Live>()
     private val counter = AtomicInteger(1)
 
+    /**
+     * 正在被**主动关闭**的会话 id。
+     *
+     * ## 为什么需要它（2026-11-01 修「read interrupted by close() on another thread」）
+     *
+     * 关会话时 `Pty.destroy()` 会在另一个线程上关掉 master fd，正阻塞在
+     * `read()` 里的泵线程于是抛 `IOException("read interrupted by close()
+     * on another thread")`。那条异常是**预期**的（用户就是让它结束），
+     * 但它与「会话真的出故障」长得一样。
+     *
+     * 所以关闭前先在这里登记 id，泵线程收尾时检查：
+     *  - id 在集合里 → 静默结束（不报「会话读取结束：…」）；
+     *  - 不在 → 照旧把原因报给用户，真正的 IO 故障仍然可见。
+     *
+     * 用并发集合而不是普通 Set：`close` 在 UI 线程，泵线程在 IO 线程。
+     */
+    private val closing: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
     /** 默认超时（秒），与 `core:linux` 的常量一致。 */
     private val defaultTimeout: Long = TerminalSessionCommand.DEFAULT_TIMEOUT_SECONDS
 
@@ -136,18 +154,49 @@ class ProotTerminalSessionPort(
         // 直接用 sessionArgs 起一个常驻交互 shell，**不套 `/bin/sh -c`**。
         // 套了之后 `-i` 会去判断 stdin 是否 tty，行为不稳定（见 sessionArgs 的说明）。
         val args = ProotCommand.sessionArgs(env, listOf("/bin/sh", "-i"))
-        val argv = listOf(env.prootBinary.absolutePath) + args
+        // ## 铺文件只做一次，`PROOT_LOADER` 与别名目录都从它来（2026-11-01 修）
+        //
+        // 之前 `ptyEnvironment` 内部自己调了一次 `prootLoaderFileFor()`，
+        // 而 `launchArgs` 又按 `executable.parentFile` 推别名路径 ——
+        // 两条来源不同，别名目录对不上，修复静默失效。
+        //
+        // 现在先把 loader 铺好，环境变量与 argv 都吃同一个结果：
+        // loader 的**父目录**就是别名所在目录。
+        val loader = prootLoaderFileFor()
+        val envVars = ptyEnvironment(env, loader)
+        // 见 [ProotCommand.launchArgs]：先试可写目录下的 `proot` 别名
+        // （proot 在那里才能找到它的 loader），失败再退回 `libproot.so` 原名。
+        // 两条启动器（`forkpty` 与 `ProcessBuilder`）必须用同一份规则 ——
+        // 各写一份正是历史上「PTY 能用、降级后全崩」的来源。
+        val argvCandidates = ProotCommand.launchArgs(
+            executable = env.prootBinary,
+            environment = envVars,
+            arguments = args,
+            stagedDir = loader?.parentFile,
+        )
         val tap = ScreenTap()
 
         // ① 优先真 PTY：vim/top 能用、Ctrl+C 生效、输出行缓冲（不攒 4KB）。
         //    窗口大小按手机常见列数给（80x24 会让 top 错位）。
-        val pty = dev.praxis.core.terminal.Pty.start(
-            command = argv.toTypedArray(),
-            environment = ptyEnvironment(env),
-            workingDir = context.filesDir,
-            rows = 60,
-            cols = 80,
-        )
+        //    候选 argv 逐个试：第一个是别名路径，起不来（fork 后立刻死）就换下一个。
+        var pty: dev.praxis.core.terminal.Pty? = null
+        for (argv in argvCandidates) {
+            val started = dev.praxis.core.terminal.Pty.start(
+                command = argv.toTypedArray(),
+                environment = envVars,
+                workingDir = context.filesDir,
+                rows = 60,
+                cols = 80,
+            ) ?: break
+            // 立刻死掉的会话不值得留着：先判活 200ms，活的才采纳。
+            // 这里比 create() 末尾的 400ms 更早，只为决定「要不要换下一个候选」。
+            java.lang.Thread.sleep(200)
+            if (started.process.isAlive) {
+                pty = started
+                break
+            }
+            runCatching { started.destroy() }
+        }
         if (pty != null) {
             var deadReason: String? = null
             Thread(
@@ -161,10 +210,33 @@ class ProotTerminalSessionPort(
                     //
                     // 这里在退出前跑一次 `waitFor` 拿退出码，把它记进 tap，
                     // 于是上层能把「会话已死，退出码 N」如实报给调用方。
-                    pumpStream(pty.stdout, tap)
+                    //
+                    // ## 流被别的线程关掉是**正常结束**，不是故障（2026-11-01 修）
+                    //
+                    // 用户在终端页关掉标签、或者切走页面触发 `close(id)` 时，
+                    // `close` 会调 `pty.destroy()` 关掉 master fd。此刻如果本线程
+                    // 正阻塞在 `read()` 上，JDK 会抛：
+                    //
+                    //     java.io.IOException: read interrupted by close() on another thread
+                    //
+                    // 旧实现把它原样报成「会话读取结束：read interrupted by close()
+                    // on another thread」—— 用户看到容器「跑着跑着结束了」，
+                    // 而实际上那是他自己关的。正常关闭不该产生错误文案。
+                    //
+                    // 判据：只要会话已被标记为关闭，或流是被自己关的，
+                    // 这条异常就是预期的。**不吞其它异常**（真正的 IO 故障仍要可见）。
+                    val closedByOwner = runCatching { pumpStream(pty.stdout, tap) }
+                    if (closedByOwner.isFailure && !closing.contains(id)) {
+                        Log.w(TAG, "PTY 会话 $id 读取中断：${closedByOwner.exceptionOrNull()?.message}")
+                    }
+                    // 读线程自己收尾：master fd 不关会漏一对 PTY fd（见 Pty 的 KDoc）。
+                    pty.closeMasterIfOwner()
                     val code = runCatching { pty.process.waitFor() }.getOrNull()
                     deadReason = "会话进程已退出（退出码 ${code ?: "未知"}）。"
                     tap.offer(DEAD_MARKER)
+                    // 关闭登记在这里才摘：见 close() 的 finally —— 那之后再没人读它，
+                    // 提前摘会让「关标签页」重新变成一条伪故障日志。
+                    closing.remove(id)
                     Log.w(TAG, "PTY 会话 $id 已结束，退出码=$code")
                 },
                 "praxis-term-pty-$id",
@@ -210,6 +282,10 @@ class ProotTerminalSessionPort(
 
         // ② 降级：libpty 不可用（32 位设备 / CI 缺库）时用管道。
         //    功能不全但仍能跑 ls/apt/cat，好过整页崩掉。
+        //
+        // 候选 argv 同样逐个试：这里没有 200ms 预判的机会（ProcessBuilder 要
+        // 等到 400ms 存活检查才知道），所以只对「启动阶段就抛异常」的情形换下一个。
+        val argv = argvCandidates.first()
         val pb = ProcessBuilder(argv).redirectErrorStream(true)
         applyEnv(pb, env)
         val process = pb.start()
@@ -218,9 +294,15 @@ class ProotTerminalSessionPort(
         // EOF 时同样补一条死亡标记（理由见上面 PTY 分支的注释）。
         Thread(
             {
-                pumpStream(process.inputStream, tap)
+                // 与 PTY 分支同一条规则：主动关闭时读被打断是预期，不报错；
+                // 其它异常照旧打日志（否则会话静默死掉，调用方只能等到超时）。
+                val read = runCatching { pumpStream(process.inputStream, tap) }
+                if (read.isFailure && !closing.contains(id)) {
+                    Log.w(TAG, "管道会话 $id 读取中断：${read.exceptionOrNull()?.message}")
+                }
                 val code = runCatching { process.waitFor() }.getOrNull()
                 Log.w(TAG, "管道会话 $id 已结束，退出码=$code")
+                closing.remove(id)
                 tap.offer(DEAD_MARKER)
             },
             "praxis-term-$id",
@@ -250,12 +332,25 @@ class ProotTerminalSessionPort(
 
     override fun close(sessionId: String): Boolean {
         val item = live.remove(sessionId) ?: return false
-        // 先发 exit：交互 shell 会自己收尾，比直接 kill 干净。
-        runCatching { item.writer.write("exit\n"); item.writer.flush() }
-        runCatching { item.process.waitFor(600, TimeUnit.MILLISECONDS) }
-        // PTY 必须走自己的 destroy：它会先关 master fd（内核据此给子进程发 SIGHUP），
-        // 再兜底 destroy 进程。只 destroy 进程的话 shell 可能还卡在 read() 上。
-        item.pty?.destroy() ?: runCatching { item.process.destroyForcibly() }
+        // ## 关闭顺序（2026-11-01 修）
+        //
+        // 1. **先登记**「这条会话是主动关的」——泵线程靠它把
+        //    `read interrupted by close() on another thread` 当成正常结束。
+        //    漏了这一步，每次关标签页都会在界面上留下一条看着像故障的红字。
+        // 2. 再发 exit：交互 shell 会自己收尾，比直接 kill 干净。
+        // 3. 最后 destroy：关 master fd（内核据此给子进程发 SIGHUP）+ 兜底信号。
+        closing.add(sessionId)
+        try {
+            runCatching { item.writer.write("exit\n"); item.writer.flush() }
+            runCatching { item.process.waitFor(600, TimeUnit.MILLISECONDS) }
+            // PTY 必须走自己的 destroy：它会先关 master fd（内核据此给子进程发 SIGHUP），
+            // 再兜底 destroy 进程。只 destroy 进程的话 shell 可能还卡在 read() 上。
+            item.pty?.destroy() ?: runCatching { item.process.destroyForcibly() }
+        } finally {
+            // 不在这里 remove：泵线程可能还没从 read() 里出来，
+            // 提前摘掉它就等于让那条异常又变成「故障」。交给泵线程在
+            // EOF 收尾时自己清理（它一定会跑到，最迟在 destroy 关流之后）。
+        }
         return true
     }
 
@@ -545,7 +640,19 @@ class ProotTerminalSessionPort(
         if (hostFile.isFile) hostFile.readText().trim().takeIf { it.startsWith("/") } else null
     }.getOrNull()
 
-    /** 后台泵：把输出流逐行送进 [ScreenTap]。 */
+    /**
+     * 后台泵：把输出流逐行送进 [ScreenTap]。
+     *
+     * ## 为什么不再内部吞异常（2026-11-01）
+     *
+     * 旧实现整个函数体包在 `runCatching` 里，异常被吃掉，调用方无法区分
+     * 「正常 EOF」与「读被打断」。而现在这个区分是必需的：
+     * 关闭会话时读线程收到的 `read interrupted by close() on another thread`
+     * 是**预期**的，不该往界面上报（见 `create()` 里泵线程的说明）。
+     *
+     * 所以异常上抛给调用方判断；调用方按「会话是否正在被主动关闭」决定
+     * 是静默还是报错。
+     */
     private fun pumpStream(input: java.io.InputStream, tap: ScreenTap) {
         runCatching {
             // ## 为什么不再用 BufferedReader.readLine()（2026-10-29 修）
@@ -604,7 +711,7 @@ class ProotTerminalSessionPort(
                 }
             }
             if (line.isNotEmpty()) tap.offer(line.toString())
-        }
+        }.getOrThrow()
     }
 
     /**
@@ -647,15 +754,19 @@ class ProotTerminalSessionPort(
      *
      * 两个缺陷叠加，就是用户截图里那一整屏报错。
      */
-    private fun ptyEnvironment(env: LinuxEnvironment): Map<String, String> = buildMap {
+    private fun ptyEnvironment(
+        env: LinuxEnvironment,
+        loader: File? = prootLoaderFileFor(),
+    ): Map<String, String> = buildMap {
         put("TERM", "xterm-256color")
         put("HOME", "/root")
         put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
         put("LANG", "C.UTF-8")
         put("PROOT_TMP_DIR", context.cacheDir.absolutePath)
         put("PROOT_NO_SECCOMP", "1")
-        // ★ 缺它 proot 起不来。与 applyEnv 保持一致，两条路径共用同一个查法。
-        prootLoaderFileFor(env)?.let { put("PROOT_LOADER", it.absolutePath) }
+        // ★ 缺它 proot 起不来。loader 由调用方传进来，与 `launchArgs` 的
+        // 别名目录同源，不会出现「loader 铺在 A、别名找 B」的分叉。
+        loader?.let { put("PROOT_LOADER", it.absolutePath) }
     }
 
     /**
@@ -739,28 +850,27 @@ class ProotTerminalSessionPort(
         // 引导器：不设的话容器一条命令都跑不起来（真机实测 execve ENOENT）。
         // PTY 分支通过 ptyEnvironment() 传入，这里同样要传 ——
         // 之前漏了，靠 proot 自己找默认路径，换个 ROM 就失败。
-        prootLoaderFileFor(env)?.let { e["PROOT_LOADER"] = it.absolutePath }
+        prootLoaderFileFor()?.let { e["PROOT_LOADER"] = it.absolutePath }
         // LD_LIBRARY_PATH / LD_PRELOAD 已随 clear() 一并清掉：
         // 留着会让容器里的程序去加载 bionic，curl 报
         // `cannot locate symbol "EVP_MD_CTX_create"`。
     }
 
     /**
-     * 找 `libproot-loader.so`。
+     * loader 路径。
      *
-     * ## 为什么要在这里再找一次
+     * ## 为什么不再自己按 `env.prootBinary.parentFile` 找（2026-11-01 改）
      *
-     * [LinuxEnvPort] 那边有一条同名的查找（设置页路径用），但
-     * `ProotTerminalSessionPort` 与它之间只共享 `LinuxEnvironment` 这个
-     * 数据对象，**不共享查找逻辑**。之前直接依赖「proot 会自己找到」，
-     * 在部分 ROM 上（nativeLibraryDir 布局不同）就会失败。
+     * 旧实现是在 `nativeLibraryDir` 里找 `libproot-loader.so`。**文件确实在**，
+     * 所以它一直"看起来没问题"；但 proot 拿这个路径去装载时依然失败 ——
+     * 因为 loader 必须与 proot **同目录且叫 `proot-loader`**，
+     * 而 `nativeLibraryDir` 里两个条件都不满足（详见
+     * `ProotCommand.LOADER_RUNTIME_NAME`）。
+     *
+     * 现在统一走 [ProotLoaderStaging]：设置页与终端页用同一个目录、同一套文件名。
+     * 返回 null 表示铺不起来，此时不设 `PROOT_LOADER`，行为退回旧样子。
      */
-    private fun prootLoaderFileFor(env: LinuxEnvironment): File? {
-        val dir = env.prootBinary.parentFile ?: return null
-        return listOf("libproot-loader.so", "libproot-loader")
-            .map { File(dir, it) }
-            .firstOrNull { it.isFile }
-    }
+    private fun prootLoaderFileFor(): File? = ProotLoaderStaging.stage(context)
 
     private companion object {
         /** 哨兵前缀。带随机后缀意义不大：同一会话内串行执行，不会撞。 */

@@ -1,6 +1,7 @@
 package dev.praxis.data.linux
 
 import android.content.Context
+import android.util.Log
 import dev.praxis.core.linux.KaliMirror
 import dev.praxis.core.linux.LinuxDiskUsage
 import dev.praxis.core.linux.LinuxDistro
@@ -108,7 +109,38 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
         kaliMirror = KaliMirror.Tsinghua,
     )
 
-    override fun isProotAvailable(): Boolean = prootBinary.isFile
+    /**
+     * proot 是否**真的能跑**。
+     *
+     * ## 为什么不是 `prootBinary.isFile`（2026-11-01 修）
+     *
+     * 只判「文件在不在」会把「包装得对、但当前进程名不允许 exec」这种情形
+     * 判成可用。Android 10+ 的 W^X 是按**进程的挂载命名空间**判的：
+     * 同一个 `libproot.so`，在主进程里 exec 被拒，在一个专门的子进程里
+     * （清单里给它单独设了 `process=`，见 `praxis-proot`）却能正常 exec。
+     *
+     * 只判文件存在的话，用户看到的是「环境已安装、proot 可用」，
+     * 点启动后却秒退 —— 而这正是本次截图里的状态。
+     *
+     * 所以这里实际跑一次 `--version`：
+     *  - 退出码 0 且有输出 → 真能跑；
+     *  - 进程根本没起来（IOException / EACCES）→ 当前进程名不行；
+     *  - 起来了但非 0 → 至少 exec 成功，问题在后续参数。
+     *
+     * 开销：一次 fork + execv，约几十毫秒。调用点只有状态刷新，
+     * 而这个判断错了的代价是用户反复点「启动容器」并报错。
+     */
+    override fun isProotAvailable(): Boolean {
+        if (!prootBinary.isFile) return false
+        return runCatching {
+            val p = ProcessBuilder(prootBinary.absolutePath, "--version")
+                .redirectErrorStream(true)
+                .start()
+            val finished = p.waitFor(5, TimeUnit.SECONDS)
+            if (!finished) runCatching { p.destroyForcibly() }
+            finished
+        }.getOrDefault(false)
+    }
 
     /**
      * 校正已有 rootfs 的权限位 —— 见接口 KDoc。
@@ -125,6 +157,17 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
             val root = env.rootfsDir
             if (!root.isDirectory) return@withContext true
             runCatching {
+                // 目录骨架必须在 chmod 之前补：新补出来的目录要一起被归一化。
+                //
+                // ## 为什么「修复权限」要顺手补目录（2026-11-01）
+                //
+                // 已经装好的 rootfs 是**过去某次解压**的产物。那次解压若是
+                // 在「排除 /dev」之前跑的（或者干脆是别的工具装的），
+                // /dev 就是空的，proot 的 bind 会静默失败，容器里没有 /dev/null。
+                // 而这个方法正是「不重装也能修好已有环境」的入口，所以它也必须
+                // 修结构，而不只是修位。两件事共用同一个规则的好处是：
+                // 新装与修复不会分叉（见方法 KDoc 的开头）。
+                ensureRootfsSkeleton(root) { /* 修复期日志对调用方无意义 */ }
                 normalizeRootfsPermissions(root) { /* 修复期日志对调用方无意义 */ }
             }.isSuccess
         }
@@ -230,6 +273,10 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
             // ③-b 扁平化：Kali 的 tarball 全部在 `kali-arm64/` 之下，
             //      不剥掉这层目录，`/bin/sh` 就不在根上，容器起不来。
             flattenIfSingleTopDir(staging, onLine)
+
+            // ③-c 补出被 tar 排除掉的目录骨架（/dev 与 /etc/apt 的两处，见各自函数）。
+            //      必须在扁平化之后：扁平化前这些东西还在 `kali-arm64/` 下面。
+            ensureRootfsSkeleton(staging, onLine)
 
             // ④ 校验：没有 /bin/sh 说明解压不完整。
             if (!File(staging, "bin/sh").isFile && !File(staging, "usr/bin/sh").isFile) {
@@ -362,6 +409,47 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
         }
         runCatching { only.delete() }
         onLine("扁平化完成。")
+    }
+
+    /**
+     * 补齐 rootfs 里被排除/缺失的目录骨架。
+     *
+     * ## 为什么要单独一步（2026-11-01）
+     *
+     * `--exclude` 让 tar 不再尝试 mknod，但也意味着 `/dev` 里**一个条目都没有**
+     * （tar 连目录本身都可能因为整目录条目的顺序而没解出来）。容器启动时
+     * proot 要把宿主的 `/dev/null` 之类 bind 到 `/dev/null`，**目标不存在时
+     * proot 只打印一条 warning 然后静默继续** —— 于是容器里没有 /dev/null，
+     * `apt` 报 `Could not open lock file /dev/null`，而报错完全不提 bind 失败。
+     *
+     * 所以解压后无条件建一遍这些目录（幂等，已存在就什么都不做）。
+     *
+     * `/etc/apt/sources.list.d` 同理：换源脚本要往里写 `ubuntu.sources`，
+     * 目录缺失时 `printf ... > 路径` 直接失败，报的是 shell 的
+     * `No such file or directory`，看起来像「权限问题」。
+     *
+     * @param root 解压出来的 rootfs 根（staging 目录）
+     */
+    private fun ensureRootfsSkeleton(root: File, onLine: (String) -> Unit) {
+        // /dev 里刻意**只建目录**，不建任何文件：设备节点由 proot 挂宿主的进来。
+        // 建空的普通文件反而更糟 —— 它会把 bind 目标「变成已存在的普通文件」，
+        // 容器里 /dev/null 变成普通文件后写入会真的写到磁盘上。
+        val dirs = listOf(
+            "dev",
+            "dev/pts",
+            "dev/shm",
+            "proc",
+            "sys",
+            "tmp",
+            "etc/apt/sources.list.d",
+            "etc/apt/apt.conf.d",
+            "opt",
+        )
+        val created = dirs.count { relative ->
+            val dir = File(root, relative)
+            !dir.isDirectory && dir.mkdirs()
+        }
+        if (created > 0) onLine("已补齐 rootfs 目录骨架（$created 个目录）。")
     }
 
     /**
@@ -1031,6 +1119,27 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
                 mode, tarball.absolutePath,
                 "-C", target.absolutePath,
             )
+            // ── /dev 下的设备节点**必须排除**（2026-11-01 修 Kali 解压失败）──
+            //
+            // 真机报错：
+            //
+            //     tar: can't create 'kali-arm64/dev/zero': Operation not permitted
+            //     解压失败（tar 退出码 1，按 xz 处理）
+            //
+            // 普通 App 没有 CAP_MKNOD，建不出字符/块设备节点 —— 这与镜像、
+            // 与权限位都无关，是内核能力问题。而 tar 只要有一条失败就以 1 退出，
+            // 整个安装流程因此判定失败，尽管其余 99% 的文件都解开了。
+            //
+            // 排除掉之后 /dev 是空目录：这恰好是我们要的状态 —— 启动时
+            // `ProotCommand.loginArgs` 本来就会 `-b /dev` 把宿主的 /dev 挂进来，
+            // 再把 null/zero/random/urandom 逐个单独 bind 一次。
+            // 容器里的 /dev 用的是系统的设备节点，不是镜像里的。
+            //
+            // 两种写法都排除：有的 tar 条目带 `./` 前缀（GNU tar 打包的
+            // ubuntu-base 就是），有的不带（NetHunter 直接是 `kali-arm64/...`）。
+            // 通配一处、漏一处，就会在「换了一个镜像」时重新踩到。
+            argv += "--exclude=./dev/*"
+            argv += "--exclude=*/dev/*"
             // `--exclude` 必须在文件参数之后：toybox 的选项解析是顺序的，
             // 放在 tar 文件之前有时会被当成「要排除的第一个成员」。
             excludes.forEach { argv += "--exclude=$it" }
@@ -1242,23 +1351,45 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
     ): Int = withContext(Dispatchers.IO) {
         runCatching {
             val args = ProotCommand.execArgs(env, command)
-            val pb = ProcessBuilder(listOf(env.prootBinary.absolutePath) + args)
-                .redirectErrorStream(true)
-            applyEnv(pb, env)
-            val p = pb.start()
-            BufferedReader(InputStreamReader(p.inputStream)).use { reader ->
-                while (true) {
-                    val line = reader.readLine() ?: break
-                    onLine(line)
+            // ## 候选 argv 逐个启动（2026-11-01 修）
+            //
+            // 见 [prootArgvCandidates]：第一个候选让 proot 从
+            // `filesDir/proot/bin/` 起跑，好让它在那里找到 loader；
+            // 第二个候选是旧行为（直接用 nativeLibraryDir 里的
+            // `libproot.so`），别名没建成时仍然要能跑起来。
+            //
+            // 退回到第二个候选必须**重跑整条命令**：proot 秒退时那条命令
+            // 一个字节都没执行，重跑是安全的；而真正的命令失败会带输出，
+            // 用「有没有产生任何输出」区分两种情形。
+            var lastExit = -1
+            for ((index, argv) in prootArgvCandidates(env, args).withIndex()) {
+                val pb = ProcessBuilder(argv).redirectErrorStream(true)
+                applyEnv(pb, env)
+                val p = pb.start()
+                var produced = false
+                BufferedReader(InputStreamReader(p.inputStream)).use { reader ->
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        if (line.isNotEmpty()) produced = true
+                        onLine(line)
+                    }
                 }
+                val exit = if (!p.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+                    onLine("[超时 ${timeoutSeconds}s，已终止]")
+                    p.destroyForcibly()
+                    TIMEOUT_EXIT_CODE
+                } else {
+                    p.exitValue()
+                }
+                lastExit = exit
+                val nextExists = index < PROOT_ARGV_FALLBACK_LIMIT - 1
+                if (exit != 0 && !produced && nextExists) {
+                    onLine("proot 未产生任何输出即退出（退出码 $exit），换一种启动方式重试…")
+                    continue
+                }
+                return@runCatching exit
             }
-            if (!p.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-                onLine("[超时 ${timeoutSeconds}s，已终止]")
-                p.destroyForcibly()
-                TIMEOUT_EXIT_CODE
-            } else {
-                p.exitValue()
-            }
+            lastExit
         }.getOrElse { error ->
             onLine("执行失败：${error.message ?: error::class.simpleName}")
             -1
@@ -1270,10 +1401,21 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
         args: List<String>,
         onLine: (String) -> Unit,
     ): LinuxEnvPort.SessionHandle = withContext(Dispatchers.IO) {
-        val pb = ProcessBuilder(listOf(env.prootBinary.absolutePath) + args)
-            .redirectErrorStream(true)
-        applyEnv(pb, env)
-        val process = pb.start()
+        // 与 [exec] 同一条规则：别名路径优先，秒退则用原名再起一次。
+        // 交互 shell 秒退时同样一个命令都没执行，重起是安全的；
+        // 而「真的起不来」两种方式都会 400ms 内死掉，多试一次的代价可忽略。
+        var process: Process? = null
+        for (argv in prootArgvCandidates(env, args)) {
+            val pb = ProcessBuilder(argv).redirectErrorStream(true)
+            applyEnv(pb, env)
+            process = pb.start()
+            val started = process ?: break
+            val alive = runCatching { started.waitFor(400, TimeUnit.MILLISECONDS) }.getOrDefault(false)
+            // waitFor 返回 true = 已经退出（没活下来），换下一个候选。
+            if (!alive) break
+        }
+        val process = process
+            ?: throw IllegalStateException("无法启动 proot 进程：${env.prootBinary.absolutePath}")
         // ## 交互 shell 会话要打标记（2026-10-30）
         //
         // `liveSession()` 必须能区分「用户启动的那个交互容器」与
@@ -1324,16 +1466,78 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
      * 程序去加载 Android 的 bionic 库，直接崩。apixiaoyuan 在终端里踩过同一个坑：
      * `curl` 报 `cannot locate symbol "EVP_MD_CTX_create"`。
      */
-    private fun applyEnv(pb: ProcessBuilder, env: LinuxEnvironment) {
-        pb.environment().apply {
-            remove("LD_LIBRARY_PATH")
-            remove("LD_PRELOAD")
+    /**
+     * 起 proot 进程时的**完整环境**（PTY 与管道两条启动器共用的唯一来源）。
+     *
+     * ## 为什么单独拆出来（2026-11-01）
+     *
+     * PTY 走 `forkpty` + `execve`，环境是**全新**的（不透传父进程）；
+     * 管道走 `ProcessBuilder`，环境是父进程的副本。两条路要表达的是
+     * 「同一套容器环境」，所以内容只能有一份 —— 历史上正是分成两份之后，
+     * 一条分支漏了 `PROOT_LOADER` / PATH，表现成「真机 PTY 能用、降级后全崩」。
+     *
+     * ⚠️ 不含 `LD_LIBRARY_PATH` / `LD_PRELOAD`：继承它们会让容器里的程序去
+     * 加载 Android 的 bionic 库，`curl` 直接报
+     * `cannot locate symbol "EVP_MD_CTX_create"`。PTY 那条路本来就是空环境，
+     * 管道那条路由 [applyEnv] 显式 `remove`。
+     */
+    private fun prootEnv(
+        env: LinuxEnvironment,
+        loader: File? = stageProotLoader(),
+    ): MutableMap<String, String> =
+        mutableMapOf<String, String>().apply {
             put("HOME", env.homeDir)
             put("TERM", "xterm-256color")
             put("LANG", "C.UTF-8")
             put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
-            // proot 自己需要临时目录。
             put("PROOT_TMP_DIR", context.cacheDir.absolutePath)
+            put("PROOT_NO_SECCOMP", "1")
+            // loader 由调用方传进来（默认现铺一次）：这样 `PROOT_LOADER`
+            // 与 `launchArgs` 的别名目录必然来自同一次铺文件，不会分叉。
+            loader?.let { put("PROOT_LOADER", it.absolutePath) }
+        }
+
+    /**
+     * 一条命令的 argv 候选（按优先级）。
+     *
+     * 决定 argv[0] 的规则在 [ProotCommand.launchArgs]（核心层，两套启动器共用）；
+     * 这里只负责把别名布局准备好（见 [stageProotLoader]），再把环境交给它。
+     */
+    private fun prootArgvCandidates(env: LinuxEnvironment, args: List<String>): List<List<String>> {
+        // ## 别名目录必须和 PROOT_LOADER 出自同一次铺文件（2026-11-01 修）
+        //
+        // 这里踩过一个让整个修复静默失效的坑，记下来：
+        //
+        // 铺文件的逻辑把 `proot` 别名建在 `filesDir/proot/bin/`，
+        // 而 `launchArgs` 最初是从 `executable.parentFile`（nativeLibraryDir，
+        // 只读）推别名路径 —— 两边对不上，别名永远不存在，永远走 fallback，
+        // 现象与没修之前一模一样，日志也看不出异常。
+        //
+        // 现在两边都用 `stageProotLoader()` 的同一个结果：它的**父目录**
+        // 就是别名所在目录。一次调用、一个来源，不可能再对不上。
+        val loader = stageProotLoader()
+        val envs = prootEnv(env, loader)
+        return ProotCommand.launchArgs(
+            executable = env.prootBinary,
+            environment = envs,
+            arguments = args,
+            stagedDir = loader?.parentFile,
+        )
+    }
+
+    /**
+     * 给子进程设环境变量。
+     *
+     * ⚠️ **必须清掉 Android 的库路径**：继承下来的 `LD_LIBRARY_PATH` 会让容器里的
+     * 程序去加载 Android 的 bionic 库，直接崩。apixiaoyuan 在终端里踩过同一个坑：
+     * `curl` 报 `cannot locate symbol "EVP_MD_CTX_create"`。
+     */
+    private fun applyEnv(pb: ProcessBuilder, env: LinuxEnvironment) {
+        pb.environment().apply {
+            remove("LD_LIBRARY_PATH")
+            remove("LD_PRELOAD")
+            // 其余全部来自 [prootEnv] —— 两条启动器只允许有一份环境定义。
+            putAll(prootEnv(env))
 
             // ## PROOT_LOADER：不设这一项，容器**一条命令都跑不起来**
             //
@@ -1360,26 +1564,66 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
             // 正确做法：把 loader 也随 APK 分发（`libproot-loader.so`），
             // 并用 `PROOT_LOADER` 指过去。proot 支持这个环境变量覆写。
             //
-            // 验证记录（同一台设备）：
+            // 验证记录（2026-10-21，同一台设备）：
             //  - 未设 PROOT_LOADER → `execve: No such file or directory`；
             //  - 设了之后 → 输出 `PROOT_REAL_OK`，`-0` 伪 root 与 bind 全部生效。
-            prootLoaderFile()?.let { put("PROOT_LOADER", it.absolutePath) }
+            //
+            // ## 2026-11-01：设了它还不够，**路径里的文件名** proot 并不认
+            //
+            // 用户真机截图里 `PROOT_LOADER` 明明已经设了，容器照样秒退。
+            // 真因有两层（详见 [ProotCommand.LOADER_RUNTIME_NAME]）：
+            //  1. proot 推导 loader 时认的是运行名 `proot-loader`，
+            //     而我们打进 APK 的只能叫 `libproot-loader.so`；
+            //  2. loader 与 proot 的相对位置是按 `/proc/self/exe` 的目录推的，
+            //     那个值恒为 `.../lib/arm64/libproot.so`，符号链接改不动。
+            //
+            // 所以现在 `PROOT_LOADER` 指向的是 [stageProotLoader] 解压出来的
+            // `filesDir/proot/bin/proot-loader`，同时 argv[0] 也换成同目录的
+            // `proot` 别名（见 [ProotCommand.launchArgs]）。
         }
     }
 
     /**
-     * proot 的 loader 路径（随 APK 分发的 `libproot-loader.so`）。
+     * 把 loader 解压到 `filesDir/proot/bin/proot-loader`，并给 proot 建好别名。
      *
-     * 返回 null 表示包里没有 —— 此时不设 `PROOT_LOADER`，让 proot 走它自己的
-     * 默认查找（在 Termux 环境下仍然可用，只是本 App 里会失败）。
-     * 用 `?.let` 而不是硬塞一个不存在的路径：塞错的路径会让 proot 报
-     * `loader was not found`，与「根本没设」是两种不同的排错线索。
+     * ## 为什么不能直接用 `nativeLibraryDir/libproot-loader.so`（2026-11-01 修）
+     *
+     * 这是「`PROOT_LOADER` 设了却依然秒退」的真因，两层：
+     *
+     * 1. **名字**：proot 找 loader 时认的是运行名 `proot-loader`。
+     *    我们打进 APK 的只能叫 `libproot-loader.so`（Android 只收 `lib*.so`），
+     *    于是即便 `PROOT_LOADER` 指过去，proot 也会先去开一个不存在的兄弟文件。
+     * 2. **目录**：loader 与 proot 的相对位置由 proot 拿 `/proc/self/exe` 的目录推导，
+     *    而那个值恒为 `.../lib/arm64/libproot.so`。所以要反过来：
+     *    把 proot 也搬进一个我们说了算的目录。
+     *
+     * ## 为什么不用符号链接指回 nativeLibraryDir
+     *
+     * Android 10+ 的 W^X 拒绝从应用私有目录执行代码，符号链接会解析到
+     * `nativeLibraryDir` 里的真实文件 —— 这一点上它本来可行；但
+     * `/proc/self/exe` 同样会解析成真实文件，**目录推导又回到原处**，等于白做。
+     * 所以必须真把文件放进 `filesDir`。
+     *
+     * 于是复制两份：
+     *  - `proot-loader`（运行名）—— proot 按目录推导时命中的就是它；
+     *  - `proot`（别名）—— 让 proot 以这个路径作 argv[0] 起跑，
+     *    它的「目录」于是变成 `filesDir/proot/bin/`，上一条才生效。
+     *
+     * ## 失败即降级，绝不抛异常
+     *
+     * 有的设备/ROM 上 `filesDir` 里可能放不了可执行文件。那种情况返回 null，
+     * [ProotCommand.launchArgs] 会退回旧行为（直接用 `nativeLibraryDir/libproot.so`）——
+     * 不会因为「修一个坑」制造出新的坑。
+     *
+     * 每次 exec 都会走到这里，所以只在副本缺失/大小不符/比源文件旧时才重拷。
+     *
+     * @return 可用的 loader 路径；解压或改名任一步失败返回 null
      */
-    private fun prootLoaderFile(): File? {
-        val nativeDir = context.applicationInfo.nativeLibraryDir
-        return listOf("libproot-loader.so", "libproot_loader.so")
-            .map { File(nativeDir, it) }
-            .firstOrNull { it.isFile }
+    private fun stageProotLoader(): File? = ProotLoaderStaging.stage(context)
+
+    private companion object {
+        /** 候选 argv 最多试几个（见 [ProotCommand.launchArgs]）。 */
+        const val PROOT_ARGV_FALLBACK_LIMIT: Int = 2
     }
 }
 /**
@@ -1433,6 +1677,24 @@ private class ProotSession(
 
     override val isAlive: Boolean get() = process.isAlive
 
+    /**
+     * 是否已经有人要求停掉这个会话。
+     *
+     * ## 为什么需要它（2026-11-01 修「会话读取结束：read interrupted by close()
+     * on another thread」）
+     *
+     * 泵线程阻塞在 `read()` 上时，`stop()` 在**另一个线程**把进程的 stdout 关掉，
+     * JDK 会抛 `IOException("read interrupted by close() on another thread")`。
+     * 旧实现把它原样 `onLine("会话读取结束：…")` 报给界面 —— 于是用户
+     * **自己点「停止容器」**时，屏幕上会多出一条看着像故障的红字，
+     * 而容器其实是被正常停掉的。
+     *
+     * 判据只能是「是不是我们主动停的」：真正的 IO 故障（设备异常、fd 损坏）
+     * 仍然要如实报出来，不能一并吞掉。
+     */
+    @Volatile
+    private var stopping: Boolean = false
+
     fun startPump() {
         Thread {
             runCatching {
@@ -1443,7 +1705,12 @@ private class ProotSession(
                     }
                 }
             }.onFailure { error ->
-                onLine("会话读取结束：${error.message ?: error::class.simpleName}")
+                if (stopping) {
+                    // 主动停止：读被打断是预期结果，静默收尾。
+                    Log.d("PraxisProot", "会话已按请求停止（读取被打断属正常）")
+                } else {
+                    onLine("会话读取结束：${error.message ?: error::class.simpleName}")
+                }
             }
         }.apply {
             isDaemon = true
@@ -1452,6 +1719,9 @@ private class ProotSession(
     }
 
     override fun stop() {
+        // ★ 必须抢在关流之前置位：泵线程被唤醒的时机不受我们控制，
+        //   晚一步就会把「主动停止」误报成故障。
+        stopping = true
         runCatching {
             // 先温和终止再强杀：proot 需要一点时间回收它跟踪的子进程
             // （`--kill-on-exit` 靠这个窗口生效）。
