@@ -35,9 +35,17 @@ Praxis（中文「思行」）是一个 Android AI 助手客户端，包名 `dev
 
 ```bash
 python3 tools/check_kt_files.py <改动的 .kt 文件>     # 括号/KDoc/@Test 结构校验
+python3 tools/check_kt_balance.py                     # 重点名单：容器层 + 高频文件
+python3 tools/check_nested_comments.py                # 注释里的 /* 会开启嵌套注释
+python3 tools/test_kt_lexer.py                        # 改过 tools/kt_lexer.py 才需要
 python3 -m py_compile tools/*.py                      # 改过 Python 才需要
 python3 -c "import yaml;yaml.safe_load(open('.github/workflows/build.yml'))"   # 改过 workflow
 ```
+
+这几个 `.kt` 校验工具共用 `tools/kt_lexer.py` 的剥离实现，改剥离逻辑时一起过。
+历史上 `check_kt_files.py` 和 `check_kt_balance.py` 各写了一套，于是字符字面量
+与三引号原始字符串的误判在两边同时存在、也同时没人发现 —— 6 个文件报出虚假的
+括号不平衡，把真正该看的基线问题盖住了。回归用例见 `tools/test_kt_lexer.py`。
 
 ### 1.2 「构建禁令」是一条真实存在的临时状态
 
