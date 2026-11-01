@@ -587,6 +587,24 @@ fun PraxisApp(
                             sessionId = newId
                             sidebarOpen = false
                         },
+                        // 删掉当前会话：与 `ChatSessionsPage` 走**同一套**兜底逻辑
+                        //（切到列表第一条；一条不剩就新建并先落库）。
+                        //
+                        // 两个入口各修一半是最坏的结果 —— 用户在抽屉里删掉当前会话能
+                        // 正常切走，在会话列表页删却停在空白页，会被当成「有时能删有时不能」。
+                        onDeleteCurrentSession = { deletedId ->
+                            coroutineScope.launch {
+                                val remain = runCatching {
+                                    chatPersistence.listSessions()
+                                }.getOrDefault(emptyList())
+                                val nextId = remain.firstOrNull { it.id != deletedId }?.id
+                                    ?: ("s" + System.currentTimeMillis()).also { fresh ->
+                                        runCatching { chatPersistence.ensureSession(fresh, "新对话") }
+                                    }
+                                sessionId = nextId
+                                sidebarOpen = false
+                            }
+                        },
                     )
                 },
                 chatTab = {
@@ -759,6 +777,38 @@ fun PraxisApp(
                     // popNow 而不是 pop：这是「程序语义上退回」，不该被
                     // 100ms 防抖吞掉（用户点完条目立刻按返回是合法操作）。
                     navigator.popNow()
+                },
+                /**
+                 * 删掉了当前会话 → 必须换一个**真实存在**的会话，否则界面悬空。
+                 *
+                 * ## 这是「当前对话无法删除」的另一半根因（2026-11-01）
+                 *
+                 * 删除本身一直是生效的（`DELETE` 提交了），但 `sessionId` 是
+                 * 本文件里的 `rememberSaveable`，页面自己改不动它。于是旧实现在
+                 * 删完当前会话后：
+                 *
+                 *   - 对话页仍然 `viewModel(key = 已删除的 id)`，一条消息都读不到；
+                 *   - `LaunchedEffect(sessionId)` 还把这个死 id 写进
+                 *     `lastChatSessionId`，冷启动继续打开它；
+                 *   - 用户重新进列表时那条会话又「不见了」，可它明明刚才还在。
+                 *
+                 * 所以这里删完先**重读一次库**，再切到列表里的第一条；
+                 * 一个都不剩就新建一个空会话（与右上角「新建」完全同一套动作，
+                 * 包括 `ensureSession` 先落库 —— 只换 id 不写库的话新会话在列表里
+                 * 压根不存在）。
+                 */
+                onDeleteCurrentSession = { deletedId ->
+                    coroutineScope.launch {
+                        val remain = runCatching {
+                            chatPersistence.listSessions()
+                        }.getOrDefault(emptyList())
+                        val nextId = remain.firstOrNull { it.id != deletedId }?.id
+                            ?: ("s" + System.currentTimeMillis()).also { fresh ->
+                                runCatching { chatPersistence.ensureSession(fresh, "新对话") }
+                            }
+                        sessionId = nextId
+                        navigator.popNow()
+                    }
                 },
             )
 

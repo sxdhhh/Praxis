@@ -747,44 +747,64 @@ class WiringGuardTest {
 
 
     /**
-     * 滚动条与消息导航浮条不许抢同一条竖轴。
+     * 回底按钮与消息导航浮条不许抢同一条竖轴，且轨道不许回来。
      *
      * ## 它防的是什么（2026-10-31）
      *
      * 这俩组件原本都用 `Alignment.CenterEnd`，靠
      * `ScrollThumbRail(... padding(bottom = 96.dp))` 往下挪来错开。
-     * 96 是拍出来的数：屏幕一矮、或导航胶囊展开，回底按钮就压在
+     * 96dp 是拍出来的数：屏幕一矮、或导航胶囊展开，回底按钮就压在
      * 胶囊上，底部还露出半截半透明残影 —— 截图里那根「诡异的滑条」。
      *
-     * 正确形态是：导航浮条留在右缘垂直中点（它的语义位置就是
-     * 「我在整段对话的哪里」），滚动条贴右下角（它属于底部操作区）。
-     * 两者物理上不再可能重叠，也不需要任何魔法 padding。
+     * 于是 10-31 那版把整块贴到 `BottomEnd`。
      *
-     * 这条断言盯的就是那个 `padding(bottom = 96.dp)` 不许回来。
+     * ## 2026-11-01 为什么断言又改了
+     *
+     * 用户拿标注截图要求：**删掉右侧那根带两个圆点的竖直进度轨道**，
+     * 并把圆形回底按钮**上移**到轨道中段偏上的位置。
+     *
+     * 删轨道之后「贴右下角」这条断言的依据也就没了 —— 它当初的存在
+     * 理由只是「让轨道 + 按钮这一整列不和导航浮条共用右缘中点」。
+     * 现在只剩一个 30dp 的圆按钮，位置改由「右缘居中 + 向下偏移父容器
+     * 高度的 12%」决定，按钮中心落在 62%，天然离开导航浮条所在的 50%。
+     *
+     * 所以这条护栏改成守**三件今天仍然成立的事**：
+     *  1. 组件里不许再有轨道（`RAIL_WIDTH` / `DOT_SIZE` / 圆点包围盒）；
+     *  2. 按钮位置必须是**相对容器比例的偏移**，不许写死 dp
+     *     （写死 dp 就是「设备专属硬编码」，矮屏会压输入栏）；
+     *  3. 那个 96dp 的拍脑袋错位值不许回来。
      */
     @Test
     fun scrollRail_doesNotShareAxisWithNavigator() {
         val screen = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatScreen.kt")
-        val railCall = screen.substringAfter("ScrollThumbRail(").substringBefore(")")
+        // 取调用点之后的一整段（按行）而不是 `substringBefore(")")`：
+        // `Modifier.offset(y = maxHeight * 0.12f)` 里那个 `)` 是个合法的
+        // 实参收尾，按第一个 `)` 截会把断言要检查的字符串整段截掉。
+        val railCall = screen.substringAfter("ScrollThumbRail(").lines().take(6).joinToString("\n")
         assertTrue(
-            "滚动条必须贴右下角（BottomEnd），不能与导航浮条同用 CenterEnd",
-            railCall.contains("Alignment.BottomEnd"),
+            "回底按钮必须用 offset(y = maxHeight * …) 相对容器比例下移，" +
+                "不许写死 dp 高度（矮屏会压输入栏、高屏会偏高）",
+            railCall.contains("offset(y = maxHeight * 0.12f)"),
         )
         assertTrue(
             "不许再用 padding(bottom = 96.dp) 这种拍出来的错位值",
             !railCall.contains("padding(bottom = 96.dp)"),
         )
+        assertTrue(
+            "按钮必须由 BoxWithConstraints 提供 maxHeight 才能算比例",
+            screen.contains("androidx.compose.foundation.layout.BoxWithConstraints"),
+        )
 
-        // 组件侧：轨道与圆点必须尺寸分明，否则圆点会嵌进轨道里像一块脏点。
+        // 组件侧：进度轨道已于 2026-11-01 按用户要求删除，不许再长回来。
         val rail = read("ui/design/src/main/java/dev/praxis/ui/design/component/ScrollThumbRail.kt")
         assertTrue(
-            "圆点必须比轨道宽（否则分辨不出当前位置）",
-            rail.contains("private val RAIL_WIDTH = 4.dp") &&
-                rail.contains("private val DOT_SIZE = 8.dp"),
+            "进度轨道（RAIL_WIDTH / DOT_SIZE）已于 2026-11-01 删除，" +
+                "当前只保留圆形回底按钮；要加回来先确认用户需求变了",
+            !rail.contains("RAIL_WIDTH") && !rail.contains("DOT_SIZE"),
         )
         assertTrue(
-            "轨道高度必须随可用空间自适应，不能写死 96.dp",
-            rail.contains("constraints.hasBoundedHeight"),
+            "回底按钮必须仍然可用：scrollToItem 到底（不能用会和弹簧打架的动画版）",
+            rail.contains("lazyState.scrollToItem(last)"),
         )
     }
     /**

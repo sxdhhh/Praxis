@@ -78,6 +78,19 @@ fun ChatSidebar(
     chatPersistence: ChatPersistence,
     currentSessionId: String,
     onOpenSession: (String) -> Unit,
+    /**
+     * 删掉了**当前会话**之后切到哪个会话。
+     *
+     * ## 为什么侧边栏和会话列表面板都要这个回调（2026-11-01）
+     *
+     * 两处入口（本抽屉 / `ChatSessionsPage`）各自独立删除，但 `sessionId`
+     * 的唯一持有者是 `PraxisApp`。只在其中一处修，用户换个入口删当前会话
+     * 依旧会把界面留在一条已经不存在的会话上 —— 缺陷表现会随入口不同而
+     * 时好时坏，那种「有时能删有时不能」最难排查。
+     *
+     * null = 上层不给兜底：此时**不删当前会话**（宁可不删，也不悬空）。
+     */
+    onDeleteCurrentSession: ((deletedSessionId: String) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
 
@@ -267,10 +280,25 @@ fun ChatSidebar(
                             visible = pendingDelete == session.id,
                             text = "确认删除「${session.title.ifBlank { "未命名对话" }}」",
                             onClick = {
-                                scope.launch {
-                                    runCatching { chatPersistence.deleteSession(session.id) }
-                                    pendingDelete = null
-                                    reloadTick++
+                                // ## 删的就是当前会话时，必须交给上层切走（2026-11-01）
+                                //
+                                // 旧实现只做「删库 + 重读」。删别的会话没问题，
+                                // 删**正打开着的**这一个时：行从抽屉里消失，而
+                                // `sessionId` 仍指着它 —— 对话页变成一条空会话，
+                                // 发消息写库失败（外键无对应 sessions 行）。
+                                // 用户那句话就是「当前对话删不掉」。
+                                val deletingCurrent = session.id == currentSessionId
+                                pendingDelete = null
+                                if (deletingCurrent && onDeleteCurrentSession == null) {
+                                    // 没有兜底会话可切：什么都不做，先切走再删。
+                                } else {
+                                    scope.launch {
+                                        runCatching { chatPersistence.deleteSession(session.id) }
+                                        reloadTick++
+                                        if (deletingCurrent) {
+                                            onDeleteCurrentSession?.invoke(session.id)
+                                        }
+                                    }
                                 }
                             },
                         )
