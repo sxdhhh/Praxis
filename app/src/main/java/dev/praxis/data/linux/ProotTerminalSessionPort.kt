@@ -336,7 +336,21 @@ class ProotTerminalSessionPort(
         //    漏了这一步，每次关标签页都会在界面上留下一条看着像故障的红字。
         // 2. 再发 exit：交互 shell 会自己收尾，比直接 kill 干净。
         // 3. 最后 destroy：关 master fd（内核据此给子进程发 SIGHUP）+ 兜底信号。
-        closing.add(sessionId)
+        // ## 只在「泵线程还活着」时才登记（2026-11-02 修一个内存泄漏）
+        //
+        // 这张表的清理者是泵线程自己（它收尾时 `closing.remove(id)`）。
+        // 但有一种情形它永远不会清：**会话早已自己结束、用户之后才关标签页**。
+        //
+        // ```
+        // 用户建会话 -> 打 exit -> shell 退出 -> 泵线程跑完 finally（remove）
+        //            -> 之后点标签页的 × -> close() 走到这里 -> add
+        //            -> 没人再 remove 了（泵线程已经结束）
+        // ```
+        //
+        // 每这么走一次就永久多一个 id。用户一天开关上百次标签页，集合会一直涨。
+        // 判据用 `process.isAlive`：进程已死说明泵线程必然已经收尾过，
+        // 此刻没有「正在读的线程」需要被认定为预期关闭。
+        if (item.process.isAlive) closing.add(sessionId)
         try {
             runCatching { item.writer.write("exit\n"); item.writer.flush() }
             runCatching { item.process.waitFor(600, TimeUnit.MILLISECONDS) }
