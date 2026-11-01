@@ -37,6 +37,7 @@ Praxis（中文「思行」）是一个 Android AI 助手客户端，包名 `dev
 python3 tools/check_kt_files.py <改动的 .kt 文件>     # 括号/KDoc/@Test 结构校验
 python3 tools/check_kt_balance.py                     # 重点名单：容器层 + 高频文件
 python3 tools/check_nested_comments.py                # 注释里的 /* 会开启嵌套注释
+python3 tools/check_kt_literals.py <改动的 .kt 文件>  # 字面量未闭合（括号平衡查不出）
 python3 tools/test_kt_lexer.py                        # 改过 tools/kt_lexer.py 才需要
 python3 -m py_compile tools/*.py                      # 改过 Python 才需要
 python3 -c "import yaml;yaml.safe_load(open('.github/workflows/build.yml'))"   # 改过 workflow
@@ -46,6 +47,10 @@ python3 -c "import yaml;yaml.safe_load(open('.github/workflows/build.yml'))"   #
 历史上 `check_kt_files.py` 和 `check_kt_balance.py` 各写了一套，于是字符字面量
 与三引号原始字符串的误判在两边同时存在、也同时没人发现 —— 6 个文件报出虚假的
 括号不平衡，把真正该看的基线问题盖住了。回归用例见 `tools/test_kt_lexer.py`。
+
+`check_kt_literals.py` 是**补充**防线，专查字符串未闭合（`"` / `'` / `"""` 数量不配对），
+这类错误括号是平衡的、`check_kt_files.py` 抓不到。但它查不出「引号数量正确、
+内容却被误切分」的写法 —— 那仍然要靠自己写内层引号时用反引号或转义。
 
 ### 1.2 「构建禁令」是一条真实存在的临时状态
 
@@ -351,9 +356,28 @@ ALL OK
 **为什么选 NetHunter 而不是官方 Kali**：官方 `cdimage.kali.org` 的 arm64 是安装器
 （installer），需要分区+grub，proot 根本跑不通。NetHunter rootfs 本身就是可直接 `tar -x` 的根文件系统。
 
-**扩展新发行版时要注意**：`DistroFamily` 目前只有 `Debian("apt")` 一个成员，
-`FtpServerScript.installScript` 和 `RemoteAccess` 里的 `apt-get` 是**硬编码**的。
-要加 Alpine（apk）/ Arch（pacman）必须先让这两处走 `DistroFamily` 分支，否则装上就跑不起来。
+**扩展新发行版时要注意**：`DistroFamily` 目前只有 `Debian("apt")` 一个成员。
+
+而且它**定义了却没被使用**——全仓只有 4 处引用，全是 `LinuxDistro` 里的声明与赋值
+（L51 字段、L94 / L136 填值、L152 定义），**没有任何一处拿它做分支**。
+这就是 README「接线护栏」警告的那种形态：枚举在、设置页可见、编译通过，
+但下游没人读它。
+
+`apt` / `apt-get` 实际硬编码在四处（加 Alpine/Arch 前必须全部改成分支）：
+
+| 文件 | 行 | 内容 |
+|---|---|---|
+| `core/linux/FtpServer.kt` | L197–198 | `apt-get update` + `apt-get install vsftpd` |
+| `core/linux/RemoteAccess.kt` | L100–101 | `apt-get update` + `apt-get install openssh-server` |
+| `core/linux/RemoteAccess.kt` | L274 | `apt-get install curl ca-certificates tar` |
+| `core/linux/ProotCommand.kt` | L535 / L545 / L647 | 换源脚本里的 `apt-get update`（共三处） |
+
+还有一处容易漏：`ProotCommand.kt` L461–L464 用 `filterNot { it.trim() == "apt-get update" }`
+**按字符串字面量**过滤掉切源脚本末尾的 update —— 换成 `apk update` 后这个过滤会失效，
+表现为「切完源仍多跑一次 update」。
+
+`TerminalSession.kt` L120 还有一份危险命令名单含 `"apt", "apt-get", "dpkg"`，
+那是**安全判定**用，不是安装路径，加发行版时也要一并扩。
 
 ---
 
@@ -392,11 +416,11 @@ ALL OK
 
 | 项 | 状态 |
 |---|---|
-| 多发行版支持 | 只有 Ubuntu + Kali，两者都是 apt 系 |
-| `ChatSettingsBar` 两个 Popup | 仍硬切，未做动画 |
-| 环境页容器与终端 PTY | 两套独立会话表，未统一 |
-| release 包签名 | 未签名，只有 debug 可用 |
-| 路线 A（wasmJs 浏览器预览） | 未启动，目前只有 Paparazzi 走 CI |
+| 多发行版支持 | 只有 Ubuntu + Kali，两者都是 apt 系。`DistroFamily` 只有一个成员，`FtpServerScript.installScript` 与 `RemoteAccess` 里的 `apt-get` 是硬编码的——加 Alpine/Arch 前要先让这两处走 `DistroFamily` 分支（见 5.5） |
+| `ChatSettingsBar` 两个 Popup | 仍硬切，未做动画。调用点在 L240 与 L760 |
+| 环境页容器与终端 PTY | 两套独立会话表：`ProotEnvPort` 与 `ProotTerminalSessionPort` 各有一个 `sessions`，未统一 |
+| release 包签名 | **已实现，不是缺口。** `app/build.gradle.kts` L112–L161 读 `PRAXIS_KEYSTORE`（local.properties）+ `PRAXIS_STORE_PASS` / `PRAXIS_KEY_PASS` / `PRAXIS_KEY_ALIAS`（环境变量）建签名配置；**缺料时刻意不建**，release 产物保持未签名，让漏配在安装阶段暴露而不是产出看着正常的包。**待办只是提供一个 keystore**（仓库不放） |
+| 路线 A（wasmJs 浏览器预览） | 未启动，源码里没有 wasmJs source set，目前只有 Paparazzi 走 CI |
 | FTP 的 chroot 隔离 | 已关闭（见 5.2），无替代隔离方案 |
 
 ---

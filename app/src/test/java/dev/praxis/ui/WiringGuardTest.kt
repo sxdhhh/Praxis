@@ -787,4 +787,81 @@ class WiringGuardTest {
             rail.contains("constraints.hasBoundedHeight"),
         )
     }
+    /**
+     * `DistroFamily` 必须真的被读，且 apt 硬编码必须走它。
+     *
+     * ## 为什么加这条（2026-11-01）
+     *
+     * `DistroFamily` 枚举 2026-10 就定义了，还带了个 `packageManager` 字段，
+     * 注释写着「保留枚举是为了不把 apt 写死」。但全仓搜下来只有 4 处引用，
+     * 全是 `LinuxDistro` 内部的声明与赋值，**没有任何一处拿它做分支**。
+     * 而 `apt-get` 实际硬编码在四个地方。
+     *
+     * 这就是 README「接线护栏」说的那种形态：枚举在、编译通过、运行时也不报错，
+     * 只是加发行版时才发现根本没人读它。和当年 `FunctionSlot.CHAT` 一模一样。
+     *
+     * ## 两段式设计
+     *
+     * 现在还没接分支，直接断言「四处都必须用 packageManager」会立刻变红、没法提交。
+     * 所以拆成两段：
+     *
+     *  - 第一段（现在就成立）：`DistroFamily` 必须带 `packageManager`，
+     *    且 `LinuxDistro` 的每个成员都必须显式填 `family`。防止有人删了枚举、
+     *    或新增发行版时忘了填族。
+     *
+     *  - 第二段（接线后才成立）：只要 `DistroFamily` 出现第二种成员
+     *    （说明开始做多发行版了），四处 apt 硬编码就必须已经改成分支，
+     *    否则立刻变红。这是「接线时强制同步」的那道闸。
+     *
+     * 加新发行版的人会先让第二段变红，然后被迫去改那四处 —— 正是想要的效果。
+     */
+    @Test
+    fun distroFamily_isActuallyConsumedByInstallScripts() {
+        val distro = read("core/linux/src/main/kotlin/dev/praxis/core/linux/LinuxDistro.kt")
+
+        // ── 第一段：枚举与成员的完整性 ──
+        assertTrue(
+            "DistroFamily 必须保留 packageManager 字段（否则等于把 apt 写死）",
+            distro.contains("enum class DistroFamily(val packageManager: String)"),
+        )
+        assertTrue(
+            "LinuxDistro 的每个成员都必须显式填 family",
+            distro.contains("family = DistroFamily."),
+        )
+
+        // ── 第二段：一旦出现第二种发行版族，四处硬编码必须已改成分支 ──
+        val enumBody = distro.substringAfter("enum class DistroFamily").substringBefore("}")
+        // 用普通字符串 + 转义：原始字符串以 `\(` 收尾时贴近 `"""` 会被当成转义序列，
+        // 是最容易踩的三引号坑之一。
+        val memberPattern = Regex("^\\s{4}(\\w+)\\(", RegexOption.MULTILINE)
+        val families = memberPattern
+            .findAll(enumBody)
+            .map { it.groupValues[1] }
+            .toSet()
+        if (families.size <= 1) return // 还没开始做多发行版，第二段不生效
+
+        val aptSites = listOf(
+            "core/linux/src/main/kotlin/dev/praxis/core/linux/FtpServer.kt" to "vsftpd 安装",
+            "core/linux/src/main/kotlin/dev/praxis/core/linux/RemoteAccess.kt" to "openssh-server 安装",
+            "core/linux/src/main/kotlin/dev/praxis/core/linux/ProotCommand.kt" to "换源后的 update",
+        )
+        for ((path, what) in aptSites) {
+            val text = read(path)
+            assertTrue(
+                "新增了 " + families.size + " 个发行版族，但 " + path + " 里的「" + what +
+                    "」仍写着 apt-get。必须改成用 DistroFamily.packageManager 拼命令，" +
+                    "否则新发行版装上就跑不起来。",
+                !text.contains("apt-get"),
+            )
+        }
+
+        // 这一处按字符串字面量过滤，换成 apk/pacman 后会静默失效
+        assertTrue(
+            "ProotCommand 里的 filterNot 用 `apt-get update` 字面量过滤，" +
+                "多发行版下必须改成按 packageManager 判断",
+            !read("core/linux/src/main/kotlin/dev/praxis/core/linux/ProotCommand.kt")
+                .contains("it.trim() == \"apt-get update\""),
+        )
+    }
 }
+
