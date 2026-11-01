@@ -3,12 +3,18 @@ package dev.praxis.feature.chat
 import dev.praxis.core.ai.AiProvider
 import dev.praxis.core.ai.AiStreamEvent
 import dev.praxis.core.ai.ChatRequest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -35,6 +41,25 @@ import org.junit.Test
  * 断言 [ChatTitleGenerator] 真的被调用、且结果真的写回了会话标题。
  */
 class ChatTitleTriggerTest {
+
+    // ## 必须换掉 Main（2026-11-01 修）
+    //
+    // `ChatViewModel` 在构造时就访问 `viewModelScope`，而它跑在
+    // `Dispatchers.Main.immediate` 上 —— 纯 JVM 单测里没有 Android Looper。
+    // 同时 `persistScope` 的调度器要注入同一个测试调度器，否则
+    // `advanceUntilIdle()` 推不动恢复 / 落盘 / 标题生成，断言会在协程
+    // 跑完之前执行，得到「生成器没被调用」这类假失败。
+    private val testDispatcher = UnconfinedTestDispatcher()
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(testDispatcher)
+    }
+
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
 
     /** 只吐一个 Done 的空回答：本测试不关心聊天内容，只关心标题副作用。 */
     private class SilentProvider : AiProvider {
@@ -103,6 +128,7 @@ class ChatTitleTriggerTest {
                 seen += userText
                 "模型总结的标题"
             },
+            persistDispatcher = testDispatcher,
         )
 
         vm.onInputChange("帮我把这个报错查一下")
@@ -134,6 +160,7 @@ class ChatTitleTriggerTest {
                 calls++
                 "AI 标题 " + calls
             },
+            persistDispatcher = testDispatcher,
         )
 
         vm.onInputChange("第一句")
@@ -157,6 +184,7 @@ class ChatTitleTriggerTest {
             chatRepository = repo,
             sessionId = "s3",
             titleGenerator = ChatTitleGenerator { error("网络断了") },
+            persistDispatcher = testDispatcher,
         )
 
         vm.onInputChange("  多行 输入\n带换行  ")

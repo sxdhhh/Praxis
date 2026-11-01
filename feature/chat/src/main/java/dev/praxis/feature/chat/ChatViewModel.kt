@@ -117,6 +117,21 @@ class ChatViewModel(
      * 不会因为缺少网络依赖而让发送失败。
      */
     private val titleGenerator: ChatTitleGenerator? = null,
+    /**
+     * 落盘 / 收尾 / 标题生成所跑的调度器。
+     *
+     * ## 为什么要做成参数（2026-11-01）
+     *
+     * 原来写死 `Dispatchers.IO`。生产上没问题，但**单测完全控制不了**：
+     * `persistScope` 里的恢复 / 落盘 / 标题生成都跑在真实线程池上，
+     * 而 `runTest` 的 `advanceUntilIdle()` 只推进测试调度器 ——
+     * 断言会在这堆协程跑完之前执行，于是「标题生成没被调用」「兜底标题是 null」
+     * 这类假失败全是这个原因，而不是被测逻辑真的错了。
+     *
+     * 默认仍是 `Dispatchers.IO`（行为不变），单测注入测试调度器即可确定性推进。
+     */
+    private val persistDispatcher: kotlinx.coroutines.CoroutineDispatcher =
+        kotlinx.coroutines.Dispatchers.IO,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatState())
@@ -295,7 +310,7 @@ class ChatViewModel(
 
     /** 落盘用协程作用域（与 viewModelScope 分开，可单独取消）。 */
     private val persistScope = kotlinx.coroutines.CoroutineScope(
-        viewModelScope.coroutineContext + kotlinx.coroutines.Dispatchers.IO,
+        viewModelScope.coroutineContext + persistDispatcher,
     )
 
     /** 快捷落盘：repo 为空时直接跳过，保证「不落盘也能用」。 */
@@ -323,6 +338,22 @@ class ChatViewModel(
      * 所以另立一个标志：恢复协程的 `finally` 里置 true。
      */
     private var restoreAttempted = false
+
+    /**
+     * 恢复还没走完时，用户按下发送的那一次「待发」标记。
+     *
+     * ## 为什么是排队重发，而不是直接丢弃（2026-11-01 修正）
+     *
+     * 上一版在 [send] 开头遇到「恢复未完成」时直接 `return`，只弹一句
+     * 「正在加载历史，请稍后再发」。问题是**用户输入的那句话等于白打了** ——
+     * 他必须自己再点一次发送。恢复只阻塞几十毫秒，用户往往看不见提示、
+     * 只觉得「按了没反应」。
+     *
+     * 改成：记下「有一次待发」，等恢复的 `finally` 跑完自动重发一次。
+     * 输入框内容本来就没清，重发用的就是用户原话，语义与「他再点一次」等价，
+     * 但不需要他真的再点。
+     */
+    private var pendingSendAfterRestore = false
 
     /**
      * 是否正在恢复历史。
@@ -622,6 +653,12 @@ class ChatViewModel(
                 // 非空数据时才为 true，而这里要的是「流程走完了」—— 空会话
                 // 也必须放行后续的 send()，否则新对话的第一句永远等不到标题。
                 restoreAttempted = true
+                // 恢复期间用户按过发送：现在放行，替他把那次发送补上。
+                // 标志先清再调 send()，避免重入时又被排队一次。
+                if (pendingSendAfterRestore) {
+                    pendingSendAfterRestore = false
+                    send()
+                }
             }
         }
     }
@@ -920,8 +957,10 @@ class ChatViewModel(
         // 的 KDoc 里那条不变式），后果比让用户重点一次发送严重得多。
         // 恢复通常只阻塞几十毫秒，用户几乎察觉不到。
         if (!restoreAttempted && chatRepository != null) {
+            // 排队等恢复完成后自动重发，**不丢用户这次输入**（见 pendingSendAfterRestore 的 KDoc）。
+            pendingSendAfterRestore = true
+            _state.update { it.copy(notice = "正在加载历史，稍后自动发送") }
             restoreIfNeeded()
-            _state.update { it.copy(notice = "正在加载历史，请稍后再发") }
             return
         }
 

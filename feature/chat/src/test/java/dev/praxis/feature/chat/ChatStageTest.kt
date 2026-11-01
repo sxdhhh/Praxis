@@ -242,6 +242,16 @@ class ChatStageTest {
             provider = HangingProvider(started),
             model = "test",
             chatRepository = persistence,
+            // ## 为什么要传调度器（2026-11-01 修）
+            //
+            // `send()` 在「恢复没走完」时会先把这次发送**排队**，等恢复的
+            // finally 里自动补发。而恢复跑在 `persistScope` 上 —— 默认是真实
+            // `Dispatchers.IO`，`advanceUntilIdle()` 推不动它，于是恢复永远
+            // 不完成、补发永远不发生、`HangingProvider` 也就永远不启动，
+            // 本条测试卡在 `started.await()` 一分钟才超时。
+            //
+            // 换成测试调度器后，恢复与补发都在 `advanceUntilIdle()` 里走完。
+            persistDispatcher = testDispatcher,
         )
 
         vm.onInputChange("跑一个长任务")
