@@ -99,4 +99,55 @@ class HardLinkParseTest {
         val line = "-rw-r--r-- root/root 0 2024-04-01 12:00 ./a.txt link to "
         assertNull(ProotEnvPort.parseHardLinkLine(line))
     }
+
+    // ── toybox 格式（2026-11-02 在模拟器实测到的真实输出）────────────
+
+    /**
+     * Android 11 的 toybox 0.8.3 用 `-> ` 而不是 ` link to `。
+     *
+     * ## 这是本解析器最关键的一条
+     *
+     * 只认 ` link to ` 的话，在这类设备上**一条硬链接都认不出来** ——
+     * 排除静默失效，tar 继续报 `can't link ... Permission denied`，
+     * 而错误信息完全指不到「你的 tar 措辞我没认出来」。
+     *
+     * 下面的输入是在 API 30 模拟器上 `toybox tar -tvf` 的**逐字输出**。
+     */
+    @Test
+    fun `toybox 的箭头格式也认作硬链接`() {
+        val line = "-rw-rw-rw- root/root         0  2026-11-01 20:28 ./usr/bin/gunzip -> ./usr/bin/uncompress"
+        val e = ProotEnvPort.parseHardLinkLine(line)
+        assertEquals("./usr/bin/gunzip", e?.linkName)
+        assertEquals("./usr/bin/uncompress", e?.targetName)
+    }
+
+    /**
+     * 符号链接同样是 `-> `，但行首是 `l` —— 不能当成硬链接。
+     *
+     * 误判的后果：那个符号链接被 `--exclude` 掉，解压后凭空少一个文件。
+     * 而符号链接在 Android 上本来就能正常创建，完全不需要排除。
+     */
+    @Test
+    fun `toybox 的符号链接不算硬链接`() {
+        val line = "lrwxrwxrwx root/root         0  2026-11-01 20:28 ./usr/bin/sh -> dash"
+        assertNull(ProotEnvPort.parseHardLinkLine(line))
+    }
+
+    /** 两种格式的目录条目都不能认成硬链接。 */
+    @Test
+    fun `toybox 的目录条目不算硬链接`() {
+        val line = "drwxrwxrwx root/root         0  2026-11-01 20:28 ./usr/bin/"
+        assertNull(ProotEnvPort.parseHardLinkLine(line))
+    }
+
+    /**
+     * 两种格式同时存在时各自都能解析（GNU 与 toybox 混排的极端情况）。
+     */
+    @Test
+    fun `两种格式都能解析`() {
+        val gnu = "-rw-r--r-- root/root  0 2024-04-01 12:00 ./a link to ./b"
+        val toy = "-rw-r--r-- root/root  0 2026-11-01 20:28 ./c -> ./d"
+        assertEquals("./b", ProotEnvPort.parseHardLinkLine(gnu)?.targetName)
+        assertEquals("./d", ProotEnvPort.parseHardLinkLine(toy)?.targetName)
+    }
 }

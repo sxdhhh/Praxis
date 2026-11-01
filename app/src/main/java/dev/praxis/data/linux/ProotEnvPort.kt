@@ -1464,12 +1464,45 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
          * 时间和大小，整段当文件名会让 `--exclude` 一个都匹配不上。
          */
         internal fun parseHardLinkLine(line: String): HardLinkEntry? {
-            val marker = " link to "
-            val at = line.indexOf(marker)
-            // at <= 0：要么没有标记，要么标记就在行首（那样左边取不到文件名）。
-            if (at <= 0) return null
-            val linkName = line.substring(0, at).trim().substringAfterLast(' ')
-            val targetName = line.substring(at + marker.length).trim()
+            // ## 两种 tar 实现，两种措辞（2026-11-02 在真机上实测发现）
+            //
+            // GNU tar 写 `name link to target`；toybox 写 `name -> target`。
+            // 而 Android 不同版本的 toybox 措辞也不同 —— 在 Android 11 的
+            // toybox 0.8.3 上实测：
+            //
+            // ```
+            // -rw-rw-rw- root/root  0  2026-11-01 20:28 ./hardlink -> ./realfile
+            // lrwxrwxrwx root/root  0  2026-11-01 20:28 ./symlink  -> realfile
+            // ```
+            //
+            // 只认 ` link to ` 的话，在那种设备上**一条都认不出来** —— 硬链接
+            // 排除静默失效，tar 继续报 `can't link ... Permission denied`，
+            // 而错误信息完全指不到「你的 tar 措辞我没认出来」。
+            //
+            // ## `->` 怎么区分硬链接与符号链接
+            //
+            // 两者都写 `->`，唯一区别是**行首类型字符**：
+            //   `-` = 普通文件（硬链接在 tar 里就是普通文件条目）
+            //   `l` = 符号链接
+            // 符号链接在 Android 上能正常创建，不需要排除；误判成硬链接会让
+            // 那个符号链接被 --exclude 掉、解压后凭空少一个文件。
+            val gnuMarker = " link to "
+            val at = line.indexOf(gnuMarker)
+            if (at > 0) {
+                val linkName = line.substring(0, at).trim().substringAfterLast(' ')
+                val targetName = line.substring(at + gnuMarker.length).trim()
+                if (linkName.isEmpty() || targetName.isEmpty()) return null
+                return HardLinkEntry(linkName, targetName)
+            }
+
+            val arrow = " -> "
+            val arrowAt = line.indexOf(arrow)
+            if (arrowAt <= 0) return null
+            // 只有普通文件条目才可能是硬链接；`l` 开头是符号链接，跳过。
+            val typeChar = line.firstOrNull() ?: return null
+            if (typeChar != '-') return null
+            val linkName = line.substring(0, arrowAt).trim().substringAfterLast(' ')
+            val targetName = line.substring(arrowAt + arrow.length).trim()
             if (linkName.isEmpty() || targetName.isEmpty()) return null
             return HardLinkEntry(linkName, targetName)
         }
