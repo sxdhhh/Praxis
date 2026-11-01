@@ -265,7 +265,19 @@ fun TerminalScreen(
     //  - 点空白 / 点「完成」→ 退出选择态。
     //
     // 不用 rememberSaveable：选择态本来就该在旋转后作废（行列数都变了）。
-    var selection by remember { mutableStateOf<TerminalSelection?>(null) }
+    //
+    // ## key 必须是会话 id（2026-11-02 修）
+    //
+    // 裸 `remember { … }` 会在**切标签页**时保留旧的选区坐标，而 `lines`
+    // 已经换成另一个会话的内容了。后果：
+    //
+    //  - 选区行列指向错误位置，屏幕上高亮的是另一段文字；
+    //  - 更糟的是点「复制」时 `extractSelectionText` 会按旧坐标从**新会话**
+    //    的内容里截一段出来 —— 复制到用户从没选过的文字。
+    //
+    // 与上面 `listState` 用同一个 key：两者都描述「当前这个标签页的视图状态」，
+    // 换标签必须一起作废。
+    var selection by remember(state.active.id) { mutableStateOf<TerminalSelection?>(null) }
     val clipboard = LocalClipboardManager.current
 
     // ## 输入框受控值的 key 为什么是**会话 id** 而不是文本
@@ -1030,9 +1042,23 @@ internal fun extractSelectionText(
     normalized: NormalizedSelection,
 ): String {
     if (lines.isEmpty()) return ""
+    // ## 越界处理：显式判空而不是靠 coerceIn 夹取（2026-11-02 澄清）
+    //
+    // 终端缓冲区会随输出增长**裁剪尾部空行**（见 `linesOf`），行数会变，
+    // 所以选区端点可能落在当前 `lines` 之外。
+    //
+    // 之前的写法是两个端点各自 `coerceIn(0, lines.lastIndex)`。它**碰巧是对的**：
+    // 越界行会让 `columnRangeOn` 返回 null 从而被跳过，结果仍是空串。
+    // 但正确性依赖「下游会过滤」这个间接事实 —— 读代码的人第一眼会以为
+    // 「夹到末尾」意味着「复制出最后一行」。
+    //
+    // 这里改成显式判空：起点已超过最后一行就直接返回空串，语义一眼可见。
+    // 行为与之前一致（已用测试固定），只是把隐含契约写成明说的。
+    if (normalized.startLine > lines.lastIndex) return ""
     val out = StringBuilder()
-    val startLine = normalized.startLine.coerceIn(0, lines.lastIndex)
-    val endLine = normalized.endLine.coerceIn(0, lines.lastIndex)
+    val startLine = normalized.startLine.coerceAtLeast(0)
+    // 终点可以越界：用裁剪区内的最后一行收尾即可（用户确实选到了末尾）。
+    val endLine = normalized.endLine.coerceAtMost(lines.lastIndex)
     for (row in startLine..endLine) {
         val range = normalized.columnRangeOn(row) ?: continue
         val cells = lines[row].cells
