@@ -32,8 +32,6 @@ import java.io.File
  */
 internal object ProotLoaderStaging {
 
-    /** proot 别名的文件名（与 [ProotCommand.launchArgs] 的约定配套）。 */
-    private const val PROOT_ALIAS_NAME: String = "proot"
 
     /**
      * 铺好 loader 与 proot 别名，返回 loader 的路径。
@@ -52,31 +50,27 @@ internal object ProotLoaderStaging {
             .firstOrNull { it.isFile }
             ?: return@runCatching null
 
-        // ## 别名拷的是 **proot 本体**，不是 loader（2026-11-01 修正）
-        //
-        // 第一版这里写的是 `packaged.copyTo(alias)` —— 把 loader 拷成了
-        // `proot`。那样别名实际是个 loader，execve 它必然失败，
-        // 而失败又被外层 runCatching 静默吞掉，表现与「完全没修」一模一样。
-        //
-        // 别名的意义是：让 proot **以 `proot` 这个名字、从可写目录起跑**，
-        // 这样 `/proc/self/exe` 的目录才会是 `filesDir/proot/bin/`，
-        // 而那里正放着 `proot-loader`。所以别名必须拷 libproot.so。
-        val prootBody = File(nativeDir, "libproot.so")
-        if (!prootBody.isFile) return@runCatching null
-
         val binDir = File(context.filesDir, "proot/bin")
         if (!binDir.isDirectory && !binDir.mkdirs()) return@runCatching null
         val loader = File(binDir, ProotCommand.LOADER_RUNTIME_NAME)
-        val alias = File(binDir, PROOT_ALIAS_NAME)
 
         // 新版本 APK 的文件会变，副本必须跟着换。比大小与时间戳，不做哈希：
         // 这是热路径（每次 exec 都会走一遍），十几 KB 级文件的哈希不划算。
         if (stale(loader, packaged)) packaged.copyTo(loader, overwrite = true)
-        if (stale(alias, prootBody)) prootBody.copyTo(alias, overwrite = true)
-        // filesDir 默认不给执行位，而 proot 必须能 execve 这个别名。
-        alias.setExecutable(true, false)
+        // loader 只被 proot `mmap` **读**，不需要可执行位；给上读权限即可。
         loader.setReadable(true, false)
-        if (!alias.isFile) return@runCatching null
+        if (!loader.isFile) return@runCatching null
+        //
+        // ## 这里曾经还拷过一份 `proot` 别名 —— 已删除（2026-11-02）
+        //
+        // 目的本来是让 proot 从可写目录起跑、好在 `/proc/self/exe` 的目录里
+        // 找到 loader。真机报 `Cannot run program ".../files/proot/bin/proot":
+        // error=13, Permission denied` —— **Android 10 起禁止从应用可写数据
+        // 目录执行文件**，`setExecutable` 没用，那是 SELinux 策略不是权限位。
+        //
+        // 结论：可执行的位置只有 `nativeLibraryDir`（只读），loader 留在
+        // `filesDir` 靠 `PROOT_LOADER` 显式指过去就够（loader 只被 mmap 读）。
+        // 详见 [ProotCommand.launchArgs] 的 KDoc。
         loader
     }.getOrNull()
 
