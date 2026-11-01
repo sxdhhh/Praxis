@@ -99,12 +99,34 @@ fun ChatSidebar(
     var groupExpanded by remember { mutableStateOf(true) }
     /** 待确认删除的会话 id（长按后进入确认态）。 */
     var pendingDelete by remember { mutableStateOf<String?>(null) }
+
+    /**
+     * 刚刚被删掉的会话 id（等上层把 `sessionId` 切走后再清）。
+     *
+     * ## 为什么必须有（2026-11-02，真机复现「当前对话删不掉」）
+     *
+     * 删除是异步的：先 `deleteSession(id)`，再由 `onDeleteCurrentSession`
+     * 通知 `PraxisApp` 把 `sessionId` 切到下一条。**这中间有一个窗口**，
+     * 其间 `sessionId` 仍指着那条已经被删掉的会话。
+     *
+     * 而下面那段「补齐当前会话的行」的守卫写在 `LaunchedEffect(open, reloadTick)`
+     * 里 —— 删除后 `reloadTick++` 会把它重跑一遍，于是它看到
+     * 「列表里没有 currentSessionId」就 `ensureSession(...)` 把刚删的行**又插回去**。
+     *
+     * 真机（模拟器 + 直读数据库）实测：删完当前会话后 `sessions` 表里多出
+     * 一条 `('main', '当前对话')` —— 用户看到的就是「这条删不掉」。
+     *
+     * 所以记下 id，在 `sessionId` 真正切走之前**跳过补齐**。
+     */
+    var justDeletedId by remember { mutableStateOf<String?>(null) }
     val sidebarListState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     // 抽屉每次打开时重新拉一次：不然新建/删除之后抽屉里还是旧列表。
     // 以 open 作为 key 而不是只在首次加载 —— 这是「打开时刷新」的语义。
-    LaunchedEffect(open, reloadTick) {
+    LaunchedEffect(open, reloadTick, currentSessionId) {
         if (!open) return@LaunchedEffect
+        // 上层已经把 sessionId 切到别的会话了：删除流程结束，清掉标记。
+        if (justDeletedId != null && currentSessionId != justDeletedId) justDeletedId = null
         // ## 先补当前会话的行，再列（2026-10-22 修，第 6 项）
         //
         // 默认会话 id 是字面量 `"main"`（`PraxisApp` 里 `rememberSaveable` 的初值），
@@ -129,7 +151,9 @@ fun ChatSidebar(
         // 正确做法：只在该会话**不存在**时才插入真正的新行。
         // 用 `listSessions()` 的结果判断即可，不必多查一次库。
         sessions = runCatching { chatPersistence.listSessions() }.getOrDefault(emptyList())
-        if (sessions.none { it.id == currentSessionId }) {
+        // ⚠️ 第二个条件不能省：刚删掉的那条此刻仍等于 currentSessionId，
+        // 补它等于把用户的删除操作撤销（见 justDeletedId 的 KDoc）。
+        if (sessions.none { it.id == currentSessionId } && currentSessionId != justDeletedId) {
             // 走到这里说明这个会话还没有任何消息、也没被建过行。
             // `ensureSession` 此时是安全的：库里本来就没有它的行，
             // REPLACE 的 DELETE 步骤删不到任何东西，CASCADE 也就不会触发。
@@ -288,6 +312,9 @@ fun ChatSidebar(
                                 // 发消息写库失败（外键无对应 sessions 行）。
                                 // 用户那句话就是「当前对话删不掉」。
                                 val deletingCurrent = session.id == currentSessionId
+                                // 先记标记再删：下面的补齐守卫会在 reloadTick 后重跑，
+                                // 不记的话它会把这条刚删的会话插回去。
+                                justDeletedId = session.id
                                 pendingDelete = null
                                 if (deletingCurrent && onDeleteCurrentSession == null) {
                                     // 没有兜底会话可切：什么都不做，先切走再删。
