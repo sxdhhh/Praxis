@@ -200,4 +200,80 @@ class ChatTitleTriggerTest {
         // 标题失败不该把整轮发送标记成失败：用户消息气泡必须还在。
         assertTrue(vm.state.value.bubbles.any { it.role == BubbleRole.User })
     }
+
+    /**
+     * 会话标题是占位值（`新对话` / `当前对话`）时，AI 标题必须能覆盖。
+     *
+     * ## 这条测的是 ⑧ 的最后一环（2026-11-02 模拟器实测）
+     *
+     * 前两条测试里的会话都是「发送时由 `ensureSession` 现建」的，
+     * 标题恰好等于兜底值，所以走通了。但真机上最常见的路径不是这样：
+     *
+     * ```
+     * 用户点「＋新建对话」→ ensureSession(newId, "新对话")
+     * 用户发第一条消息   → fallbackTitle = 首句前 24 字 ≠ "新对话"
+     * ```
+     *
+     * 旧实现只在「当前标题 == fallbackTitle」时才覆盖，于是这种会话的 AI 标题
+     * 被**静默丢弃**。模拟器实测：mock 收到两次请求（标题生成 + 正文），
+     * 说明链路全通，但库里标题仍是「新对话」。
+     *
+     * 所以这条用「预先存在且标题为占位值」的仓储来复现真机最常见的情形。
+     */
+    @Test
+    fun `会话标题是占位值时 AI 标题仍能覆盖`() = runTest {
+        val repo = FakePersistence().apply {
+            // 模拟「点新建对话」：会话已存在，标题是占位值。
+            titles["s4"] = "新对话"
+        }
+        val vm = ChatViewModel(
+            provider = SilentProvider(),
+            model = "test",
+            chatRepository = repo,
+            sessionId = "s4",
+            titleGenerator = ChatTitleGenerator { "AI 总结的标题" },
+            persistDispatcher = testDispatcher,
+        )
+
+        vm.onInputChange("帮我看下这个报错")
+        vm.send()
+        advanceUntilIdle()
+
+        assertEquals(
+            "占位标题必须被 AI 标题替换；否则通过「新建对话」建的会话永远没有 AI 标题",
+            "AI 总结的标题",
+            repo.titles["s4"],
+        )
+    }
+
+    /**
+     * 用户**手动改名**过的标题不得被 AI 覆盖。
+     *
+     * 这条与上一条是一对：上一条放行占位值，这一条守住真正的用户意图。
+     * 少了它，上面那次放宽就会变成「用户改的名字被 AI 冲掉」。
+     */
+    @Test
+    fun `用户手动改过的标题不被 AI 覆盖`() = runTest {
+        val repo = FakePersistence().apply {
+            titles["s5"] = "我自己起的名字"
+        }
+        val vm = ChatViewModel(
+            provider = SilentProvider(),
+            model = "test",
+            chatRepository = repo,
+            sessionId = "s5",
+            titleGenerator = ChatTitleGenerator { "AI 想覆盖的名字" },
+            persistDispatcher = testDispatcher,
+        )
+
+        vm.onInputChange("随便说点什么")
+        vm.send()
+        advanceUntilIdle()
+
+        assertEquals(
+            "用户手动改的名字不能被 AI 盖掉",
+            "我自己起的名字",
+            repo.titles["s5"],
+        )
+    }
 }
