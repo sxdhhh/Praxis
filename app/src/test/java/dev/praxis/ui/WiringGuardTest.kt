@@ -1141,5 +1141,87 @@ class WiringGuardTest {
             flat.contains("LaunchedEffect(open, reloadTick, currentSessionId) {"),
         )
     }
+
+    /**
+     * ③ 硬链接解析必须**被真的调用**，不是只定义在那。
+     *
+     * ## 为什么这条必要（2026-11-02）
+     *
+     * `parseHardLinkLine` 有 13 条单测，覆盖 GNU 与 toybox 两种措辞。
+     * 但如果 `listHardLinkEntries` 改回内联解析（或干脆不调它），
+     * 那 13 条测试依然全绿 —— 它们测的是函数本身，不是「函数有没有被用」。
+     *
+     * 这正是「能力在、接线不在」的形态，本项目已多次踩过。
+     */
+    @Test
+    fun rootfsExtract_actuallyUsesHardLinkParser() {
+        val text = read("app/src/main/java/dev/praxis/data/linux/ProotEnvPort.kt")
+        assertTrue(
+            "listHardLinkEntries 没有调用 parseHardLinkLine —— 硬链接识别会静默失效，" +
+                "tar 会继续报 can't link ... Permission denied",
+            text.contains("parseHardLinkLine(line)?.let"),
+        )
+    }
+
+    /**
+     * ⑤ 两条启动分支必须**共用**同一个预期收尾判定。
+     *
+     * ## 为什么这条必要（2026-11-02）
+     *
+     * 判据原先在 PTY 分支与管道分支各内联了一遍。历史上这种「两处各写一份」
+     * 分叉过（一条改了一条没改，表现是「终端能用、设置页里的命令全崩」）。
+     * 抽成 `isExpectedShutdown` 就是为了让两条分支不可能再分叉。
+     */
+    @Test
+    fun sessionReadInterruption_sharesOnePredicate() {
+        val text = read("app/src/main/java/dev/praxis/data/linux/ProotTerminalSessionPort.kt")
+        assertTrue(
+            "PTY 分支没有走 isExpectedShutdown",
+            text.contains("isExpectedShutdown(closedByOwner.isFailure, closing.contains(id))"),
+        )
+        assertTrue(
+            "管道分支没有走 isExpectedShutdown",
+            text.contains("isExpectedShutdown(read.isFailure, closing.contains(id))"),
+        )
+        assertTrue(
+            "又出现了内联的旧判据 —— 两条分支会再次分叉",
+            !text.contains(".isFailure && !closing.contains("),
+        )
+    }
+
+    /**
+     * ⑥ 回底按钮的可见性必须走 `shouldShowScrollToBottom`，不能又内联成 `||`。
+     *
+     * ## 为什么这条必要（2026-11-02）
+     *
+     * 原实现 `visible = showWhenIdle || showButton` 让按钮**永远显示**，
+     * `isAtBottom` 算得再准也被短路。这个错误很容易在重构时回来 ——
+     * 因为「保持显示」听起来就该用 `||`。
+     */
+    @Test
+    fun scrollToBottom_visibilityGoesThroughPredicate() {
+        val text = read("ui/design/src/main/java/dev/praxis/ui/design/component/ScrollThumbRail.kt")
+        assertTrue(
+            "可见性没有走 shouldShowScrollToBottom",
+            text.contains("shouldShowScrollToBottom(atBottom)"),
+        )
+        // ⚠️ 只看**代码行**，不看注释。
+        //
+        // 那段错法的原文被写进了 KDoc 作为反面教材（「原实现是 visible = showWhenIdle
+        // || showButton」），所以整文件搜字符串会命中注释、造成假红。
+        // 这与本项目其它检查（strip_noncode）同一个口径：注释不是代码。
+        val code = text.lines()
+            .filterNot { it.trimStart().startsWith("*") || it.trimStart().startsWith("//") }
+            .joinToString("\n")
+        assertTrue(
+            "可见性又变成了 `visible = showWhenIdle ...` —— 只要让 showWhenIdle 参与，" +
+                "按钮就会在到底时依然亮着（按下去什么都不会发生）",
+            !code.contains("visible = showWhenIdle"),
+        )
+        assertTrue(
+            "isAtBottom 没有被调用 —— 到底判定失效，按钮该灭时不灭",
+            code.contains("isAtBottom("),
+        )
+    }
 }
 
