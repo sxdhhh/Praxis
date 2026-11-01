@@ -95,6 +95,37 @@ interface ChatPersistence {
      */
     suspend fun updateSessionTitle(sessionId: String, title: String)
 
+    /**
+     * 只在标题**仍是 [allowed] 之一**时才改 —— AI 生成标题用的抢占式更新。
+     *
+     * ## 为什么不直接用 [updateSessionTitle]（2026-11-02，⑧ 的竞争条件）
+     *
+     * AI 生成标题的流程是「先读当前标题、判断能不能覆盖、再写」。
+     * 而 `generate()` 是一次真实网络请求（几秒），用户完全可能在这几秒里
+     * 手动改名。读与写之间没有原子性时，刚改的名字会被 AI 覆盖 ——
+     * 表现是「我改的名字自己变回去了」。
+     *
+     * 这个方法把「判断」下沉到存储层的单条语句里，中间插不进别人的写。
+     *
+     * ## 默认实现
+     *
+     * 退化为「读-判断-写」。内存实现（单测）是单线程顺序执行的，
+     * 不存在这个竞争窗口，所以默认实现足够；真实实现（`RoomChatPersistence`）
+     * 必须覆写成原子的 SQL 条件更新。
+     *
+     * @return true 表示真的写进去了；false 表示标题已被别人改过，本次放弃
+     */
+    suspend fun updateSessionTitleIfMatches(
+        sessionId: String,
+        title: String,
+        allowed: List<String>,
+    ): Boolean {
+        val current = listSessions().firstOrNull { it.id == sessionId }?.title
+        if (current == null || current !in allowed) return false
+        updateSessionTitle(sessionId, title)
+        return true
+    }
+
     // ── 消息变体（2026-10-24）─────────────────────────────────
 
     /**

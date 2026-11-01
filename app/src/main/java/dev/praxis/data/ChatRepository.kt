@@ -350,6 +350,23 @@ class ChatRepository(
     }
 
     /**
+     * 只在标题仍是 [allowed] 之一时才改，返回是否真的写了。
+     *
+     * ## 为什么要下沉到 SQL（2026-11-02，⑧ 的竞争条件）
+     *
+     * AI 生成标题要几秒（一次真实网络请求）。原先的「读当前标题 → 判断 →
+     * 写回」三步之间没有原子性，用户在这几秒里手动改名就会被 AI 覆盖。
+     *
+     * 把条件放进 WHERE 之后，「判断」与「写入」是同一条语句、同一个事务，
+     * 中间插不进别人的写。返回 0 行即表示放弃覆盖。
+     */
+    suspend fun updateSessionTitleIfMatches(
+        sessionId: String,
+        title: String,
+        allowed: List<String>,
+    ): Boolean = sessionDao.setTitleIfMatches(sessionId, title, allowed) > 0
+
+    /**
      * 刷新会话的 `updatedAt`（供侧边栏按最近活跃排序）。
      *
      * ## 为什么不能用 `upsert`（2026-10-22 修，第二个数据丢失点）

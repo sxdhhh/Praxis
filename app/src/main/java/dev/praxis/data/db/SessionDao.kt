@@ -90,4 +90,37 @@ interface SessionDao {
      */
     @Query("UPDATE sessions SET title = :title WHERE id = :id")
     suspend fun setTitle(id: String, title: String)
+
+    /**
+     * 只在标题**仍是给定值时**才改 —— 给 AI 生成标题用的原子条件更新。
+     *
+     * ## 为什么不能「先读再写」（2026-11-02，⑧ 的竞争条件）
+     *
+     * 原先 `generateTitleIfPossible` 是这么写的：
+     *
+     * ```
+     * val current = listSessions()...?.title          // 读
+     * if (current != 允许覆盖的值) return
+     * updateSessionTitle(sessionId, cleaned)          // 写
+     * ```
+     *
+     * 读与写之间**没有原子性**。而 `generator.generate()` 是一次真实网络请求
+     * （几秒），用户完全可能在这几秒里手动改名 —— 改完名字、AI 才回来，
+     * 于是刚改的名字被覆盖。窗口越小越难复现，但一旦命中就是「我改的名字
+     * 自己变回去了」，比不生成标题更让人困惑。
+     *
+     * 把条件放进 SQL 的 WHERE 之后，判断与写入是同一条语句、同一个事务，
+     * 中间不可能插进别人的写。
+     *
+     * ## 为什么同时匹配 `expected` 与 `fallback`
+     *
+     * 调用方允许覆盖两种状态：
+     *  - 标题仍等于本次算出的兜底值（没被任何人动过）；
+     *  - 标题仍是占位值（`新对话` / `当前对话`，见 isPlaceholderTitle）。
+     * 用 `IN (:allowed)` 一次覆盖，仍然是一条语句。
+     *
+     * @return 实际更新的行数；0 表示标题已被别人改过，本次放弃覆盖
+     */
+    @Query("UPDATE sessions SET title = :title WHERE id = :id AND title IN (:allowed)")
+    suspend fun setTitleIfMatches(id: String, title: String, allowed: List<String>): Int
 }

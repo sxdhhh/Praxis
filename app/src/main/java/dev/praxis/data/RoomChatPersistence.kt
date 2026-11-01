@@ -139,4 +139,16 @@ class RoomChatPersistence(
     override suspend fun updateSessionTitle(sessionId: String, title: String) {
         repository.updateSessionTitle(sessionId, title)
     }
+
+    /**
+     * 覆写成**单条条件 UPDATE**，消除「读-判断-写」的竞争窗口。
+     *
+     * 见 [ChatPersistence.updateSessionTitleIfMatches] 的 KDoc：
+     * AI 生成标题要几秒，期间用户可能手动改名，非原子实现会让刚改的名字被覆盖。
+     */
+    override suspend fun updateSessionTitleIfMatches(
+        sessionId: String,
+        title: String,
+        allowed: List<String>,
+    ): Boolean = repository.updateSessionTitleIfMatches(sessionId, title, allowed)
 }
