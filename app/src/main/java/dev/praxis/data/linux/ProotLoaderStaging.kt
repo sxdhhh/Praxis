@@ -54,7 +54,28 @@ internal object ProotLoaderStaging {
         // 新版本 APK 的文件会变，副本必须跟着换。比大小与时间戳，不做哈希：
         // 这是热路径（每次 exec 都会走一遍），十几 KB 级文件的哈希不划算。
         if (stale(loader, packaged)) packaged.copyTo(loader, overwrite = true)
-        // loader 只被 proot `mmap` **读**，不需要可执行位；给上读权限即可。
+        // ## ⚠️ 必须给执行位（2026-11-02 在模拟器上实测确认）
+        //
+        // 我一度以为「loader 只被 proot mmap 读，不需要 +x」，于是只调了
+        // `setReadable`。结果是 644。实测（API 30，x86_64 proot 5.1.107）：
+        //
+        // ```
+        // chmod 644 -> proot error: execve("/bin/sh"): Permission denied   FAIL
+        // chmod 755 -> RUN_OK                                                PASS
+        // ```
+        //
+        // 来回切了 4 次，4 次都一致 —— 执行位就是那个开关。
+        //
+        // ## 为什么这个错误特别难查
+        //
+        // 报错是 `execve("/bin/sh"): Permission denied` —— 它说的**不是** loader，
+        // 而是 guest 的 /bin/sh。于是第一反应永远是「rootfs 权限不对」或
+        // 「proot 参数错」，不会想到「loader 缺执行位」。
+        //
+        // 而 proot 秒退之后，`ProotTerminalSessionPort.create` 的 400ms 存活检查
+        // 会判定「启动后立即退出」，终端回退到宿主 shell —— 用户看到的是
+        // `/bin/sh: can't access tty`。整条链上**没有一句提到 loader**。
+        loader.setExecutable(true, false)
         loader.setReadable(true, false)
         if (!loader.isFile) return@runCatching null
         //
