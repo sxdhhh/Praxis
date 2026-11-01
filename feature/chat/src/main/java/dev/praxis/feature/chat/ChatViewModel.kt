@@ -307,6 +307,24 @@ class ChatViewModel(
     private var restored = false
 
     /**
+     * 本 ViewModel 实例的「恢复」是否已经**走过一遍**（无论成没成）。
+     *
+     * ## 为什么不能复用 [restored]（2026-11-01，标题生成为什么会被吞掉）
+     *
+     * [restored] 只在**读到了非空数据**时才置位，所以它回答不了
+     * 「恢复流程跑过没有」。而 [send] 要在恢复走完之前拦住自己 ——
+     * 否则第一轮发送会因为「还没读出历史」被误判成「本会话第一条消息」，
+     * 结果把用户手动改过的标题用 AI 标题盖掉。
+     *
+     * 空会话（新对话）恢复完就是 `restored == false`，拿它做闸门等于
+     * **永远关着**：用户在新对话里发第一句，标题生成被跳过，
+     * 而这一句本来是唯一该触发生成的那一条。
+     *
+     * 所以另立一个标志：恢复协程的 `finally` 里置 true。
+     */
+    private var restoreAttempted = false
+
+    /**
      * 是否正在恢复历史。
      *
      * ## 为什么必须有这个标志（「消息突然不显示」的直接原因之一）
@@ -600,6 +618,10 @@ class ChatViewModel(
             } finally {
                 // 无论成功失败都要清：否则一次失败会把后续 attempt 全挡住。
                 restoreInFlight = false
+                // 「恢复跑过一遍」与「恢复成功」是两件事：[restored] 只在读到
+                // 非空数据时才为 true，而这里要的是「流程走完了」—— 空会话
+                // 也必须放行后续的 send()，否则新对话的第一句永远等不到标题。
+                restoreAttempted = true
             }
         }
     }
@@ -878,6 +900,31 @@ class ChatViewModel(
         val attachments = _state.value.attachments
         if ((text.isEmpty() && attachments.isEmpty()) || _state.value.isStreaming) return
 
+        // ## ★ 恢复没走完之前不许发（2026-11-01，AI 标题的第二个坑）
+        //
+        // `isFirstUserMessage` 下面那一行是「气泡里还没有用户消息」，
+        // 它**假设气泡已经反映库里已有的历史**。而恢复是异步的：
+        // `ChatTab` 的 `LaunchedEffect` 触发 `restoreIfNeeded()` 之后要读一次库，
+        // 这段时间里 `bubbles` 还是空的。
+        //
+        // 用户点进一个旧会话、在恢复完成前直接发一条（网络慢 / 库大时很常见），
+        // 就会得到 `isFirstUserMessage == true` —— 于是：
+        //
+        //  1. 标题被当成「本会话第一条」重新生成，**覆盖用户手动改过的名字**
+        //     （`generateTitleIfPossible` 的兜底比较因此失效：库里真实标题
+        //     不等于这次写的兜底值，恰好被放行）；
+        //  2. 恢复协程中途把 `history` 重建，刚发出去的那条被挤掉。
+        //
+        // 这里直接丢弃这一次发送并给出可读提示，而不是「先发再补」：
+        // 补写会破坏 history 与 bubbles 的按条对齐（见 `pendingContinueHint`
+        // 的 KDoc 里那条不变式），后果比让用户重点一次发送严重得多。
+        // 恢复通常只阻塞几十毫秒，用户几乎察觉不到。
+        if (!restoreAttempted && chatRepository != null) {
+            restoreIfNeeded()
+            _state.update { it.copy(notice = "正在加载历史，请稍后再发") }
+            return
+        }
+
         // ## 必须在 `_state.update` **之前**判定「是不是本会话第一条」
         //
         // 判定放在 update 之后会永远得到 false：`send()` 刚把用户气泡 push
@@ -954,24 +1001,27 @@ class ChatViewModel(
             )
         }
 
+        // ── 兜底标题：先便宜地算出来，下面两个块共用同一个值 ──
+        //
+        // ## 为什么标题是「两段式」（对齐 Operit `addVisibleUserMessageToCurrentChat`）
+        //
+        // 旧实现是 `ensureSession(sessionId, text.take(24))` ——
+        // 直接把首句前 24 字当会话名。两个后果：
+        //  - 侧边栏里多条会话名一模一样（都以「帮我看看这个」开头）；
+        //  - 标题是半句话（24 字常常截在词中间）。
+        //
+        // Operit 的做法是：
+        //   1. 第一条消息时先把兜底标题写进去（`new_conversation`），
+        //      这样侧边栏立刻有名字，不用等模型；
+        //   2. 异步 `generateConversationTitle` 成功后，**只在标题仍是兜底值
+        //      时**才覆盖 —— 用户若在这期间手动改名，不能被 AI 盖掉。
+        //
+        // 这里 1:1 照此实现：第 1 步由下面的 `ensureSession` 完成，
+        // 第 2 步由后面的 `generateTitleIfPossible` 完成。
+        val fallbackTitle = SessionTitle.fallback(text)
+
         // 用户消息先落盘，再做助手占位落盘，顺序与 UI 一致。
         launchPersist {
-            // ## 标题：先写兜底标题，再异步让 AI 总结（对齐 Operit）
-            //
-            // 旧实现是 `ensureSession(sessionId, text.take(24))` ——
-            // 直接把首句前 24 字当会话名。两个后果：
-            //  - 侧边栏里多条会话名一模一样（都以「帮我看看这个」开头）；
-            //  - 标题是半句话（24 字常常截在词中间）。
-            //
-            // Operit 的 `addVisibleUserMessageToCurrentChat` 是**两段式**：
-            //   1. 第一条消息时先把兜底标题写进去（`new_conversation`），
-            //      这样侧边栏立刻有名字，不用等模型；
-            //   2. 异步 `generateConversationTitle` 成功后，**只在标题仍是兜底值
-            //      时**才覆盖 —— 用户若在这期间手动改名，不能被 AI 盖掉。
-            //
-            // 这里 1:1 照此实现：第 1 步写入兜底标题，第 2 步用
-            // `generateTitleIfPossible` 在「标题仍是兜底值」时才覆盖。
-            val fallbackTitle = SessionTitle.fallback(text)
             ensureSession(sessionId, fallbackTitle)
             appendMessage(sessionId, role = "user", content = text)
             val assistantRowId = appendMessage(
@@ -980,10 +1030,41 @@ class ChatViewModel(
                 content = "",
             )
             assistantRowIds[assistantId] = assistantRowId
-            // 只有「本会话第一条消息」才触发生成：标题描述的是会话主题，
-            // 后面每轮都重新总结会让标题不停变（用户会觉得列表在乱跳）。
-            if (isFirstUserMessage) {
-                generateTitleIfPossible(fallbackTitle, text)
+        }
+
+        // ── ★ 标题生成必须在 launchPersist 的**外面**单独起协程（2026-11-01 修）
+        //
+        // ## 原来的缺陷：「AI 生成标题」整条链路在，但一个标题都没生成过
+        //
+        // 旧代码把 `generateTitleIfPossible(fallbackTitle, text)` 写在
+        // `launchPersist { … }` **里面**（就是上面那个块的末尾）。
+        // 所以它要等两件事都成功才轮得到执行：
+        //
+        //   1. `ensureSession` / `appendMessage` × 2 都返回；
+        //   2. 这三次写库中途没人抛异常。
+        //
+        // 而 `generate()` 是一次**真实网络请求**（几秒）。它跑在
+        // `persistScope` 的这个协程里，会让「这一轮的落盘任务」迟迟不结束；
+        // 更糟的是它夹在两条落盘语句之间 —— 一旦写库抛异常，连标题生成都
+        // 不会开始，且异常被 `persistScope` 吞掉，界面上什么都看不到。
+        //
+        // 修法：落盘归落盘，标题生成单独 `persistScope.launch`。
+        // 两者互不阻塞、互不牵连 —— 写库失败也仍然会去生成标题，
+        // 标题失败（网络断/没配模型）也绝不影响消息落盘。
+        //
+        // ## 为什么仍然只在「本会话第一条消息」时触发
+        //
+        // 标题描述的是会话主题。后面每轮都重新总结会让标题不停变，
+        // 用户在侧边栏里会觉得列表在乱跳。
+        //
+        // ## 为什么兜底标题仍然先写
+        //
+        // 用户按下发送后最多几百毫秒就要看到自己那一句出现在列表里，
+        // 而模型生成标题要几秒。先写兜底、生成完再覆盖，两边的体验都保住。
+        if (isFirstUserMessage) {
+            persistScope.launch {
+                val repo = chatRepository ?: return@launch
+                repo.generateTitleIfPossible(fallbackTitle, text)
             }
         }
 

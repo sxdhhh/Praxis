@@ -61,6 +61,25 @@ fun ChatSessionsPage(
     chatPersistence: ChatPersistence,
     currentSessionId: String,
     onOpenSession: (String) -> Unit,
+    /**
+     * 删掉**当前正在看的那个会话**之后，切到哪个会话。
+     *
+     * ## 为什么必须由上层决定（2026-11-01，「当前对话无法删除」）
+     *
+     * `currentSessionId` 的真实持有者是 `PraxisApp` 的 `rememberSaveable`，
+     * 本页只读它画高亮。删掉当前会话后若什么都不做：
+     *
+     *  1. 会话行真的从库里没了（`DELETE` 已提交，这点原来的实现是对的）；
+     *  2. 但 `sessionId` 还指着那个已经不存在的 id，`viewModel(key = id)`
+     *     照旧持有一个悬空会话 —— 界面一片空白、发消息写库失败（外键），
+     *     用户看到的就是「删不掉 / 删了还回来」；
+     *  3. 更隐蔽的是 `lastChatSessionId` 也被写成了这个死 id，
+     *     下次冷启动继续打开一头空会话。
+     *
+     * null 表示上层不提供兜底（预览 / 测试）：这时**不删当前会话**，
+     * 而不是删完把界面留在悬空状态。
+     */
+    onDeleteCurrentSession: ((deletedSessionId: String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val navigator = LocalNavigator.current
@@ -175,10 +194,28 @@ fun ChatSessionsPage(
                     onClick = {
                         if (pendingDelete == session.id) {
                             // 已处于确认态：这一次点击执行删除。
-                            scope.launch {
-                                runCatching { chatPersistence.deleteSession(session.id) }
-                                pendingDelete = null
-                                reloadTick++
+                            //
+                            // ## 当前会话为什么不能照常删（2026-11-01 修）
+                            //
+                            // 旧实现只有下面三行：删库 → 清确认态 → 重读列表。
+                            // 删**别的**会话时没问题；删**正打开着的**这个会话时，
+                            // 行从列表里消失了，但 `currentSessionId` 仍指向它 ——
+                            // 对话页停在一条已经不存在的会话上（空白 + 发消息写库失败）。
+                            // 用户看到的现象就是「当前对话删不掉」。
+                            //
+                            // 现在：删完若删的正是当前会话，交给上层切走一个存在的会话。
+                            // 上层没接这个回调时不删 —— 宁可不删，也不留一个悬空的当前会话。
+                            val deletingCurrent = session.id == currentSessionId
+                            pendingDelete = null
+                            if (deletingCurrent && onDeleteCurrentSession == null) {
+                                // 没有可用的兜底会话：什么都不做（列表保持原样），
+                                // 用户先切到别的会话再删即可。
+                            } else {
+                                scope.launch {
+                                    runCatching { chatPersistence.deleteSession(session.id) }
+                                    reloadTick++
+                                    if (deletingCurrent) onDeleteCurrentSession?.invoke(session.id)
+                                }
                             }
                         } else {
                             onOpenSession(session.id)

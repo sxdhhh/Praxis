@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
@@ -1072,28 +1073,63 @@ fun ChatScreen(
                 modifier = Modifier.align(Alignment.CenterEnd),
             )
 
-            // ── 右侧滚动指示条 + 回到底部 ─────────────────────────
+            // ── 回到底部按钮（右侧，垂直方向约 62%）──────────────
             //
-            // ## 为什么贴右下角而不是 CenterEnd（2026-10-31 重构）
+            // ## 2026-11-01：进度轨道已删，按钮上移（用户标注截图）
             //
-            // 上一版它与导航浮条都是 `CenterEnd`，靠
-            // `padding(bottom = 96.dp)` 往下挪来错开。这个做法有两个问题：
+            // 用户截图里红叉划掉的是右侧那根「带上下两个圆点的竖轨」，
+            // 蓝箭头把底部圆形按钮指到**轨道中段偏上**。两件事一次改完：
+            // 轨道整根删掉（`ScrollThumbRail` 现在只画按钮，理由见其 KDoc），
+            // 按钮从「贴右下角」挪到右缘 62% 高度处。
             //
-            //  1. 96dp 是拍出来的数，屏幕越矮两者越近 —— 截图里
-            //     回底按钮与导航胶囊已经叠在一起，按钮下方露出半透明残影；
-            //  2. 同一根竖轴上放两个不同语义的控件，用户分不清
-            //     「哪个是进度、哪个是跳转」。
+            // ## 为什么这里反过来用 `CenterEnd`（与 2026-10-31 那版相反）
             //
-            // 导航浮条的语义位置就是**右缘垂直中点**（「我在整段对话的哪里」），
-            // 而滚动条属于**底部操作区**。贴右下角之后两者物理上不再可能重叠，
-            // 也不再需要那个魔法数字。
-            ScrollThumbRail(
-                lazyState = listState,
+            // 10-31 那版之所以把整块贴 `BottomEnd`，是为了让「轨道 + 按钮」
+            // 这一整列从底部往上长。现在轨道没了，只剩一个 30dp 的圆按钮：
+            // 贴底时它在视觉上属于输入区，而用户要的是「悬在正文右侧」。
+            //
+            // 于是改成「右缘居中 + 把中心向下平移父容器高度的 12%」：
+            //   `Alignment.CenterEnd` 让按钮中心先落在 50%，
+            //   `offset(y = maxHeight * 0.12f)` 再把中心压到 62%。
+            //
+            // ## 为什么用容器百分比而不是写死 dp
+            //
+            // 写死 `padding(bottom = 120.dp)` 在矮屏（分屏、横屏、小折叠）
+            // 上会压到输入栏，在高屏上又偏高。用「相对本 Box 的百分比」则
+            // 始终落在「消息区中下部」那一带，与设备密度、屏幕高度无关 ——
+            // 这正是「不加设备专属硬编码」的要求。
+            //
+            // 这里用 `offset(y = maxHeight * 0.12f)` 而不是
+            // `fillMaxHeight() + padding(bottom = 24%)`：
+            //  ```kotlin
+            //  Modifier.align(CenterEnd).fillMaxHeight().padding(bottom = 24.dp)
+            //  ```
+            // 是**行不通**的 —— `align` 只是父布局的 placement 参数，
+            // 它会让 Box 在最大约束内测量子项，而 `fillMaxHeight()` 立刻
+            // 把子项吃掉一整屏高，再叠加 padding 只会溢出，根本不会产生位移。
+            // `offset` 才是「布局位置已定、再按像素平移」的那个 modifier，
+            // 且它不影响兄弟节点的测量与点击区域之外的布局。
+            //
+            // ## 为什么不会与导航浮条打架
+            //
+            // 导航浮条在右缘**正中**（50%），且只在手势滚动时浮出；
+            // 本按钮只有 30dp 高，中心下移 12% 后最上沿仍在 50% 以下
+            // （1080p 竖屏下相差约一百多 dp），远大于胶囊半高 29dp，不会重叠。
+            // 这也是 2026-10-31 那条「不许抢同一条竖轴」护栏要守的东西 ——
+            // 那条护栏只管「不许回到 CenterEnd + 96dp 的拍脑袋错位」，
+            // 现在按钮本来就不在右缘垂直中点，由下面的 offset 明确让位。
+            Box(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    // 贴边留一点空隙，不压住气泡正文的最后一个字。
-                    .padding(end = 2.dp, bottom = 8.dp),
-            )
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 4.dp),
+            ) {
+                androidx.compose.foundation.layout.BoxWithConstraints {
+                    ScrollThumbRail(
+                        lazyState = listState,
+                        modifier = Modifier.offset(y = maxHeight * 0.12f),
+                    )
+                }
+            }
         }
 
         // 丝滑跟随：apixiaoyuan 的弹簧跟随引擎（`AutoFollowScroll.kt`，k=130 / c=24 / m=1）。
