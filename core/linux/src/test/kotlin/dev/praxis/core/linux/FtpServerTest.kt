@@ -151,8 +151,14 @@ class FtpServerScriptTest {
             !s.contains("allow_writeable_chroot"),
         )
         assertTrue(
-            "没有 chroot 时靠 local_root 把用户落到家目录",
-            s.contains("local_root=${cfg.homeDir}"),
+            // ⚠️ 注意这里的引号：writeConfig 写的是
+            //     local_root='<homeDir>'
+            // 因为 homeDir 走了 shellQuote（防路径里有空格/单引号）。
+            // 断言若写成不带引号的 `local_root=/home/ubuntu` 会**永远失败**，
+            // 而这个失败只在 core:linux 的单元测试里暴露，CI 上表现为
+            // verify job 的 Unit tests 红，报告里却看不到具体断言。
+            "没有 chroot 时靠 local_root 把用户落到家目录（注意 shellQuote 会加单引号）",
+            s.contains("local_root='${cfg.homeDir}'"),
         )
     }
 
