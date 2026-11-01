@@ -437,7 +437,7 @@ ALL OK
 | FTP 返回 `227 (0,0,0,0,...)` | `pasv_address=0.0.0.0`（见 5.2） |
 | FTP 每个连接都 `500 OOPS` | `secure_chroot_dir` 不存在（见 5.2） |
 | `:preview:compileDebugKotlin` OOM Metaspace | 本地内存不够，必须走 CI |
-| CI 报 `:terminal` "No variants exist" | 忘了 `submodules: true`（历史问题） |
+| CI 报某个模块 "No variants exist" | **这条已过时（2026-11-01 核）**：历史上 miuix 走过 git submodule，所以当时要在 `actions/checkout` 上加 `submodules: true`。现在已改成把 AAR 直接入库 —— `third_party/maven/` 下有 47 个 `.aar` 被 git 跟踪（含 pom/md5/sha1），仓库**没有 `.gitmodules`，索引里也没有任何 gitlink**。所以 `build.yml` 里 checkout 不写 `submodules:` 是对的，别去加。真遇到这个报错要从模块自身的 source set / variant 配置查 |
 | push 卡住零流量 | 没带 `PROOT_TMP_DIR=/tmp TMPDIR=/tmp` |
 
 ---

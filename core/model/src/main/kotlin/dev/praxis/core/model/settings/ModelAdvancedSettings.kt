@@ -71,10 +71,28 @@ data class ModelAdvancedSettings(
      */
     val maxConcurrentRequests: Int = 0,
 ) {
-    /** 有没有真的配了东西。用于分区标题右侧显示「已配置 N 项」。 */
+    /**
+     * 已配置（键非空白）的请求头条数。
+     *
+     * ⚠️ 目前没有生产代码使用它（2026-11-01 核）。原来这里写着
+     * 「用于分区标题右侧显示『已配置 N 项』」，但设置页是自己算的：
+     * `ModelScreen.kt` L941 用 `headerRows.count { it.first.isNotBlank() }`，
+     * 数的是**用户正在编辑的行**，而不是已保存的 [customHeaders]。
+     * 那个选择是对的 —— 改了还没保存时，标题要跟着输入实时变。
+     *
+     * 所以本属性是「按已保存状态计数」的便捷入口，留给需要它的调用方；
+     * 只有 `ModelAdvancedSettingsTest` 在用它做断言。
+     */
     val configuredHeaderCount: Int
         get() = customHeaders.count { it.first.isNotBlank() }
 
+    /**
+     * 限流或并发是否至少配了一项。
+     *
+     * 同样目前只有 `ModelAdvancedSettingsTest` 在用（2026-11-01 核）。
+     * 设置页判断「队列这一组有没有配过」时用的是各字段自己的默认值，
+     * 没有走这里。
+     */
     val hasQueueLimits: Boolean
         get() = requestLimitPerMinute > 0 || maxConcurrentRequests > 0
 
