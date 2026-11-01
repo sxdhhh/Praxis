@@ -271,14 +271,13 @@ object ProotCommand {
     const val LOADER_RUNTIME_NAME: String = "proot-loader"
 
     /**
-     * proot 进程可能使用的可执行文件名（按优先级）。
+     * proot 进程的可执行文件名。
      *
-     * [launchArgs] 会把 `<stagedDir>/proot`（通常是 `filesDir/proot/bin/proot`）
-     * 放在前面、`libproot.so` 作为兜底。
-     * 于是同一个进程在不同设备上可能叫这两个名字中的任意一个，而
-     * `ProotEnvPort` 的「容器是否在跑」探测要按进程名找它，必须两个都认。
+     * 别名方案废弃后只剩一个名字（见 [launchArgs] 的 KDoc）；
+     * 仍保留成 List 是因为 `ProotEnvPort` 的「容器是否在跑」探测
+     * 按进程名匹配，未来如果再引入新的可执行名，加在这里即可。
      */
-    val PROOT_EXECUTABLE_NAMES: List<String> = listOf("proot", "libproot.so")
+    val PROOT_EXECUTABLE_NAMES: List<String> = listOf("libproot.so")
 
     /**
      * 起一个 proot 进程时该用的 argv —— **整个仓库只有这一份实现**。
@@ -290,50 +289,51 @@ object ProotCommand {
      * 一条分支设了 `PROOT_LOADER`、另一条忘了，于是「真机 PTY 能用、降级后全崩」。
      * 所以 argv 的生成收在核心层，两条启动器都调它。
      *
-     * ## argv[0] 为什么优先用别名路径
+     * ## ⚠️ 别名方案已废弃（2026-11-02 真机实测，Permission denied）
      *
-     * 详见 [LOADER_RUNTIME_NAME]：proot 是按 `/proc/self/exe` 的**目录**找 loader 的。
-     * `/proc/self/exe` 在内核里记的是真正被 exec 的文件（永远是
-     * `.../lib/arm64/libproot.so`），符号链接改不了它，唯一的手段是让 proot
-     * **从另一个目录以 `proot` 这个名字起跑** —— 那里放好 loader 即可。
+     * 上一版让 proot 从 `filesDir/proot/bin/proot`（我们铺的副本）起跑，
+     * 理由是「那样 `/proc/self/exe` 的目录里就有 loader」。真机直接报：
      *
-     * ## ⚠️ 别名目录必须从外面传进来，不能靠 `executable.parentFile`
+     * ```
+     * Cannot run program ".../files/proot/bin/proot": error=13, Permission denied
+     * ```
      *
-     * 最初这里写的是 `File(executable.parentFile, "proot")`，看起来天经地义：
-     * 「跟 proot 放一起」。但 `executable` 是 `nativeLibraryDir` 下的
-     * `libproot.so`，而 **`nativeLibraryDir` 在 Android 上是只读的**
-     * （`/data/app/<pkg>/lib/arm64`），根本建不了别名文件。
+     * 真因不是权限位没设 —— 代码里 `setExecutable(true, false)` 一直在调。
+     * 是 **Android 10 起禁止从应用可写数据目录执行文件**（`untrusted_app`
+     * 的 SELinux 策略），`chmod +x` 也改不了。可执行的目录只有
+     * `nativeLibraryDir`（APK 解出来的 `lib/`），而它在 Android 上是**只读**的。
      *
-     * 所以别名放在可写目录（`filesDir/proot/bin/`），由 [stagedDir] 传进来。
-     * 这个不一致曾经让「修 proot 秒退」的整个改动**静默失效** ——
-     * 铺文件的逻辑把别名建在 filesDir，而这里还在找 nativeLibraryDir，
-     * 两边路径对不上，永远走 fallback，现象与没修一模一样。
+     * 所以正确分工是：
+     *
+     * | 角色 | 放哪 | 为什么 |
+     * |---|---|---|
+     * | proot 本体 | `nativeLibraryDir/libproot.so` | 只有这里能 exec |
+     * | loader | `filesDir/proot/bin/`（任意名） | 只被 mmap **读**，不执行 |
+     *
+     * 参考项目 DIY Sandbox 正是这么做的：`envir['PROOT_LOADER'] =
+     * '${RuntimeEnvir.binPath}/loader'` —— loader 在可写目录、名字还是自定义的，
+     * 说明 proot 确实认 `PROOT_LOADER` 这个显式路径，不依赖兄弟文件名。
+     *
+     * 于是本函数不再产生「别名候选」：只有一个候选，就是 nativeLibraryDir
+     * 里的 `libproot.so`。多一个必然失败的候选只会白等一次 400ms，
+     * 还把真正的报错盖在「试了两种都没起来」后面。
+     *
+     * ## 历史注记
+     *
+     * 曾有一版让 proot 从 `filesDir/proot/bin/proot` 起跑，理由是那样
+     * 它的兄弟目录里就有 loader。真机证明这条路在 Android 10+ 上封死，
+     * 于是 loader 改由 `PROOT_LOADER` 显式指路，别名整体删除。
      *
      * @param executable 真正要 exec 的文件（`nativeLibraryDir/libproot.so`）
-     * @param environment 环境变量。只有给了 `PROOT_LOADER` 才启用别名优先：
-     *   没给说明调用方走的是旧路径，行为必须与旧代码逐字一致。
      * @param arguments proot 自己的参数（如 [loginArgs] 的返回值）
-     * @param stagedDir 别名所在的**可写**目录；null 表示调用方没有铺过文件，
-     *   直接走原名起跑。
-     * @return 按优先级排列的 argv 候选，至少一个。调用方要**按顺序尝试**：
-     *   别名路径的父目录若没建成、或该设备不允许在那里建可执行文件，
-     *   必须还能退回用 `libproot.so` 原名起跑。
+     * @return argv 候选。目前恒为一个元素（两个启动器统一走这一条）；
+     *   保留 List 形状是为了调用方「按顺序尝试」的循环不必改。
      */
     fun launchArgs(
         executable: File,
-        environment: Map<String, String>,
         arguments: List<String>,
-        stagedDir: File? = null,
     ): List<List<String>> {
-        val primary = executable.absolutePath
-        val first = listOf(primary) + arguments
-        if (environment["PROOT_LOADER"].isNullOrBlank()) return listOf(first)
-        if (executable.name != "libproot.so") return listOf(first)
-        // 别名必须在**可写**目录里建（nativeLibraryDir 只读），由调用方传进来。
-        val dir = stagedDir ?: return listOf(first)
-        val alias = File(dir, "proot").absolutePath
-        if (alias == primary) return listOf(first)
-        return listOf(listOf(alias) + arguments, first)
+        return listOf(listOf(executable.absolutePath) + arguments)
     }
 
     /**

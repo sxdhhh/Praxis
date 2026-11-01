@@ -1520,24 +1520,12 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
      * 这里只负责把别名布局准备好（见 [stageProotLoader]），再把环境交给它。
      */
     private fun prootArgvCandidates(env: LinuxEnvironment, args: List<String>): List<List<String>> {
-        // ## 别名目录必须和 PROOT_LOADER 出自同一次铺文件（2026-11-01 修）
-        //
-        // 这里踩过一个让整个修复静默失效的坑，记下来：
-        //
-        // 铺文件的逻辑把 `proot` 别名建在 `filesDir/proot/bin/`，
-        // 而 `launchArgs` 最初是从 `executable.parentFile`（nativeLibraryDir，
-        // 只读）推别名路径 —— 两边对不上，别名永远不存在，永远走 fallback，
-        // 现象与没修之前一模一样，日志也看不出异常。
-        //
-        // 现在两边都用 `stageProotLoader()` 的同一个结果：它的**父目录**
-        // 就是别名所在目录。一次调用、一个来源，不可能再对不上。
-        val loader = stageProotLoader()
-        val envs = prootEnv(env, loader)
+        // 这里**不**铺 loader：铺文件这件事由 [applyEnv] → [prootEnv] 负责
+        // （它要把 `PROOT_LOADER` 指向铺好的 loader）。在这里再铺一次是
+        // 冗余，而且上一版正是因为「两处各自算一次路径」对不上才让修复静默失效。
         return ProotCommand.launchArgs(
             executable = env.prootBinary,
-            environment = envs,
             arguments = args,
-            stagedDir = loader?.parentFile,
         )
     }
 

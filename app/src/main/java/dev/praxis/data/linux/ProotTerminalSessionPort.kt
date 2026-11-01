@@ -164,15 +164,12 @@ class ProotTerminalSessionPort(
         // loader 的**父目录**就是别名所在目录。
         val loader = prootLoaderFileFor()
         val envVars = ptyEnvironment(env, loader)
-        // 见 [ProotCommand.launchArgs]：先试可写目录下的 `proot` 别名
-        // （proot 在那里才能找到它的 loader），失败再退回 `libproot.so` 原名。
-        // 两条启动器（`forkpty` 与 `ProcessBuilder`）必须用同一份规则 ——
-        // 各写一份正是历史上「PTY 能用、降级后全崩」的来源。
+        // 见 [ProotCommand.launchArgs]：只有「执行 nativeLibraryDir 里的
+        // `libproot.so`」一个候选。两条启动器（`forkpty` 与 `ProcessBuilder`）
+        // 必须用同一份规则 —— 各写一份正是历史上「PTY 能用、降级后全崩」的来源。
         val argvCandidates = ProotCommand.launchArgs(
             executable = env.prootBinary,
-            environment = envVars,
             arguments = args,
-            stagedDir = loader?.parentFile,
         )
         val tap = ScreenTap()
 
