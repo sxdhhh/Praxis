@@ -869,7 +869,10 @@ class ProotTerminalSessionPort(
      */
     private fun prootLoaderFileFor(): File? = ProotLoaderStaging.stage(context)
 
-    private companion object {
+    // internal 而不是 private：isExpectedShutdown 是 ⑤ 的核心判定，
+    // 单测要直接断言它（private companion 会让测试完全访问不到，
+    // 2026-11-02 CI 就是这样红了 4 条）。
+    internal companion object {
         /** 哨兵前缀。带随机后缀意义不大：同一会话内串行执行，不会撞。 */
         const val SENTINEL = "__PRAXIS_DONE__"
 
