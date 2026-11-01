@@ -676,7 +676,9 @@ object ProotCommand {
      * 挪走之后，这个文件对「22.04 用传统格式」的情形**依然是备份**：
      * 上面 [backupSourcesScript] 已经在改名之前把它存成 `.praxis-bak` 了。
      */
-    private fun retireLegacySources(env: LinuxEnvironment): String = buildString {
+    // internal 而不是 private：这段脚本决定「apt 会不会把同一套源读两遍」，
+    // 正是第 ④ 项用户报的警告来源，必须能被单测直接断言（2026-11-02）。
+    internal fun retireLegacySources(env: LinuxEnvironment): String = buildString {
         appendLine("# 传统格式源会让同一套源被声明两遍（apt 会报 configured multiple times）。")
         appendLine("# 改名而不是删除：可逆，且改名后 apt 不再扫描它。")
         appendLine("if [ -f ${env.legacySourcesFile} ]; then")
