@@ -1564,6 +1564,17 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
             // loader 由调用方传进来（默认现铺一次）：这样 `PROOT_LOADER`
             // 与 `launchArgs` 的别名目录必然来自同一次铺文件，不会分叉。
             loader?.let { put("PROOT_LOADER", it.absolutePath) }
+            // ## proot 自己的动态依赖（2026-11-02 实测后加）
+            //
+            // proot 的 ELF 要 `libtalloc.so.2` 与 `libandroid-shmem.so`。**执行**
+            // `nativeLibraryDir` 里的二进制时，Android 链接器不搜那个目录（实测：
+            // 库就在同目录仍报 `library "libtalloc.so.2" not found`）。不指路 proot 起不来。
+            //
+            // 指过去的目录里只放这两个库，不含 Android 系统库 —— 所以不会重现
+            // 「容器程序加载 bionic 后报 cannot locate symbol」那个老问题。
+            ProotLoaderStaging.stageLibs(context)?.let {
+                put("LD_LIBRARY_PATH", it.absolutePath)
+            }
         }
 
     /**

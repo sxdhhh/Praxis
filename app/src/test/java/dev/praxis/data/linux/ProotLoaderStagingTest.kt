@@ -177,4 +177,36 @@ class ProotLoaderStagingTest {
             text.contains("loader.setExecutable(true"),
         )
     }
+
+    // ── 动态依赖（2026-11-02 实测确认的 ② 另一半根因）──────────────
+
+    /**
+     * `libtalloc.so` 必须被铺成 `libtalloc.so.2` —— 名字对不上就等于没有。
+     *
+     * ## 这是两步错误里的第二步
+     *
+     * 1. 执行 `nativeLibraryDir` 里的二进制时，Android 链接器**不搜**那个目录
+     *    （实测：库就在同目录，仍报 `library "libtalloc.so.2" not found`）；
+     * 2. 就算它肯搜，APK 里打包名是 `libtalloc.so`（Android 只允许 `lib*.so`），
+     *    而 proot 的 `DT_NEEDED` 写的是 `libtalloc.so.2` —— 仍然找不到。
+     *
+     * 所以铺的时候必须**改名**。这条断言就是钉住这次改名。
+     */
+    @Test
+    fun `talloc 必须按运行时名字铺成 so_2`() {
+        org.junit.Assert.assertTrue(
+            "DEPENDENCY_LIBS 里没有 libtalloc.so -> libtalloc.so.2 的改名映射；" +
+                "打包名与 proot 的 DT_NEEDED 不同，不改名链接器一定找不到",
+            ProotLoaderStaging.DEPENDENCY_LIBS.contains("libtalloc.so" to "libtalloc.so.2"),
+        )
+    }
+
+    /** libandroid-shmem 的打包名与运行时名一致，但也要在映射表里被铺出去。 */
+    @Test
+    fun `shmem 也在依赖清单里`() {
+        org.junit.Assert.assertTrue(
+            "DEPENDENCY_LIBS 里缺 libandroid-shmem.so",
+            ProotLoaderStaging.DEPENDENCY_LIBS.any { it.second == "libandroid-shmem.so" },
+        )
+    }
 }

@@ -778,6 +778,8 @@ class ProotTerminalSessionPort(
         // ★ 缺它 proot 起不来。loader 由调用方传进来，与 `launchArgs` 的
         // 别名目录同源，不会出现「loader 铺在 A、别名找 B」的分叉。
         loader?.let { put("PROOT_LOADER", it.absolutePath) }
+        // 与 applyEnv() 逐字一致：proot 自己的动态依赖也要能找到。
+        prootLibDirFor()?.let { put("LD_LIBRARY_PATH", it.absolutePath) }
     }
 
     /**
@@ -862,9 +864,18 @@ class ProotTerminalSessionPort(
         // PTY 分支通过 ptyEnvironment() 传入，这里同样要传 ——
         // 之前漏了，靠 proot 自己找默认路径，换个 ROM 就失败。
         prootLoaderFileFor()?.let { e["PROOT_LOADER"] = it.absolutePath }
-        // LD_LIBRARY_PATH / LD_PRELOAD 已随 clear() 一并清掉：
-        // 留着会让容器里的程序去加载 bionic，curl 报
-        // `cannot locate symbol "EVP_MD_CTX_create"`。
+        // ## 依赖库路径（2026-11-02 实测后加）
+        //
+        // proot 的 ELF 里有 `DT_NEEDED: libtalloc.so.2 / libandroid-shmem.so`。
+        // **执行** `nativeLibraryDir` 里的二进制时，Android 的链接器**不搜**那个
+        // 目录（实测：库就在同目录，仍报 `library "libtalloc.so.2" not found`）。
+        // 不指路的话 proot 根本起不来。
+        //
+        // 指的那个目录里只有这两个库，**不掺 Android 系统库** —— 所以不会重现
+        // 下面说的「容器程序加载 bionic 后 cannot locate symbol」那个老问题。
+        prootLibDirFor()?.let { e["LD_LIBRARY_PATH"] = it.absolutePath }
+        // LD_PRELOAD 已随 clear() 一并清掉：留着会让容器里的程序去加载 bionic，
+        // curl 报 `cannot locate symbol "EVP_MD_CTX_create"`。
     }
 
     /**
@@ -882,6 +893,16 @@ class ProotTerminalSessionPort(
      * 返回 null 表示铺不起来，此时不设 `PROOT_LOADER`，行为退回旧样子。
      */
     private fun prootLoaderFileFor(): File? = ProotLoaderStaging.stage(context)
+
+    /**
+     * proot 动态依赖所在目录（`filesDir/proot/lib/`），供 `LD_LIBRARY_PATH` 使用。
+     *
+     * 与 [prootLoaderFileFor] 同源（都走 [ProotLoaderStaging]），保证
+     * 「loader 铺在 A、依赖铺在 B」这种分叉不会发生。
+     *
+     * 返回 null 时调用方就不设 `LD_LIBRARY_PATH` —— 与修之前的行为一致。
+     */
+    private fun prootLibDirFor(): File? = ProotLoaderStaging.stageLibs(context)
 
     // internal 而不是 private：isExpectedShutdown 是 ⑤ 的核心判定，
     // 单测要直接断言它（private companion 会让测试完全访问不到，
