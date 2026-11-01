@@ -43,54 +43,45 @@ internal object ProotLoaderStaging {
      *   要么报错信息与修之前完全一致 —— 修一个坑不该制造新的坑。
      */
     fun stage(context: Context): File? = runCatching {
-        val nativeDir = context.applicationInfo.nativeLibraryDir
-        val packaged = pickPackagedLoader(nativeDir)
-            ?: return@runCatching null
-
-        val binDir = File(context.filesDir, "proot/bin")
-        if (!binDir.isDirectory && !binDir.mkdirs()) return@runCatching null
-        val loader = File(binDir, ProotCommand.LOADER_RUNTIME_NAME)
-
-        // 新版本 APK 的文件会变，副本必须跟着换。比大小与时间戳，不做哈希：
-        // 这是热路径（每次 exec 都会走一遍），十几 KB 级文件的哈希不划算。
-        if (stale(loader, packaged)) packaged.copyTo(loader, overwrite = true)
-        // ## ⚠️ 必须给执行位（2026-11-02 在模拟器上实测确认）
-        //
-        // 我一度以为「loader 只被 proot mmap 读，不需要 +x」，于是只调了
-        // `setReadable`。结果是 644。实测（API 30，x86_64 proot 5.1.107）：
-        //
-        // ```
-        // chmod 644 -> proot error: execve("/bin/sh"): Permission denied   FAIL
-        // chmod 755 -> RUN_OK                                                PASS
-        // ```
-        //
-        // 来回切了 4 次，4 次都一致 —— 执行位就是那个开关。
-        //
-        // ## 为什么这个错误特别难查
-        //
-        // 报错是 `execve("/bin/sh"): Permission denied` —— 它说的**不是** loader，
-        // 而是 guest 的 /bin/sh。于是第一反应永远是「rootfs 权限不对」或
-        // 「proot 参数错」，不会想到「loader 缺执行位」。
-        //
-        // 而 proot 秒退之后，`ProotTerminalSessionPort.create` 的 400ms 存活检查
-        // 会判定「启动后立即退出」，终端回退到宿主 shell —— 用户看到的是
-        // `/bin/sh: can't access tty`。整条链上**没有一句提到 loader**。
-        loader.setExecutable(true, false)
-        loader.setReadable(true, false)
-        if (!loader.isFile) return@runCatching null
-        //
-        // ## 这里曾经还拷过一份 `proot` 别名 —— 已删除（2026-11-02）
-        //
-        // 目的本来是让 proot 从可写目录起跑、好在 `/proc/self/exe` 的目录里
-        // 找到 loader。真机报 `Cannot run program ".../files/proot/bin/proot":
-        // error=13, Permission denied` —— **Android 10 起禁止从应用可写数据
-        // 目录执行文件**，`setExecutable` 没用，那是 SELinux 策略不是权限位。
-        //
-        // 结论：可执行的位置只有 `nativeLibraryDir`（只读），loader 留在
-        // `filesDir` 靠 `PROOT_LOADER` 显式指过去就够（loader 只被 mmap 读）。
-        // 详见 [ProotCommand.launchArgs] 的 KDoc。
-        loader
+        pickPackagedLoader(context.applicationInfo.nativeLibraryDir)
     }.getOrNull()
+
+    // ## 为什么不再往 filesDir 拷一份（2026-11-02 定案）
+    //
+    // 这个函数**曾经**把 loader 拷到 `filesDir/proot/bin/proot-loader` 再指过去，
+    // 理由是「proot 只会按运行名 `proot-loader` 在自身目录里找，而
+    // nativeLibraryDir 里只能叫 `libproot-loader.so`」。那个理由在**显式设置**
+    // `PROOT_LOADER` 时并不成立 —— 环境变量给的是完整路径，名字随便叫。
+    //
+    // ### 真正致命的一点：proot 是 `execve` loader 的，不是简单 mmap
+    //
+    // 实测（API 30，x86_64 proot 5.1.107，模拟器，App 自己的进程）：
+    //
+    // | `PROOT_LOADER` 指向 | 结果 |
+    // |---|---|
+    // | `files/proot/bin/proot-loader`（`app_data_file`） | `execve("/bin/sh"): Permission denied` |
+    // | `nativeLibraryDir/libproot-loader.so`（`apk_data_file`） | **正常起来，见到 `~ #` 提示符** |
+    //
+    // 两份文件**逐字节相同**（md5 一致）、权限都是 755。差别只有 SELinux 标签：
+    //
+    // - `app_data_file`：`untrusted_app` **没有** `execute` 权限（Android 10+ 的 W^X）；
+    // - `apk_data_file`：`untrusted_app` **有** `execute` 权限。
+    //
+    // 所以「拷到 filesDir」这条思路从根上就是错的：`setExecutable` 改的是 POSIX
+    // 权限位，改不动 SELinux 策略。这与之前那个
+    // `files/proot/bin/proot: error=13, Permission denied` 是**同一个原因**，
+    // 当时只修了 proot 本体、没意识到 loader 也一样。
+    //
+    // 现在的做法：**直接用 nativeLibraryDir 里的原件**，不拷贝、不改名。
+    // `PROOT_LOADER` 直接指向它，proot 就能 exec 它。
+    //
+    // ### 报错为什么完全指不到真因
+    //
+    // 整条链上 proot 只会说 `execve("/bin/sh"): Permission denied` —— 它说的是
+    // guest 的 /bin/sh，**不是 loader**。于是排查方向永远是「rootfs 权限」或
+    // 「proot 参数」。而 proot 秒退后 400ms 存活检查判定「启动后立即退出」，
+    // 终端回退宿主 shell，用户最后看到 `/bin/sh: can't access tty`。
+    // 三层转述，没有一句提到 loader。
 
     /**
      * 在 `nativeLibraryDir` 里挑出**实际存在的** loader 打包文件；都没有返回 null。

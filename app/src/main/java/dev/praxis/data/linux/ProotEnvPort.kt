@@ -1636,18 +1636,18 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
             //  - 未设 PROOT_LOADER → `execve: No such file or directory`；
             //  - 设了之后 → 输出 `PROOT_REAL_OK`，`-0` 伪 root 与 bind 全部生效。
             //
-            // ## 2026-11-01：设了它还不够，**路径里的文件名** proot 并不认
+            // ## 2026-11-02 定案：loader 必须留在 nativeLibraryDir 原地用
             //
-            // 用户真机截图里 `PROOT_LOADER` 明明已经设了，容器照样秒退。
-            // 真因有两层（详见 [ProotCommand.LOADER_RUNTIME_NAME]）：
-            //  1. proot 推导 loader 时认的是运行名 `proot-loader`，
-            //     而我们打进 APK 的只能叫 `libproot-loader.so`；
-            //  2. loader 与 proot 的相对位置是按 `/proc/self/exe` 的目录推的，
-            //     那个值恒为 `.../lib/arm64/libproot.so`，符号链接改不动。
+            // 此前两版做法（拷到 filesDir 改名、造 proot 别名）**都错**。
+            // 真因是 proot 会 **`execve`** 这个 loader，而 `filesDir` 属
+            // `app_data_file` —— `untrusted_app` 对它没有 `execute` 权限
+            // （Android 10+ 的 W^X）。逐字节相同、权限都 755 的两份文件，
+            // 只因所在目录不同，结果完全相反：
             //
-            // 所以现在 `PROOT_LOADER` 指向的是 [stageProotLoader] 解压出来的
-            // `filesDir/proot/bin/proot-loader`，同时 argv[0] 也换成同目录的
-            // `proot` 别名（见 [ProotCommand.launchArgs]）。
+            //   filesDir 里的        -> execve("/bin/sh"): Permission denied
+            //   nativeLibraryDir 里的 -> 正常进容器，出现 `~ #`
+            //
+            // 详见 [ProotCommand.LOADER_FILE_NAME]。
         }
     }
 

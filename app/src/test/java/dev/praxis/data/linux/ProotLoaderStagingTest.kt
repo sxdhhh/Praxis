@@ -165,16 +165,26 @@ class ProotLoaderStagingTest {
      * 这不是最强的验证，但能拦住「有人觉得 loader 不用 +x 又把它删掉」。
      */
     @Test
-    fun `铺 loader 时必须设置执行位`() {
+    fun `loader 必须直接取自 nativeLibraryDir，不能拷到 filesDir`() {
         val src = File("src/main/java/dev/praxis/data/linux/ProotLoaderStaging.kt")
         val file = listOf(src, File("app/" + src.path), File("../app/" + src.path))
             .firstOrNull { it.isFile }
             ?: throw AssertionError("找不到 ProotLoaderStaging.kt")
-        val text = file.readText()
+        // 只看代码行，不看注释（反面教材写在 KDoc 里，会误伤）
+        val code = file.readLines()
+            .filterNot { it.trimStart().startsWith("*") || it.trimStart().startsWith("//") || it.trimStart().startsWith("/*") }
+            .joinToString("\n")
+        // stage() 必须只有「从 nativeLibraryDir 挑一个」这一步。
         org.junit.Assert.assertTrue(
-            "ProotLoaderStaging 没有给 loader 设置执行位 —— 644 的 loader 会让 proot " +
-                "报 execve(\"/bin/sh\"): Permission denied 然后秒退",
-            text.contains("loader.setExecutable(true"),
+            "stage() 没有从 nativeLibraryDir 取 loader",
+            code.contains("pickPackagedLoader(context.applicationInfo.nativeLibraryDir)"),
+        )
+        // 反例：曾经把 loader 拷到 filesDir 再改名 —— 那条路是死的。
+        org.junit.Assert.assertFalse(
+            "stage() 又把 loader 拷到 filesDir 了 —— filesDir 是 app_data_file，" +
+                "untrusted_app 没有 execute 权限，proot execve 它会报 " +
+                "execve(\"/bin/sh\"): Permission denied",
+            code.contains("proot/bin") || code.contains("copyTo(loader"),
         )
     }
 
