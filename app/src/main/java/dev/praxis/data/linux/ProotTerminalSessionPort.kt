@@ -223,7 +223,7 @@ class ProotTerminalSessionPort(
                     // 判据：只要会话已被标记为关闭，或流是被自己关的，
                     // 这条异常就是预期的。**不吞其它异常**（真正的 IO 故障仍要可见）。
                     val closedByOwner = runCatching { pumpStream(pty.stdout, tap) }
-                    if (closedByOwner.isFailure && !closing.contains(id)) {
+                    if (!isExpectedShutdown(closedByOwner.isFailure, closing.contains(id))) {
                         Log.w(TAG, "PTY 会话 $id 读取中断：${closedByOwner.exceptionOrNull()?.message}")
                     }
                     // 读线程自己收尾：master fd 不关会漏一对 PTY fd（见 Pty 的 KDoc）。
@@ -294,7 +294,7 @@ class ProotTerminalSessionPort(
                 // 与 PTY 分支同一条规则：主动关闭时读被打断是预期，不报错；
                 // 其它异常照旧打日志（否则会话静默死掉，调用方只能等到超时）。
                 val read = runCatching { pumpStream(process.inputStream, tap) }
-                if (read.isFailure && !closing.contains(id)) {
+                if (!isExpectedShutdown(read.isFailure, closing.contains(id))) {
                     Log.w(TAG, "管道会话 $id 读取中断：${read.exceptionOrNull()?.message}")
                 }
                 val code = runCatching { process.waitFor() }.getOrNull()
@@ -875,6 +875,43 @@ class ProotTerminalSessionPort(
 
         /** 超时伪退出码，与 coreutils `timeout` 一致。 */
         const val TIMEOUT_EXIT_CODE = 124
+
+        /**
+         * 读线程拿到的这个异常，该不该被当成**故障**报给界面。
+         *
+         * ## 为什么需要这个判断（⑤ 的核心，2026-11-01 修 / 2026-11-02 抽测）
+         *
+         * 用户报的第 ⑤ 项是「容器会话读取中断（read interrupted by close()
+         * on another thread）」。真因是：用户点关闭标签页时 `close()` 会关掉
+         * master fd，而此刻泵线程正阻塞在 `read()` 上，JDK 于是抛：
+         *
+         * ```
+         * java.io.IOException: read interrupted by close() on another thread
+         * ```
+         *
+         * 旧实现把它原样报成「会话读取结束：read interrupted by close()…」——
+         * 用户看到容器「跑着跑着结束了」，实际上那是**他自己关的**。
+         * 正常关闭不该产生错误文案。
+         *
+         * ## 判据
+         *
+         * 只有「会话已被标记为关闭」时才算预期。**其它异常一律可见** ——
+         * 真正的 IO 故障（磁盘错、fd 被系统回收）必须能被用户看到，
+         * 否则会变成「会话静默死掉，调用方只能等到超时」。
+         *
+         * ## 为什么抽成纯函数
+         *
+         * 这条判据原先在两处（PTY 分支与管道分支）各内联了一遍。
+         * 抽出来之后既能单测，也保证两条分支**不会再次分叉** ——
+         * 那种分叉历史上出现过（一条改了一条没改，表现是「终端能用、
+         * 设置页里的命令全崩」）。
+         *
+         * @param failed 泵线程是否抛了异常
+         * @param closing 该会话是否已被标记为「正在关闭」
+         * @return true 表示这是预期内的收尾，不该报错
+         */
+        internal fun isExpectedShutdown(failed: Boolean, closing: Boolean): Boolean =
+            !failed || closing
     }
 }
 
