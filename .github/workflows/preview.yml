@@ -79,14 +79,34 @@ jobs:
             --tests 'dev.praxis.preview.*' \
             --stacktrace
 
+      # ## 为什么现在列整个 paparazzi 目录，而不是写死 images（2026-11-02 修）
+      #
+      # Paparazzi 2.0 把产物挪到了 `build/reports/paparazzi/<variant>/`，
+      # 而这里原来还在找 1.x 的 `build/reports/paparazzi/images`。
+      # 后果很有欺骗性：测试 5 个全过、workflow 报绿，但上传的 artifact 里
+      # **一张图都没有**（只有一个 warning）—— 视觉验证链路静默空转，
+      # HANDOVER 里「Paparazzi 走 CI」这句话其实一直是假的。
+      #
+      # 日志里的证据：
+      #   See the Paparazzi report at: .../build/reports/paparazzi/debug/index.html
+      #
+      # 所以改成整个 reports/paparazzi 都列、都传，不再猜具体子目录名。
       - name: List rendered images
         if: always()
         run: |
-          dir=preview/build/reports/paparazzi/images
-          if [ -d "$dir" ]; then
-            ls -lh "$dir"
+          root=preview/build/reports/paparazzi
+          if [ -d "$root" ]; then
+            echo "== 目录结构 =="
+            find "$root" -maxdepth 2 -type d | sort
+            echo "== 图片文件 =="
+            found=$(find "$root" -name '*.png' -o -name '*.gif' 2>/dev/null | sort)
+            if [ -n "$found" ]; then
+              echo "$found" | while read -r f; do ls -lh "$f"; done
+            else
+              echo "::warning::paparazzi 目录存在但没有 png/gif —— 渲染可能真的失败了"
+            fi
           else
-            echo "::warning::没有渲染出任何图片（Paparazzi 可能失败）"
+            echo "::warning::没有 $root 目录（Paparazzi 可能失败）"
           fi
 
       # 无论成功失败都传：失败时的 HTML 报告能直接看出崩在哪一步。
@@ -96,7 +116,7 @@ jobs:
         with:
           name: ui-previews
           path: |
-            preview/build/reports/paparazzi/images
-            preview/build/reports/tests
+            preview/build/reports/paparazzi/**
+            preview/build/reports/tests/**
           retention-days: 14
           if-no-files-found: warn
