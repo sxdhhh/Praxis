@@ -1018,5 +1018,71 @@ class WiringGuardTest {
             flat.contains("extractSelectionText(state.active.lines, activeSelection.normalized)"),
         )
     }
+
+    /**
+     * proot 启动：可执行文件只能来自 `nativeLibraryDir`，loader 只能靠 PROOT_LOADER 指路。
+     *
+     * ## 为什么必须有这条（2026-11-02，真机 Permission denied）
+     *
+     * 曾经为了「让 proot 在 /proc/self/exe 的目录里找到 loader」，把 libproot.so
+     * 拷一份到 `filesDir/proot/bin/proot` 并以它为 argv[0] 起跑。真机直接报：
+     *
+     * ```
+     * Cannot run program ".../files/proot/bin/proot": error=13, Permission denied
+     * ```
+     *
+     * 原因是 **Android 10 起禁止从应用可写数据目录执行文件**（SELinux 策略），
+     * `setExecutable(true, false)` 改不了。可执行的只有 `nativeLibraryDir`，
+     * 而它只读 —— 所以「把 proot 拷到别处执行」这个方向**永远**不成立。
+     *
+     * 这条护栏把结论钉住：一旦有人再把可执行路径指向 filesDir，CI 立刻红，
+     * 不必等他装到真机上才发现。
+     */
+    @Test
+    fun prootExecutable_neverComesFromAppDataDir() {
+        val cmd = read("core/linux/src/main/kotlin/dev/praxis/core/linux/ProotCommand.kt")
+        val cmdFlat = cmd.replace(Regex("\\s+"), " ")
+
+        // 1) 核心层不再构造任何「别名」可执行路径。
+        assertTrue(
+            "ProotCommand 又在构造别名可执行路径了 —— Android 10+ 上必然 " +
+                "Permission denied，proot 会连启动都做不到",
+            !cmdFlat.contains("val alias = File("),
+        )
+        // 2) 仍然只有「一个候选」：多候选意味着第一次注定失败。
+        assertTrue(
+            "launchArgs 的签名变了 —— 现在只允许 (executable, arguments) 两个入参，" +
+                "多出来的候选若指向 filesDir，每次启动都会白等一次超时",
+            cmdFlat.contains("fun launchArgs( executable: File, arguments: List<String>, )"),
+        )
+
+        // 3) 两条启动器都必须设 PROOT_LOADER（历史上一条设了、一条忘了，
+        //    表现是「终端能用、设置页里的命令全崩」）。
+        for (path in listOf(
+            "app/src/main/java/dev/praxis/data/linux/ProotEnvPort.kt",
+            "app/src/main/java/dev/praxis/data/linux/ProotTerminalSessionPort.kt",
+        )) {
+            assertTrue(
+                path + " 没有设置 PROOT_LOADER —— proot 找不到 loader 时会报 " +
+                    "execve(\"/bin/sh\"): No such file or directory，极具误导性",
+                read(path).contains("PROOT_LOADER"),
+            )
+        }
+
+        // 4) 铺文件逻辑只铺 loader，不再铺可执行的别名。
+        val staging = read("app/src/main/java/dev/praxis/data/linux/ProotLoaderStaging.kt")
+        assertTrue(
+            "ProotLoaderStaging 又在铺 proot 别名了 —— 那是 Android 10+ 上" +
+                "不能执行的文件，铺了也没用",
+            !staging.contains("PROOT_ALIAS_NAME"),
+        )
+
+        // 5) 可执行文件来源必须是 nativeLibraryDir。
+        assertTrue(
+            "ProotEnvPort 没有从 nativeLibraryDir 取 proot 可执行文件",
+            read("app/src/main/java/dev/praxis/data/linux/ProotEnvPort.kt")
+                .contains("nativeLibraryDir"),
+        )
+    }
 }
 
