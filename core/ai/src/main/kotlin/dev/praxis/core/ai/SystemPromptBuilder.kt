@@ -11,7 +11,7 @@ package dev.praxis.core.ai
  * 这里拆成三件具体的事，缺一件这句话就没落实：
  *
  * 1. **可自定义** → [SystemPromptSettings.custom]，设置页可编辑、可清空；
- * 2. **优先级** → [Priority] 枚举 + [buildLayers] 的**固定拼接顺序**，
+ * 2. **优先级** → 下文的 [PromptPriority] 枚举 + [buildLayers] 的**固定拼接顺序**，
  *    且高优先级的那条带「不得被后续内容覆盖」的显式约束句；
  * 3. **不能偏离** → 末尾追加一条 [ADHERENCE_INSTRUCTION]，
  *    用「强约束」措辞要求模型以这些规则为最高准则。
@@ -30,10 +30,24 @@ package dev.praxis.core.ai
  *
  * 用户的指令比 Praxis 的默认人格更具体、更贴近他本人；
  * 而技能与记忆是**素材**（事实与能力），不该压过用户的明确要求。
- * 顺序即优先级，与 [Priority] 的声明值一致。
+ * 顺序即优先级，与 [PromptPriority] 的声明顺序一致。
+ *
+ * ## ⚠️ 这个枚举目前没有被代码读取（2026-11-01 记录）
+ *
+ * 本枚举声明了五档优先级的**顺序契约**，但 [buildLayers] 用的是函数体里的
+ * `①..⑤` 圈号注释，没有任何一行代码引用过本枚举。全仓搜 `PromptPriority`
+ * 只命中它自己的定义行。
+ *
+ * 也就是说：契约靠注释维系，改 `buildLayers` 的拼接顺序时**编译器不会报错**。
+ * 真正守住顺序的是 `SystemPromptBuilderTest`（它断言了各层的相对顺序）。
+ *
+ * 之前这里写着 `label` 供「设置页解释优先级」使用 —— 设置页从未消费过它，
+ * 那句话是愿望不是事实，已改掉。要真正接线，可以把 `buildLayers` 改成按
+ * `PromptPriority.entries` 遍历生成各层，那样顺序由枚举固化；但那要动核心
+ * 拼接链路，需在有编译器/测试的情况下改。
  */
 enum class PromptPriority(
-    /** 显示名（设置页用来解释优先级）。 */
+    /** 显示名。 */
     val label: String,
 ) {
     /** 用户自定义系统提示词：最高。 */
