@@ -1223,5 +1223,39 @@ class WiringGuardTest {
             code.contains("isAtBottom("),
         )
     }
+
+    /**
+     * ② 的两条启动路径都必须把 `LD_LIBRARY_PATH` 指向依赖目录。
+     *
+     * ## 为什么这条必要（2026-11-02 实测）
+     *
+     * proot 的 ELF 要 `libtalloc.so.2` 与 `libandroid-shmem.so`，而**执行**
+     * `nativeLibraryDir` 里的二进制时 Android 链接器不搜那个目录（实测：
+     * 库就在同目录，仍报 `library "libtalloc.so.2" not found`）。
+     *
+     * 不指路 = proot 起不来 = 秒退 = 终端回退宿主 shell = `can't access tty`。
+     * 而代码原先只**清掉** `LD_LIBRARY_PATH`，从没设过它 —— 这正是被漏掉的一环。
+     */
+    @Test
+    fun prootChild_mustGetLibraryPath() {
+        val term = read("app/src/main/java/dev/praxis/data/linux/ProotTerminalSessionPort.kt")
+        val envPort = read("app/src/main/java/dev/praxis/data/linux/ProotEnvPort.kt")
+        // 管道分支
+        assertTrue(
+            "applyEnv 没设 LD_LIBRARY_PATH —— 管道分支的 proot 会链接失败",
+            term.contains("prootLibDirFor()?.let { e[\"LD_LIBRARY_PATH\"] = it.absolutePath }"),
+        )
+        // PTY 分支
+        assertTrue(
+            "ptyEnvironment 没设 LD_LIBRARY_PATH —— PTY 分支的 proot 会链接失败",
+            term.contains("prootLibDirFor()?.let { put(\"LD_LIBRARY_PATH\", it.absolutePath) }"),
+        )
+        // 设置页 / AI 工具那条路径
+        assertTrue(
+            "ProotEnvPort.prootEnv 没设 LD_LIBRARY_PATH",
+            envPort.contains("ProotLoaderStaging.stageLibs(context)") &&
+                envPort.contains("put(\"LD_LIBRARY_PATH\", it.absolutePath)"),
+        )
+    }
 }
 
