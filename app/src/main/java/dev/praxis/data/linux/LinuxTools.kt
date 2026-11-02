@@ -59,8 +59,14 @@ class LinuxExecTool(
         description = """
             在设备的 Linux 容器（Kali / Ubuntu）里执行一条 shell 命令。
 
-            适用：需要用 Linux 工具（nmap、curl、python3、grep、apt 等）完成的任务。
-            不适用：读写手机上的文件（用文件工具）、执行 Android shell（用终端工具）。
+            ⚠️ 无状态：每次调用都会新起一个 proot 进程，命令结束即销毁。
+            cd / export 不会保留到下一次调用。需要连续操作同一目录、
+            或保留 shell 变量时，改用 create_terminal_session +
+            execute_in_terminal_session（那是一条常驻的 PTY 会话）。
+
+            适用：一次性的独立命令（nmap 扫一次、curl 取一次、grep 查一次）。
+            不适用：读写手机上的文件（用文件工具）、执行 Android shell（用 host_shell 工具）、
+            需要跨命令保留状态的连续操作（用终端会话工具）。
 
             容器是 proot 伪 root，**不碰宿主系统**，但网络与容器内文件会真实改变。
 
