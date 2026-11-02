@@ -1,5 +1,7 @@
 package dev.praxis.ui.widgets
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -135,6 +137,19 @@ fun MiuixSidebar(
     onCreateLabel: String = "新建",
     /** 底部提示文案。 */
     hint: String? = null,
+    /**
+     * 底部操作条槽（多选模式用）。
+     *
+     * ## 为什么由本组件提供这个槽（2026-11-03）
+     *
+     * 多选模式的操作条（置顶 / 删除）必须**贴在抽屉底部**、且不随内容滚动。
+     * 若让调用方塞进 `content` 里，它就成了 LazyColumn 的一部分 —— 会话一多，
+     * 操作条会被滚走，用户在多选态下找不到「删除」在哪。
+     *
+     * 所以放在 `weight(1f)` 的内容区**外面**、与头部对称。
+     * null = 不显示（默认，行为与之前完全一致）。
+     */
+    bottomBar: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
@@ -386,6 +401,7 @@ fun MiuixSidebar(
                 onCreateLabel = onCreateLabel,
                 hint = hint,
                 onDismiss = currentDismiss,
+                bottomBar = bottomBar,
                 content = content,
             )
         }
@@ -398,6 +414,7 @@ private fun SidebarPanel(
     onCreate: (() -> Unit)?,
     onCreateLabel: String,
     hint: String?,
+    bottomBar: (@Composable () -> Unit)?,
     onDismiss: () -> Unit,
     content: @Composable () -> Unit,
 ) {
@@ -437,9 +454,16 @@ private fun SidebarPanel(
         Box(
             modifier = Modifier
                 .weight(1f)
-                .padding(bottom = navBarBottom),
+                // 有底部操作条时，导航栏 inset 交给它去留（否则会多出一条空隙）。
+                .padding(bottom = if (bottomBar == null) navBarBottom else 0.dp),
         ) {
             content()
+        }
+        if (bottomBar != null) {
+            // 操作条在内容区外面：不随列表滚动，永远贴在抽屉底部。
+            Box(modifier = Modifier.padding(bottom = navBarBottom)) {
+                bottomBar()
+            }
         }
     }
 }
@@ -506,13 +530,33 @@ fun SidebarSessionRow(
     onClick: () -> Unit,
     onTogglePin: () -> Unit,
     onLongClick: (() -> Unit)? = null,
+    /**
+     * 是否处于多选模式。
+     *
+     * ## 为什么要有这个（2026-11-03）
+     *
+     * 用户要求侧边栏管理「像 DeepSeek 一样」：长按某条进入多选，
+     * 每条左侧出现圆形复选框，底部出现 [置顶][删除] 批量操作条。
+     *
+     * 多选模式下行的外观要变三处：
+     *  1. 左侧让出一个复选框的位置；
+     *  2. **图钉按钮隐藏** —— 单条置顶与批量置顶同时存在会让操作含义打架；
+     *  3. 点击语义从「打开会话」变成「切换勾选」。
+     */
+    selectionMode: Boolean = false,
+    /** 当前行是否被勾选。仅在 [selectionMode] 为 true 时有意义。 */
+    checked: Boolean = false,
 ) {
-    val container = if (selected) {
-        MiuixTheme.colorScheme.primaryContainer
-    } else {
-        MiuixTheme.colorScheme.surface
+    val container = when {
+        // 多选态优先：勾选中的行要高亮，但它不一定等于「当前打开的会话」。
+        selectionMode && checked -> MiuixTheme.colorScheme.primaryContainer
+        // 多选态下，非勾选行一律用 surface —— 否则「当前会话」的高亮会
+        // 与勾选高亮混淆，用户分不清哪条是打开着的、哪条是选中的。
+        selectionMode -> MiuixTheme.colorScheme.surface
+        selected -> MiuixTheme.colorScheme.primaryContainer
+        else -> MiuixTheme.colorScheme.surface
     }
-    val titleColor = if (selected) {
+    val titleColor = if ((selectionMode && checked) || (!selectionMode && selected)) {
         MiuixTheme.colorScheme.onPrimaryContainer
     } else {
         MiuixTheme.colorScheme.onSurface
@@ -530,6 +574,45 @@ fun SidebarSessionRow(
             .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // 多选态：左侧圆形复选框（对齐 DeepSeek 的形态）。
+        if (selectionMode) {
+            Box(
+                modifier = Modifier
+                    .padding(end = 10.dp)
+                    .size(20.dp)
+                    // 已选：实心圆 + 勾；未选：空心圆描边。
+                    // 不用 MiuixIcons 的 checkbox：那个是方角，DeepSeek 是圆的。
+                    .clip(CircleShape)
+                    .background(
+                        if (checked) {
+                            MiuixTheme.colorScheme.primary
+                        } else {
+                            androidx.compose.ui.graphics.Color.Transparent
+                        },
+                    )
+                    .then(
+                        if (checked) {
+                            Modifier
+                        } else {
+                            Modifier.border(
+                                width = 1.5.dp,
+                                color = MiuixTheme.colorScheme.outline,
+                                shape = CircleShape,
+                            )
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (checked) {
+                    Icon(
+                        imageVector = MiuixIcons.Regular.Check,
+                        contentDescription = null,
+                        tint = MiuixTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(13.dp),
+                    )
+                }
+            }
+        }
         Column(Modifier.weight(1f)) {
             Text(
                 text = title,
@@ -550,7 +633,17 @@ fun SidebarSessionRow(
         }
         // 图钉：置顶的显示实心，未置顶的显示空心。
         // 两个图标都常驻（而不是 hover 才出），因为触屏没有 hover 状态。
-        IconButton(onClick = onTogglePin, modifier = Modifier.size(32.dp)) {
+        //
+        // 多选态下隐藏：否则「单条置顶」与底部「批量置顶」两个入口同时存在，
+        // 用户点行内图钉会以为在勾选。
+        IconButton(
+            onClick = onTogglePin,
+            modifier = Modifier.size(32.dp).then(
+                if (selectionMode) Modifier else Modifier,
+            ),
+            enabled = !selectionMode,
+        ) {
+            if (!selectionMode) {
             Icon(
                 imageVector = if (pinned) MiuixIcons.Regular.Unpin else MiuixIcons.Regular.Pin,
                 contentDescription = if (pinned) "取消置顶" else "置顶",
@@ -559,8 +652,9 @@ fun SidebarSessionRow(
                 } else {
                     MiuixTheme.colorScheme.onSurfaceVariantSummary
                 },
-                modifier = Modifier.size(16.dp),
-            )
+                    modifier = Modifier.size(16.dp),
+                )
+            }
         }
     }
 }

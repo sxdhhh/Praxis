@@ -5,6 +5,9 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -119,6 +122,23 @@ fun ChatSidebar(
      * 所以记下 id，在 `sessionId` 真正切走之前**跳过补齐**。
      */
     var justDeletedId by remember { mutableStateOf<String?>(null) }
+
+    /**
+     * 多选模式（2026-11-03，对齐 DeepSeek）。
+     *
+     * 用户原话：「侧边栏的管理应该像DeepSeek一样」。
+     * DeepSeek 的行为是：长按某条 → 进入多选 → 每条左侧出圆形复选框
+     * → 顶部标题变「选择对话」+ 右侧 × → 底部出现 [置顶][删除] 操作条。
+     *
+     * 旧实现只有「长按 → 二次确认删除」**单条**，删三条要点三次 + 等三次动画。
+     *
+     * 两个状态分开存：
+     *  - [selectionMode] 控制「是不是多选态」（决定行样式、底部条是否出现）；
+     *  - [selectedIds] 是勾选集合。
+     * 退出多选时清空集合，避免下次进来带着上次的残留勾选。
+     */
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     val sidebarListState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     // 抽屉每次打开时重新拉一次：不然新建/删除之后抽屉里还是旧列表。
@@ -180,7 +200,9 @@ fun ChatSidebar(
         open = open,
         progress = progress,
         onDismiss = onDismiss,
-        title = "对话历史",
+        // 多选态下标题变「选择对话」—— 与 DeepSeek 一致，
+        // 让用户一眼知道现在点行是「勾选」而不是「打开」。
+        title = if (selectionMode) "选择对话" else "对话历史",
         onCreateLabel = "＋ 新建对话",
         onCreate = {
             // ## 新建对话必须**立刻落库**（2026-10-22 修，第 6 项）
@@ -203,6 +225,71 @@ fun ChatSidebar(
             scope.launch {
                 runCatching { chatPersistence.ensureSession(newId, "新对话") }
                 onOpenSession(newId)
+            }
+        },
+        // ── 多选模式的底部操作条（对齐 DeepSeek）─────────────────────
+        //
+        // 只在多选态出现，且由 MiuixSidebar 的 bottomBar 槽承载：
+        // 放在 content 里会被 LazyColumn 滚走，用户在长列表里找不到「删除」。
+        bottomBar = if (!selectionMode) {
+            null
+        } else {
+            {
+                SidebarSelectionActions(
+                    selectedCount = selectedIds.size,
+                    allSelected = sessions.isNotEmpty() && selectedIds.size == sessions.size,
+                    onToggleSelectAll = {
+                        selectedIds = if (selectedIds.size == sessions.size) {
+                            emptySet()
+                        } else {
+                            sessions.map { it.id }.toSet()
+                        }
+                    },
+                    onPin = {
+                        val ids = selectedIds.toList()
+                        scope.launch {
+                            ids.forEach { id ->
+                                runCatching {
+                                    chatPersistence.setSessionPinned(sessionId = id, pinned = true)
+                                }
+                            }
+                            selectionMode = false
+                            selectedIds = emptySet()
+                            reloadTick++
+                        }
+                    },
+                    onDelete = {
+                        val ids = selectedIds.toList()
+                        if (ids.isEmpty()) return@SidebarSelectionActions
+                        // ## 批量删除的三条红线（每一条都是踩过的坑）
+                        //
+                        // 1. **只调 deleteSession，绝不调 ensureSession / upsert**。
+                        //    SQLite 的 `@Insert(onConflict = REPLACE)` 是 DELETE+INSERT，
+                        //    会连带触发 messages 表的 ON DELETE CASCADE —— 整个会话
+                        //    的消息被删光。本项目已因为这个丢过两次数据。
+                        // 2. **当前会话在被删集合里时，必须交给上层切走**，
+                        //    否则对话页会停在一条已不存在的会话上发不出消息。
+                        // 3. **先记 justDeletedId 再删**，不然 reloadTick 触发的
+                        //    补齐守卫会把刚删的行插回去（「删不掉」的老 bug）。
+                        val deletingCurrent = ids.contains(currentSessionId)
+                        justDeletedId = if (deletingCurrent) currentSessionId else null
+                        selectionMode = false
+                        selectedIds = emptySet()
+                        scope.launch {
+                            ids.forEach { id ->
+                                runCatching { chatPersistence.deleteSession(id) }
+                            }
+                            reloadTick++
+                            if (deletingCurrent) {
+                                onDeleteCurrentSession?.invoke(currentSessionId)
+                            }
+                        }
+                    },
+                    onExit = {
+                        selectionMode = false
+                        selectedIds = emptySet()
+                    },
+                )
             }
         },
         hint = "长按会话可删除",
@@ -286,15 +373,31 @@ fun ChatSidebar(
                             subtitle = null,
                             selected = session.id == currentSessionId,
                             pinned = session.pinned,
+                            selectionMode = selectionMode,
+                            checked = session.id in selectedIds,
                             onClick = {
-                                // 点了别的行就取消「待删除」态：
-                                // 否则确认按钮会留在原处，用户会以为点错了行。
-                                pendingDelete = null
-                                onOpenSession(session.id)
+                                if (selectionMode) {
+                                    // 多选态：点行 = 切换勾选，不打开会话。
+                                    selectedIds = if (session.id in selectedIds) {
+                                        selectedIds - session.id
+                                    } else {
+                                        selectedIds + session.id
+                                    }
+                                } else {
+                                    // 点了别的行就取消「待删除」态：
+                                    // 否则确认按钮会留在原处，用户会以为点错了行。
+                                    pendingDelete = null
+                                    onOpenSession(session.id)
+                                }
                             },
-                            // 长按进入删除确认态（同一条再长按一次则收起）。
+                            // 长按：进入多选态并勾上这一条（DeepSeek 的行为）。
                             onLongClick = {
-                                pendingDelete = if (pendingDelete == session.id) null else session.id
+                                if (!selectionMode) {
+                                    selectionMode = true
+                                    selectedIds = setOf(session.id)
+                                    // 进多选先把单条待删除态清掉：两套删除入口不能并存。
+                                    pendingDelete = null
+                                }
                             },
                             onTogglePin = {
                                 scope.launch {
@@ -347,5 +450,73 @@ fun ChatSidebar(
                 }
             }
         }
+    }
+}
+
+/**
+ * 多选模式的底部操作条：[全选] [置顶] [删除]，对齐 DeepSeek。
+ *
+ * ## 为什么单独抽出来
+ *
+ * 它由 [MiuixSidebar] 的 `bottomBar` 槽承载（在内容区外面），
+ * 所以必须是一个独立的 Composable，不能内联在 `content` 里。
+ *
+ * ## 为什么「删除」不是红色以外的强调
+ *
+ * 删除是破坏性操作，用 `error` 色区分。但因为是多选批量删除、
+ * 且没有二次确认（DeepSeek 也没有），文案里带上条数（「删除 3」）
+ * 让人在按下之前就知道会影响几条 —— 这比弹一个确认框更轻、也更安全。
+ */
+@Composable
+private fun SidebarSelectionActions(
+    selectedCount: Int,
+    allSelected: Boolean,
+    onToggleSelectAll: () -> Unit,
+    onPin: () -> Unit,
+    onDelete: () -> Unit,
+    onExit: () -> Unit,
+) {
+    val hasSelection = selectedCount > 0
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        // 全选 / 取消全选：与 DeepSeek 一样放在操作条里，而不是标题栏。
+        MiuixTextActionButton(
+            visible = true,
+            text = if (allSelected) "取消全选" else "全选",
+            onClick = onToggleSelectAll,
+        )
+        // ## 没勾选时不显示这两个按钮，而不是「显示但禁用」
+        //
+        // `MiuixTextActionButton` 只有 (visible, text, onClick, modifier) 四个参数，
+        // 没有 enabled / 颜色入参（已核对 ui/widgets/MiuixButtons.kt:70）。
+        // 与其为了「禁用态」改那个公共组件、让一堆不相关调用点跟着适配，
+        // 不如用 `visible` 表达：没勾选 = 没有可执行的操作 = 不展示。
+        //
+        // 这也更贴近 DeepSeek —— 它没选任何项时底部只有「全选」。
+        if (hasSelection) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(Modifier.weight(1f)) {
+                    MiuixTextActionButton(
+                        visible = true,
+                        text = "置顶 $selectedCount",
+                        onClick = onPin,
+                    )
+                }
+                Box(Modifier.weight(1f)) {
+                    MiuixTextActionButton(
+                        visible = true,
+                        text = "删除 $selectedCount",
+                        onClick = onDelete,
+                    )
+                }
+            }
+        }
+        MiuixTextActionButton(
+            visible = true,
+            text = "完成",
+            onClick = onExit,
+        )
     }
 }
