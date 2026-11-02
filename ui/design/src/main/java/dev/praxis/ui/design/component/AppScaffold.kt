@@ -386,10 +386,7 @@ private fun BlurredTopBar(
                         // 也看不出这是个可点的东西。
                         onBack != null -> FloatingIconButton(
                             onClick = onBack,
-                            // `Back` 是 miuix 的顶层扩展属性
-                            // （`top.yukonga.miuix.kmp.icon.extended.Back`），
-                            // 不是 `MiuixIcons.Regular.Back` —— 后者不存在。
-                            icon = Back,
+                            icon = MiuixIcons.Regular.Back,
                             contentDescription = "返回",
                         )
                         else -> Unit
