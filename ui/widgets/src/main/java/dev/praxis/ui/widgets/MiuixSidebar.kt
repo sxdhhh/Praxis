@@ -1,5 +1,10 @@
 package dev.praxis.ui.widgets
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
 import androidx.compose.animation.core.Animatable
@@ -604,12 +609,32 @@ fun SidebarSessionRow(
                 contentAlignment = Alignment.Center,
             ) {
                 if (checked) {
-                    Icon(
-                        imageVector = MiuixIcons.Regular.Check,
-                        contentDescription = null,
-                        tint = MiuixTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(13.dp),
-                    )
+                    // ## 为什么自绘勾而不是用图标（2026-11-03）
+                    //
+                    // 我原本写的 `MiuixIcons.Regular.Check` **不存在** ——
+                    // 下载 miuix-icons 0.9.4 的 aar 核实过，那个包里没有 Check
+                    // 图标（CI #117 直接报 Unresolved reference 'Check'）。
+                    //
+                    // 与其再找一个「长得像勾」的图标凑合（大小/线宽/端点都会
+                    // 跟 11dp 的圆不成比例），不如画两条线：零依赖、比例可控。
+                    Canvas(modifier = Modifier.size(11.dp)) {
+                        val w = size.width
+                        val h = size.height
+                        val path = Path().apply {
+                            moveTo(w * 0.10f, h * 0.52f)
+                            lineTo(w * 0.40f, h * 0.80f)
+                            lineTo(w * 0.90f, h * 0.22f)
+                        }
+                        drawPath(
+                            path = path,
+                            color = MiuixTheme.colorScheme.onPrimary,
+                            style = Stroke(
+                                width = w * 0.16f,
+                                cap = StrokeCap.Round,
+                                join = StrokeJoin.Round,
+                            ),
+                        )
+                    }
                 }
             }
         }
