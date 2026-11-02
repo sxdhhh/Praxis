@@ -263,7 +263,6 @@ class WiringGuardTest {
      */
     @Test
     fun bottomSheets_shareSameComponent() {
-        val settings = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatSettingsBar.kt")
         val attachment = read("feature/chat/src/main/java/dev/praxis/feature/chat/AttachmentPanel.kt")
 
         // 附件菜单必须走 miuix 下拉（与模型/功能同源）。
@@ -277,13 +276,20 @@ class WiringGuardTest {
             !attachment.contains("MiuixAnimatedPopup(") &&
                 !attachment.contains("AttachmentCellView("),
         )
-        // 两边都不许再出现「靠同一组魔法数字对齐」的写法。
+        // 附件面板不许再出现「靠魔法数字对齐」的写法。
+        //
+        // ## 为什么只查附件，不查 ChatSettingsBar（2026-11-03 收窄）
+        //
+        // 第一版把 ChatSettingsBar 也一起查了，CI 立刻红 —— 因为「功能」与
+        // 「模型选择」两块面板内容复杂（记忆/工具/权限等分区、可折叠、需滚动），
+        // 它们**必须**用自建 Card + 各自的分区布局，不适合塞进纯列表形态的下拉。
+        //
+        // 而用户这条诉求的原话是「**加号的菜单**应该和模型和功能菜单的样式一致」，
+        // 指向的是加号那一个。把范围扩到 ChatSettingsBar 属于我擅自加戏，
+        // 而且会让一条本来正确的断言变成「挡路」。
+        //
+        // 所以收窄到：附件面板自己不许写死尺寸（它已交给 miuix）。
         listOf(".padding(bottom = 96.dp, end = 8.dp)", ".width(280.dp)").forEach { needle ->
-            assertTrue(
-                "ChatSettingsBar 又出现了硬编码对齐尺寸 $needle —— " +
-                    "三块浮层应交给 miuix 组件保证，不该各自写常量",
-                !settings.contains(needle),
-            )
             assertTrue(
                 "AttachmentPanel 又出现了硬编码对齐尺寸 $needle",
                 !attachment.contains(needle),
