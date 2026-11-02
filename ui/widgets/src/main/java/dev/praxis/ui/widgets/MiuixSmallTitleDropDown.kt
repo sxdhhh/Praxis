@@ -21,12 +21,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -57,10 +55,6 @@ fun MiuixDropdown(
     // State to manage whether the dropdown is expanded or not.
     val isDropdownExpanded = remember { mutableStateOf(false) }
     val hapticFeedback = LocalHapticFeedback.current
-    // 触发行的实测尺寸：交给 OverlayDropdownPopup 的 collapseSize，
-    // 它拿这个矩形当「收起态」的起点，展开时从这块内容长成面板。
-    // 0 尺寸起步是安全的：弹窗内部对 0 会退化成「无收起态动画」而不是崩掉。
-    var triggerSize by remember { mutableStateOf(IntSize.Zero) }
     // 把 items 包成一个 DropdownEntry：入参是 entry 列表，
     // 每个 item 的 onClick 自己负责选中并收起。
     val entry = remember(items, selectedIndex) {
@@ -99,7 +93,6 @@ fun MiuixDropdown(
                     },
                 )
                 // Use the same padding as SmallTitle for consistent layout.
-                .onSizeChanged { triggerSize = it }
                 .padding(horizontal = 28.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -158,23 +151,33 @@ fun MiuixDropdown(
         // 的内部实现一致（见 miuix-preference 的 OverlayDropdownPopup.kt）。
         // `renderInRootScaffold = true` 让它绘制到根 Scaffold 的 overlay 层，
         // 避免被 LazyColumn 的 clip 裁掉。
-        // ## 换成 OverlayDropdownPopup：补上「收起态→展开」的形变动画（2026-11-03）
+        // ## 换成 OverlayDropdownPopup（2026-11-03）
         //
         // 用户原话：「现在只有加号的那个菜单有弹窗动画，模型和功能菜单没有弹出和关闭的动画」。
         //
-        // `OverlayListPopup` 只有「整体出现/消失」，没有形状插值 —— 收起态就是没有，
-        // 菜单凭空浮出来。而 `OverlayDropdownPopup` 支持把**收起态的胶囊**（当前选中文字
-        // + 箭头）当作起点，用 `collapseSize` + `collapseContent` 描述它，
-        // 弹窗会从这块内容原位长成面板，关闭时再缩回去。
+        // `OverlayListPopup` 只有整体出现/消失；`OverlayDropdownPopup` 是它的升级版，
+        // 带逐项的出现动画与关闭动画，并通过 `onDismissFinished` 给出「关闭动画真正结束」
+        // 的时刻 —— 这个回调是「关完再允许重开」的必需信号，ListPopup 没有。
         //
-        // ## 关于命名的一句话澄清
+        // ## 关于「收起态形变」—— 官方 0.9.4 做不了，别再照 NexioSchedule 抄
         //
-        // 上面那段注释提到「miuix-preference 的 OverlayDropdownPopup」—— 那是**发布版**
-        // 的 API，它没有 `collapseContent` / `collapseSize` 这些参数。
-        // NexioSchedule 用的是它自己 fork 进 `:miuix` 模块的增强版。
-        // 现在这版用的是 Praxis 依赖的**官方 0.9.4**：它有 `collapseSize` / `collapseContent`
-        // / `collapseOnSelection` / `onDismissFinished`，足以做出形变动画。
-        // （已用 javap 从 Maven Central 的 aar 里核实过签名，不是照抄。）
+        // NexioSchedule 的调用里有 `collapseSize` / `collapseContent` / `dragSelectState`，
+        // 那是它自己 fork 进 :miuix 模块的增强版
+        // （miuix/src/commonMain/.../popup/LiquidOverlayDropdownPopup.kt）。
+        // Praxis 依赖的是官方 0.9.4，javap 核实过签名只有 8 个参数：
+        //
+        //   entries / show / onDismiss / onDismissFinished / maxHeight
+        //   dropdownColors / renderInRootScaffold / collapseOnSelection
+        //
+        // **没有** collapseSize / collapseContent / onFractionProgress / dragSelectState。
+        // 我先后两次照着 NexioSchedule 的调用写参数、两次编译失败 —— 记在这里，
+        // 下次要抄之前先 javap 一遍官方 aar。
+        //
+        // 想要「胶囊长成面板」那种形变，只能 fork miuix 或手写插值，
+        // 那属于 P6 的范围，不在这一项里硬塞。
+        //
+        // `renderInRootScaffold = true` 保留：让浮层画到根 Scaffold 的 overlay 层，
+        // 避免被 LazyColumn 的 clip 裁掉（模型选择在设置页的 LazyColumn 里）。
         OverlayDropdownPopup(
             entries = listOf(entry),
             show = isDropdownExpanded.value,
@@ -188,30 +191,6 @@ fun MiuixDropdown(
             renderInRootScaffold = true,
             // 单选场景：选中后收起。
             collapseOnSelection = true,
-            // 收起态尺寸：以触发行为准（测量后再传，否则首帧是 0 会闪一下）。
-            collapseSize = triggerSize,
-            // 收起态内容：与触发行完全一致的「选中文字 + 箭头」，
-            // 弹窗就是从这一块长出来的。
-            collapseContent = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp),
-                ) {
-                    Text(
-                        text = if (itemsNotEmpty) items[selectedIndex] else placeholder,
-                        fontSize = MiuixTheme.textStyles.subtitle.fontSize,
-                        fontWeight = FontWeight.Bold,
-                        color = MiuixTheme.colorScheme.onBackgroundVariant,
-                    )
-                    Image(
-                        modifier = Modifier.size(10.dp, 16.dp),
-                        imageVector = MiuixIcons.Basic.ArrowUpDown,
-                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantActions),
-                        contentDescription = null,
-                    )
-                }
-            },
         )
     }
 }
