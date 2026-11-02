@@ -14,7 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -47,7 +47,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 fun FloatingIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    icon: ImageVector = MiuixIcons.Regular.Back,
+    icon: ImageVector = Back,
     contentDescription: String = "返回",
     iconTint: Color = MiuixTheme.colorScheme.onSurface,
 ) {
