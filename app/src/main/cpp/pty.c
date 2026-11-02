@@ -257,3 +257,85 @@ Java_dev_praxis_core_terminal_Pty_setPtyWindowSize(
     }
     return 0;
 }
+
+/*
+ * ═══════════════════════════════════════════════════════════════════
+ * 兼容符号：不带 `_00024Companion` 的版本（2026-11-03 真机实证修复）
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ * ## 真机症状
+ *
+ * 终端一进就 `can't access tty`，logcat 里：
+ *
+ * ```
+ * E PraxisPty: java.lang.UnsatisfiedLinkError: No implementation found for
+ *   int[] dev.praxis.core.terminal.Pty.createSubprocess(java.lang.String[], ...)
+ *   (tried Java_dev_praxis_core_terminal_Pty_createSubprocess and
+ *          Java_dev_praxis_core_terminal_Pty_createSubprocess___3Ljava_lang_String_2...)
+ * ```
+ *
+ * ## 为什么
+ *
+ * Kotlin 侧把这些写成 companion object 里的 `@JvmStatic external fun`。
+ * `@JvmStatic` 会在**外层类 `Pty`** 上再生成一个静态桥接方法，而 JNI 解析时
+ * **优先查外层类那个名字**（`Java_..._Pty_createSubprocess`），
+ * 但它没有 native implementation —— 于是 UnsatisfiedLinkError。
+ *
+ * 证据：同一份文件里 `setPtyWindowSize` 当初就是因为没写 Companion 前缀而能工作，
+ * 其余四个写了 `_00024Companion` 的全部失效。两套命名混在同一个库里，
+ * 说明这个前缀写法本身没经过真机验证。
+ *
+ * ## 修法
+ *
+ * 补上不带前缀的别名，让 JVM 无论按哪个名字解析都能找到实现。
+ * 保留带 `_00024Companion` 的旧符号，避免破坏其它调用路径。
+ */
+
+JNIEXPORT jintArray JNICALL
+Java_dev_praxis_core_terminal_Pty_createSubprocess(
+        JNIEnv *env, jclass clazz,
+        jobjectArray cmdarray, jobjectArray envarray,
+        jstring workingDir, jint rows, jint cols) {
+    return Java_dev_praxis_core_terminal_Pty_00024Companion_createSubprocess(
+            env, NULL, cmdarray, envarray, workingDir, rows, cols);
+}
+
+JNIEXPORT jint JNICALL
+Java_dev_praxis_core_terminal_Pty_waitForPid(JNIEnv *env, jclass clazz, jint pid) {
+    return Java_dev_praxis_core_terminal_Pty_00024Companion_waitFor(env, NULL, pid);
+}
+
+JNIEXPORT jint JNICALL
+Java_dev_praxis_core_terminal_Pty_getTerminalFlags(JNIEnv *env, jclass clazz, jint fd) {
+    return Java_dev_praxis_core_terminal_Pty_00024Companion_getTerminalFlags(env, NULL, fd);
+}
+
+JNIEXPORT jint JNICALL
+Java_dev_praxis_core_terminal_Pty_getAvailableBytes(JNIEnv *env, jclass clazz, jint fd) {
+    return Java_dev_praxis_core_terminal_Pty_00024Companion_getAvailableBytes(env, NULL, fd);
+}
+
+/*
+ * `setPtyWindowSize` 的对称别名。
+ *
+ * 它原本只有 `Pty_`（外层类）形式，其余四个只有 `Pty_00024Companion_`（伴生类）形式。
+ * 既然两套命名都在用，就把两套都补齐 —— 无论 JVM 按哪个名字解析都能拿到实现。
+ * 只补一边等于在赌 `@JvmStatic` 的生成规则永远不变，而这次真机故障正是
+ * 因为赌错了生成规则。
+ */
+JNIEXPORT jint JNICALL
+Java_dev_praxis_core_terminal_Pty_00024Companion_setPtyWindowSize(
+        JNIEnv *env, jobject thiz, jint fd, jint rows, jint cols) {
+    return Java_dev_praxis_core_terminal_Pty_setPtyWindowSize(env, NULL, fd, rows, cols);
+}
+
+/*
+ * `waitFor` 的名字不一致问题：Kotlin 侧方法叫 `waitForPid`，
+ * 而 C 侧伴生版本历史上写成了 `waitFor`（少了 Pid）。
+ * JVM 解析用的是 Kotlin 方法名，所以 `waitForPid` 这个名字必须有实现。
+ */
+JNIEXPORT jint JNICALL
+Java_dev_praxis_core_terminal_Pty_00024Companion_waitForPid(
+        JNIEnv *env, jobject thiz, jint pid) {
+    return Java_dev_praxis_core_terminal_Pty_00024Companion_waitFor(env, thiz, pid);
+}

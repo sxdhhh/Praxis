@@ -171,3 +171,50 @@ if (pid == 0) {
 **这三条加日志本身就是必须的修复** —— 一个能让整个终端静默降级的代码路径，
 不该一行日志都没有。这是可观测性缺陷，不是调试手段。
 
+## M4 真机实证（2026-11-03）—— 修正假设
+
+### 数据没有丢，是界面没加载
+
+真机数据库直读，重启 App 前后对比：
+
+```
+              重启前              重启后
+sessions:     main / s1793628034799   （不变）
+  main         2 条消息            2 条消息
+  s1793628034799  47 条消息         47 条消息
+```
+
+**一条都没少。** 所以用户说的「部分内容消失」不是数据丢失，
+而是**重进后界面没能把已有内容渲染出来**。
+
+### 与「命中率清零」是同一个根因
+
+`ContextUsage.used` 只在 `ChatViewModel.publishUsage()` 里写，三个调用点全在发送路径：
+
+```
+ChatViewModel.kt:1677  publishUsage(buildPreparedMessages(config), config)
+ChatViewModel.kt:1717  publishUsage(buildPreparedMessages(config), config)
+ChatViewModel.kt:2633  publishUsage(buildPreparedMessages(config), config)
+```
+
+`restoreIfNeeded()`（重进入口）不调用它 → 重进后 `used` 停在 0 → 进度条显示 `0 / 1.0M`。
+
+两者指向同一个缺陷形态：**恢复路径只恢复了一半状态**。
+
+### 修法
+
+`restoreIfNeeded()` 恢复完历史后，把「由历史派生的状态」全部重算一遍：
+
+1. `publishUsage(恢复出的历史, config)` → 恢复 `contextUsage.used`；
+2. 检查恢复后是否真的把消息灌进了 `state.bubbles`（对比数据库条数）；
+3. 若消息没渲染，查恢复流程里对 `compacted.coveredCount` / `history` 的处理 ——
+   压缩摘要覆盖的部分是否被正确重建。
+
+### 验证方式（真机可做）
+
+```
+基线：拉库 -> 记 sessions 与每会话消息数、记界面进度条读数
+重启 App -> 再拉库对比（数据层）+ 截图看进度条与消息气泡（UI 层）
+```
+
+数据层已确认不会丢，所以**验收重点是 UI 层**。
