@@ -201,6 +201,12 @@ open class Pty(
                 return null
             }
             val envArray = environment.map { "${it.key}=${it.value}" }.toTypedArray()
+            // ## 每个失败分支都必须留日志（2026-11-03 真机实证后补）
+            //
+            // 原来这四处全是静默 `return null`。真机实测：终端降级到管道、
+            // logcat 里**一条 PraxisPty 都没有** —— 完全不知道死在哪一步。
+            //
+            // 一个能让整个终端降级的路径不该沉默。这里把「哪一步、为什么」写进日志。
             val result = runCatching {
                 createSubprocess(
                     command,
@@ -209,13 +215,24 @@ open class Pty(
                     if (rows > 0) rows else 60,
                     if (cols > 0) cols else 40,
                 )
-            }.getOrNull() ?: return null
+            }.onFailure {
+                Log.e(TAG, "createSubprocess 抛异常（JNI 层），argv[0]=${command.firstOrNull()}", it)
+            }.getOrNull() ?: run {
+                Log.e(TAG, "createSubprocess 返回 null：forkpty 失败，argv[0]=${command.firstOrNull()}")
+                return null
+            }
 
             // 返回 [pid, masterFd]，长度不对说明 JNI 出错。
-            if (result.size < 2) return null
+            if (result.size < 2) {
+                Log.e(TAG, "createSubprocess 返回长度 ${result.size}（应为 2），JNI 出错")
+                return null
+            }
             val pid = result[0]
             val fd = result[1]
-            if (fd < 0) return null
+            if (fd < 0) {
+                Log.e(TAG, "forkpty 拿到的 masterFd=$fd 非法（pid=$pid）")
+                return null
+            }
 
             val masterFileDescriptor = runCatching {
                 // 用反射拿到真实 FileDescriptor：JNI 只回了 int fd，

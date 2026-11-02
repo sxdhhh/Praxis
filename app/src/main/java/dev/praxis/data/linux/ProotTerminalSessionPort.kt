@@ -189,9 +189,24 @@ class ProotTerminalSessionPort(
             // 这里比 create() 末尾的 400ms 更早，只为决定「要不要换下一个候选」。
             java.lang.Thread.sleep(200)
             if (started.process.isAlive) {
+                Log.i(TAG, "PTY 会话建立成功 pid=${started.pid} argv[0]=${argv.firstOrNull()}")
                 pty = started
                 break
             }
+            // ## 丢弃也要留证据（2026-11-03 真机实证后补）
+            //
+            // 真机现象：终端一进就报 `can't access tty`，而 logcat 一条都没有。
+            // 原因就在这里 —— PTY 子进程 200ms 内死掉，被静默丢弃、降级到管道，
+            // 全程不留痕。用户和我都无从知道到底是 execve 失败、还是权限问题。
+            //
+            // 退出码要取出来：127 是 pty.c 里 execve/chdir 失败，
+            // 其它值多半是 shell 自己退出。这条日志能直接区分两类原因。
+            val exitNow = runCatching { started.process.waitFor() }.getOrNull()
+            Log.w(
+                TAG,
+                "PTY 子进程 200ms 内已退出（exit=$exitNow），丢弃该候选并降级到管道；" +
+                    "argv[0]=${argv.firstOrNull()}"
+            )
             runCatching { started.destroy() }
         }
         if (pty != null) {
