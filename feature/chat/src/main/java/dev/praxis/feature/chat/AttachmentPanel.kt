@@ -158,6 +158,9 @@ fun AttachmentPanel(
         onDismissFinished = { onDismiss?.invoke() },
         maxHeight = null,
         dropdownColors = DropdownDefaults.dropdownColors(),
+        // 画到根 Scaffold 的 overlay 层：输入栏在页面底部，
+        // 不这样会被外层容器的 clip 裁掉（与模型/功能菜单一致）。
+        renderInRootScaffold = true,
         // 动作菜单：点完就收起。
         collapseOnSelection = true,
     )
