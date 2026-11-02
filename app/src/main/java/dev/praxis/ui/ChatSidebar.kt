@@ -7,8 +7,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,6 +32,7 @@ import dev.praxis.ui.widgets.SidebarEmptyState
 import dev.praxis.ui.widgets.SidebarSectionLabel
 import dev.praxis.ui.widgets.SidebarSessionRow
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 对话侧边栏（左侧抽屉）的内容装配。
