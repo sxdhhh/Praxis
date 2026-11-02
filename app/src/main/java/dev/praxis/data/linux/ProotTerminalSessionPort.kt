@@ -151,9 +151,30 @@ class ProotTerminalSessionPort(
 
         val id = "t${counter.getAndIncrement()}"
         val env = envPort.defaultEnvironment(distroProvider())
-        // 直接用 sessionArgs 起一个常驻交互 shell，**不套 `/bin/sh -c`**。
-        // 套了之后 `-i` 会去判断 stdin 是否 tty，行为不稳定（见 sessionArgs 的说明）。
-        val args = ProotCommand.sessionArgs(env, listOf("/bin/sh", "-i"))
+        // ## 终端连的必须是「容器里的登录 shell」，不是宿主的 /bin/sh（2026-11-03 修）
+        //
+        // 旧实现是 `sessionArgs(env, listOf("/bin/sh", "-i"))` —— 两个错误：
+        //
+        // **错误 1：硬编码 `/bin/sh`，绕过了容器内的登录 shell 探测。**
+        // `loginArgs` 尾部本来会调 `loginShell(env)` 选 rootfs 里实际存在的
+        // bash（优先）或 sh；而 `sessionArgs` 的职责正是把尾部两个元素
+        // **替换**成调用方给的 program。于是容器里明明装了 bash，用户拿到的
+        // 却被钉死在 `/bin/sh` —— 没有登录 shell 的 PATH、别名、提示符，
+        // `ls`/`apt` 甚至可能因 PATH 不全而找不到。
+        // 用户原话：「终端连接的应该是内置的 linux 系统而不是 /bin/sh」。
+        //
+        // **错误 2：`-i` 在非 tty 路径上刷 stty 报错。**
+        // `sh -i` 强制交互模式，交互 shell 会 `tcgetattr(stdin)` 读终端属性；
+        // 一旦落到下面的管道降级分支，stdin 不是 tty，于是输出里夹一行
+        // `stty: 'standard input': Inappropriate ioctl for device`。
+        // 这正是用户看到的那句。
+        //
+        // 改用 `loginTail(env)`（= `loginShell(env) + "-l"`）：
+        //   - `-l` 是**登录 shell** 语义，它自己判断要不要交互，
+        //     不需要 `-i` 强行指定，因此不会在非 tty 上刷 stty 错误；
+        //   - shell 从 rootfs 里探测，容器里有什么就用什么；
+        //   - 探测规则只有 `loginShell` 一处，不会在这儿写第二份。
+        val args = ProotCommand.sessionArgs(env, ProotCommand.loginTail(env))
         // ## 铺文件只做一次，`PROOT_LOADER` 与别名目录都从它来（2026-11-01 修）
         //
         // 之前 `ptyEnvironment` 内部自己调了一次 `prootLoaderFileFor()`，
