@@ -218,3 +218,122 @@ ChatViewModel.kt:2633  publishUsage(buildPreparedMessages(config), config)
 ```
 
 数据层已确认不会丢，所以**验收重点是 UI 层**。
+## M1 真因已定位并修复（2026-11-03，真机实证）
+
+### 决定性日志
+
+装上带日志的 APK（run #101）后，一次就抓到：
+
+```
+E PraxisPty: java.lang.UnsatisfiedLinkError: No implementation found for
+  int[] dev.praxis.core.terminal.Pty.createSubprocess(java.lang.String[], ...)
+  (tried Java_dev_praxis_core_terminal_Pty_createSubprocess and
+         Java_dev_praxis_core_terminal_Pty_createSubprocess___3Ljava_lang_String_2...)
+E PraxisPty:   at dev.praxis.core.terminal.Pty$Companion.start(Pty.kt:211)
+E PraxisPty:   at ProotTerminalSessionPort$create$2.invokeSuspend(...:181)
+```
+
+### 因果链（完整）
+
+```
+Kotlin 侧 5 个方法写成 companion 里的 @JvmStatic external fun
+  -> @JvmStatic 在外层类 Pty 上生成静态桥接方法
+  -> JVM 解析 native 实现时优先按外层类名查找：Java_..._Pty_<name>
+  -> 但 pty.c 里 4 个方法写的是 Java_..._Pty_00024Companion_<name>（伴生形式）
+  -> UnsatisfiedLinkError
+  -> Pty.start() 每次返回 null
+  -> ProotTerminalSessionPort 200ms 判死，静默丢弃
+  -> 降级到 ProcessBuilder 管道
+  -> /bin/sh -i 无 tty
+  -> 用户看到 `0: can't access tty; job control turned off`
+```
+
+### 为什么以前没人发现
+
+旁证很硬：同一份 `pty.c` 里 `setPtyWindowSize` 当初写的是
+`Java_..._Pty_setPtyWindowSize`（**无** Companion），是唯一可能对的；
+另外四个都带了 `_00024Companion`。两套命名混在一个库里，
+说明这个前缀写法从未在真机上验证过。
+
+还有一处：C 侧伴生版本叫 `waitFor`，Kotlin 方法叫 `waitForPid`，差一个后缀。
+
+### 修法：两套命名都提供实现
+
+不赌 `@JvmStatic` 的生成规则，而是两边都补：
+
+```
+伴生形式  Java_..._Pty_00024Companion_<name>   原有，保留
+外层形式  Java_..._Pty_<name>                   新增
+```
+
+总计 11 个导出符号，5 个方法 × 2 种命名全覆盖。
+
+### 这次能破案，靠的是上一轮补的日志
+
+上一轮把三处静默点（pty.c 子进程、Pty.start 四个 return null、判死丢弃）
+全部加上日志。这一轮装上后**一条日志就定位了**。
+
+反过来印证：这个 bug 之所以能活这么久，正是因为整条链零日志。
+可观测性不是辅助手段，它本身就是缺陷的一部分。
+
+### 待验证
+
+修好的 APK（commit 57a14e5）构建中，装上后应看到：
+
+- `logcat -s PraxisPty` 出现 `forkpty ok: pid=... fd=...`
+- proot 进程 `tty_nr != 0`、`fd/0 -> /dev/pts/N`
+- 终端出现真实提示符、Ctrl+C 生效
+## M1 修复已验证（2026-11-03 真机实测，收尾）
+
+### 修复前 vs 修复后（同一台设备、同一个位置）
+
+| | 终端页显示 | proot 进程属性 |
+|---|---|---|
+| 修复前 | `/bin/sh: 0: can't access tty; job control turned off` | `tty_nr=0`，`fd/0 -> pipe:[]` |
+| **修复后** | `# pwd > /tmp/.praxis_cwd 2>/dev/null` → `PRAXIS_CR` | **`tty_nr=34818`，`fd/0 -> /dev/pts/2`** |
+
+### 三条独立证据
+
+**一、日志（commit 57a14e5 的 APK）**
+
+```
+D PraxisPty: forkpty ok: pid=402 fd=180 size=60x80
+I ProotTermSession: PTY 会话建立成功 pid=402 argv[0]=.../lib/arm64/libproot.so
+```
+
+而修复前是同一条链上的：
+
+```
+E PraxisPty: java.lang.UnsatisfiedLinkError: No implementation found for
+  int[] dev.praxis.core.terminal.Pty.createSubprocess(...)
+```
+
+**二、进程属性（最硬的一条）**
+
+```
+PID 402  tty_nr=34818                    <- 不再是 0
+/proc/402/fd/0 -> /dev/pts/2            <- 真 PTY，不再是 pipe
+```
+
+**三、界面**
+
+终端页不再是 `can't access tty`，而是真实提示符 `#` + Praxis 自己的 cwd 探测
+命令执行结果（`PRAXIS_CR` 标记）。**容器内的 shell 真的在跑。**
+
+### 修复内容回顾（三处，缺一不可）
+
+1. **JNI 符号名**（关键）：`@JvmStatic external fun` 会在外层类生成静态桥接，
+   JVM 优先按 `Java_..._Pty_<name>` 查找，而 C 侧写的是
+   `Java_..._Pty_00024Companion_<name>` → `UnsatisfiedLinkError`。
+   修法：两套命名都导出（11 个符号覆盖 5 方法 × 2 命名）。
+2. **可观测性**：整条失败链（pty.c 子进程 / Pty.start 四个 return null /
+   判死丢弃）原本零日志。补上后，**一次就定位了**。
+3. （上一轮）proot 三层根因：loader 执行位 / 动态依赖 / loader 位置。
+
+### 一条可复用的教训
+
+这个 bug 活了很久，不是因为它复杂 —— 它只有一行名字不匹配。
+它活下来是因为**整条链沉默**：库加载成功但方法绑不上，失败被四处
+`return null` 吃掉，最后降级到管道只表现为一句看似无关的 `can't access tty`。
+
+先把日志补上，再谈修 —— 这次两小时定位的 bug，前面几轮摸索了几十小时。
