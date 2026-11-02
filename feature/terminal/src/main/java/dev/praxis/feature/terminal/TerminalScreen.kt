@@ -1,12 +1,13 @@
 package dev.praxis.feature.terminal
 
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,9 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -37,9 +35,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -67,7 +63,7 @@ import dev.praxis.feature.terminal.keyboard.TerminalKeyLayout
 import dev.praxis.feature.terminal.keyboard.TerminalModifiers
 import dev.praxis.feature.terminal.keyboard.TerminalVirtualKeyboard
 import dev.praxis.feature.terminal.keyboard.applyTerminalKey
-import dev.praxis.ui.design.component.AutoFollowScrollLazy
+import dev.praxis.ui.design.component.AutoFollowScroll
 import dev.praxis.ui.design.component.LocalScrollBottomLimit
 import dev.praxis.ui.design.component.LocalTopBarInset
 import dev.praxis.ui.design.component.imeLiftPadding
@@ -187,7 +183,9 @@ fun TerminalScreen(
     // 那个函数的第一个参数是 `initialFirstVisibleItemIndex: Int`（要 Int），
     // 传会话 id（String）是类型错误。要按 key 重建只能自己 `remember(key)`。
     // 与 `ChatScreen` 里对 `sessionKey` 的处理逐字一致。
-    val listState = remember(state.active.id) { LazyListState() }
+    // 输出区已改为单块文本 + Modifier.verticalScroll（见下方说明），
+    // 所以这里是 ScrollState 而不是 LazyListState。
+    val scrollState = remember(state.active.id) { ScrollState(0) }
 
     // ── 丝滑滚动触发源（2026-10-24 修）──────────────────────────
     //
@@ -218,20 +216,14 @@ fun TerminalScreen(
     }
     val resetKey = state.active.id
 
-    AutoFollowScrollLazy(
-        lazyState = listState,
-        itemCount = state.active.lines.size,
-        contentVersion = contentVersion,
-        // ## `initialAutoFollow = false`（切页不再自动到底）
-        //
-        // 旧值 true 的语义是「首次拿到已测量列表就定位到末尾」。
-        // 对聊天页/日志页那是正确的（最新内容在底部），但对终端页
-        // 会造成用户报的「切到终端页就自己向下滚」—— 他什么都没输入。
-        //
-        // 终端的阅读习惯与聊天相反：进来先看 banner 与历史开头，
-        // 而不是跳到最底下。**有新输出时**才跟随（那才是丝滑滚动的本意）。
+    // 非 Lazy 版：输出区已改成单块文本 + verticalScroll。
+    //
+    // itemCount 这里传 contentVersion（字符总数）—— AutoFollowScroll 的契约
+    // 就是「内容变多就跟随」，并不要求它是条目数量。
+    AutoFollowScroll(
+        state = scrollState,
+        itemCount = contentVersion,
         initialAutoFollow = false,
-        resetKey = resetKey,
     )
 
     // ── 虚拟键盘与输入行编辑状态（2026-10-23 新增）──────────────────
@@ -259,27 +251,6 @@ fun TerminalScreen(
     // 终端输出区是 LazyColumn 逐行独立 Text，Compose 自带的 SelectionContainer
     // 也救不了跨行选择（它只能在一个 Text 内部选）。
     //
-    // 所以这里自己维护 (anchor, focus) 两端格子坐标：
-    //  - 长按某行 → 进入选择态，锚点落在手指那一格；
-    //  - 长按后拖动 → 移动焦点端，实时扩选；
-    //  - 点空白 / 点「完成」→ 退出选择态。
-    //
-    // 不用 rememberSaveable：选择态本来就该在旋转后作废（行列数都变了）。
-    //
-    // ## key 必须是会话 id（2026-11-02 修）
-    //
-    // 裸 `remember { … }` 会在**切标签页**时保留旧的选区坐标，而 `lines`
-    // 已经换成另一个会话的内容了。后果：
-    //
-    //  - 选区行列指向错误位置，屏幕上高亮的是另一段文字；
-    //  - 更糟的是点「复制」时 `extractSelectionText` 会按旧坐标从**新会话**
-    //    的内容里截一段出来 —— 复制到用户从没选过的文字。
-    //
-    // 与上面 `listState` 用同一个 key：两者都描述「当前这个标签页的视图状态」，
-    // 换标签必须一起作废。
-    var selection by remember(state.active.id) { mutableStateOf<TerminalSelection?>(null) }
-    val clipboard = LocalClipboardManager.current
-
     // ## 输入框受控值的 key 为什么是**会话 id** 而不是文本
     //
     // 这里踩过一个真实的坑，写下来防止改回去：
@@ -429,167 +400,57 @@ fun TerminalScreen(
             val cols = (measured.width / charWidthPx).toInt().coerceIn(20, 300)
             onResize(rows, cols)
         }
-        // ## 选择手势挂在 LazyColumn 外层，不是挂在每一行
+        // ## 输出区：单块文本 + SelectionContainer（2026-11-03 改造）
         //
-        // 挂在单行上的话，「按住第一行、往下拖到第五行」会被 LazyColumn 的
-        // 滚动抢走事件（手指一动就变成滚屏），选区永远长不出第一行。
-        // 放在容器上，用 EnterExit 语义让手势优先，滚动仍然在被判为
-        // 「拖动」之后由 LazyColumn 自己接管（长按未触发时）。
+        // 旧实现是 LazyColumn 逐行 Text + 自研 cell 坐标选择模型
+        // （TerminalSelection 存起止行列、拖动扩选、底部弹「已选中文本/复制/全选/完成」）。
+        // 用户反馈「自写就太难用」，要求改用系统自带的复制粘贴。
         //
-        // 坐标系换算：pointerInput 给的是**容器本地**坐标，
-        // 需要先减 contentPadding.top(10.dp) 再除以行高得到行号；
-        // 列号同理用左边距 12.dp 与字宽换算。这两个常量必须与下面
-        // contentPadding / lineStyle 保持一致，改一处要同步改这里。
-        val lineHeightDp = TerminalTypography.lineStyle(fontSizeSp).lineHeight
-        val charWidthDp = TerminalTypography.lineStyle(fontSizeSp).fontSize * 0.6f
-        val lineHeightPxSel = with(density) { lineHeightDp.toPx() }
-        val charWidthPxSel = with(density) { charWidthDp.toPx() }
-        val padTopPx = with(density) { 10.dp.toPx() }
-        val padStartPx = with(density) { 12.dp.toPx() }
-        val rowGapPx = with(density) { 2.dp.toPx() }
-
-        // ## 把「容器本地坐标」换算成「数据行列下标」
+        // ## 为什么不能 SelectionContainer 包 LazyColumn
         //
-        // 这是选择功能里唯一需要小心的地方，两处易错：
+        // Compose 的 SelectionContainer 在选择上等同于**一个文本节点**，
+        // 选区不能跨越 LazyColumn 的不同 item —— 而终端恰恰是「每行一个 item」。
+        // 包进去只能选中当前那一行，拖到行外就断，比旧实现更难用。
         //
-        // 1. **不能把 item 间距算进行高**。`Arrangement.spacedBy(2.dp)` 加在
-        //    行与行之间，每行的**内容高度**只有 lineHeight。第一版把间距并进
-        //    除数，行号会一路偏大，越往下拖偏得越多。
-        //    正确算法：总步长 = lineHeight + gap，但行号取 `floor(y / step)`，
-        //    因为间距属于「上一行之后的空白」，落在空白里仍算上一行。
+        // ## 所以整块渲染
         //
-        // 2. **必须用 snapshot 状态读滚动位置**。`firstVisibleItemIndex` 是
-        //    `LazyListState` 上的 snapshot 状态，在手势回调里直接读是安全的
-        //    （回调运行在 snapshot 上下文中）；这里不用 `derivedStateOf` 包，
-        //    是因为包了之后每次读都要走一遍依赖图，而手势每帧都要读，
-        //    包出来的收益（避免多余重组）在这里并不存在 —— 手势回调本来就不重组。
-        val stepPx = lineHeightPxSel + rowGapPx
-
-        val pointToCell: (Float, Float, Int) -> Pair<Int, Int> = { yPx, xPx, total ->
-            val safeStep = stepPx.coerceAtLeast(1f)
-            // 手指相对「第一可见行顶部」的偏移（含被滚掉的那部分）
-            val withinList = yPx - padTopPx + listState.firstVisibleItemScrollOffset
-            val rowOffset = kotlin.math.floor(withinList / safeStep).toInt()
-            val row = (listState.firstVisibleItemIndex + rowOffset)
-                .coerceIn(0, (total - 1).coerceAtLeast(0))
-            val col = ((xPx - padStartPx) / charWidthPxSel.coerceAtLeast(1f))
-                .toInt().coerceAtLeast(0)
-            row to col
+        // 把所有行拼成一条 AnnotatedString（保留 ANSI 配色），放进一个 Text，
+        // 外面套 SelectionContainer。长按出现的是**系统选择手柄**与系统浮动菜单
+        // （复制/全选），与其它 App 一致。
+        //
+        // ## 代价与判据
+        //
+        // 失去 LazyColumn 的按需渲染 —— 所有行都要参与排版。终端行数有上限
+        // （scrollback + 屏幕行）。真机实测若滚动/输入的帧耗时超过 16ms，
+        // 就退回「平时 LazyColumn、进入选择态才切单块」的折中方案。
+        val defaultFg = MiuixTheme.colorScheme.onSurfaceContainer
+        val fullText = remember(state.active.lines, defaultFg) {
+            buildAnnotatedScreen(state.active.lines, defaultFg)
         }
 
-        LazyColumn(
-            state = listState,
+        SelectionContainer(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .onSizeChanged { measured = it }
                 .background(TerminalPalette.defaultBackground(MiuixTheme.colorScheme.surfaceContainer))
-                .pointerInput(state.active.id, state.active.lines.size) {
-                    // 注意 lambda 里的提前返回必须写 `return@onDrag` 这类**显式标签**：
-                    // 写成 `return@detectDragGesturesAfterLongPress` 会直接从整个
-                    // 手势检测器返回，后续拖动事件全部丢失。这里改用 if 包住，
-                    // 既避开标签陷阱，也让控制流一眼可见。
-                    detectDragGesturesAfterLongPress(
-                        onDragStart = { offset ->
-                            val total = state.active.lines.size
-                            if (total > 0) {
-                                val cell = pointToCell(offset.y, offset.x, total)
-                                selection = TerminalSelection(cell.first, cell.second, cell.first, cell.second)
-                            }
-                        },
-                        onDrag = { change, _ ->
-                            change.consume()
-                            val cur = selection
-                            val total = state.active.lines.size
-                            if (cur != null && total > 0) {
-                                val cell = pointToCell(change.position.y, change.position.x, total)
-                                selection = cur.withFocus(cell.first, cell.second)
-                            }
-                        },
-                        // 拖动结束后**保持选择态**：用户松手是为了去点「复制」，
-                        // 不是为了取消选择。取消有专门的「完成」按钮。
-                        onDragEnd = { },
-                        onDragCancel = { },
-                    )
-                },
-            contentPadding = PaddingValues(
-                start = 12.dp,
-                end = 12.dp,
-                top = 10.dp,
-                // 操作条与输入条都在 Column 里各占一段，不是浮层，
-                // 所以这里不放它们的高度，只留呼吸间距 + 全局底栏限位。
-                // 限位用 `keyboardBottomInset` 而不是裸 `scrollLimit`：
-                // 键盘弹出时那个值已归零，否则列表底部会多出一条看不见的空白。
-                bottom = 10.dp + keyboardBottomInset,
-            ),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+                .verticalScroll(scrollState),
         ) {
-            items(
-                count = state.active.lines.size,
-                // ★ 这里为什么给下标 key（2026-10-22 核查后定案）
-                //
-                // 我最初想给「内容哈希」做 key，核查 `linesOf` 后否掉了：
-                // `linesOf` 的行数是**固定**的（`scrollback + buffer.rows`），
-                // 格子列表永远等长，行不会「整体前移」。既然位置与内容一一对应，
-                // 下标就是这组数据最准确的稳定身份。
-                //
-                // 反过来，给内容哈希会**制造崩溃**：
-                //  - 终端里大量空行、重复的提示行内容完全相同；
-                //  - LazyColumn 要求 key 唯一，撞 key 直接抛
-                //    `IllegalArgumentException: Key "..." was already used`。
-                // 这是真机可复现的崩溃，比它想修的「错行」严重得多。
-                //
-                // 显式写 `key = { it }` 而不是省略参数：省略时框架内部也是用下标，
-                // 但写出来能防止后来者「顺手加个内容 key」把崩溃引回来。
-                key = { index -> index },
-            ) { index ->
-                // 只把「这一行与选区的关系」传下去，不传整个 selection：
-                // 传整个对象会让**每一行**在拖动的每一帧都重组；
-                // 传 `IntRange?` 时未涉及的行参数不变，Compose 可跳过。
-                val rowRange = selection?.normalized?.columnRangeOn(index)
-                TerminalRow(
-                    line = state.active.lines[index],
-                    textStyle = TerminalTypography.lineStyle(fontSizeSp),
-                    selectionRange = rowRange,
-                )
-            }
-        }
-
-        // ## 选择操作条（2026-11-01 新增）
-        //
-        // 只在选择态出现，占 Column 里的一段（与操作条同构，不是浮层）：
-        // 浮层会盖住最后几行输出，而用户刚选的往往就是那几行。
-        //
-        // 三个动作：复制 / 全选 / 退出。全选是用户明确要求的 —— 终端里
-        // 「把整段输出拷出去」比「精确选几行」常见得多。
-        val activeSelection = selection
-        if (activeSelection != null) {
-            TerminalSelectionBar(
-                hasRange = !activeSelection.isEmpty,
-                onCopy = {
-                    val text = extractSelectionText(state.active.lines, activeSelection.normalized)
-                    if (text.isNotBlank()) {
-                        clipboard.setText(AnnotatedString(text))
-                    }
-                    selection = null
-                },
-                onSelectAll = {
-                    val lines = state.active.lines
-                    if (lines.isNotEmpty()) {
-                        val lastRow = lines.lastIndex
-                        // 末尾列取该行最后一个非空白格，避免把行尾空白也选进去
-                        var lastCol = 0
-                        val cells = lines[lastRow].cells
-                        for (i in cells.indices) {
-                            if (!cells[i].char.isWhitespace()) lastCol = i
-                        }
-                        selection = TerminalSelection(0, 0, lastRow, lastCol)
-                    }
-                },
-                onDismiss = { selection = null },
+            Text(
+                text = fullText,
+                style = TerminalTypography.lineStyle(fontSizeSp),
+                color = defaultFg,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = 12.dp,
+                        end = 12.dp,
+                        top = 10.dp,
+                        // 键盘弹出时 keyboardBottomInset 已归零，不会多出一条空白。
+                        bottom = 10.dp + keyboardBottomInset,
+                    ),
             )
         }
-
         TerminalActionBar(
             running = state.running,
             keyboardVisible = keyboardVisible,
@@ -1028,101 +889,12 @@ private fun TerminalActionChip(
 }
 
 /**
- * 从若干行里按选区取出纯文本。
- *
- * 规则与用户直觉一致：
- *  - 每条被选中的行取一次，行与行之间用 `\n` 连；
- *  - 行内**去掉行尾空白**（终端每行是定宽格子，尾随空格没有意义，
- *    留着会让粘贴出来的文本全是尾空格）；
- *  - 宽字符的右半格是占位格，跳过；
- *  - 首行不从行首开始时，只取选区起点之后的部分。
- */
-internal fun extractSelectionText(
-    lines: List<TerminalLine>,
-    normalized: NormalizedSelection,
-): String {
-    if (lines.isEmpty()) return ""
-    // ## 越界处理：显式判空而不是靠 coerceIn 夹取（2026-11-02 澄清）
-    //
-    // 终端缓冲区会随输出增长**裁剪尾部空行**（见 `linesOf`），行数会变，
-    // 所以选区端点可能落在当前 `lines` 之外。
-    //
-    // 之前的写法是两个端点各自 `coerceIn(0, lines.lastIndex)`。它**碰巧是对的**：
-    // 越界行会让 `columnRangeOn` 返回 null 从而被跳过，结果仍是空串。
-    // 但正确性依赖「下游会过滤」这个间接事实 —— 读代码的人第一眼会以为
-    // 「夹到末尾」意味着「复制出最后一行」。
-    //
-    // 这里改成显式判空：起点已超过最后一行就直接返回空串，语义一眼可见。
-    // 行为与之前一致（已用测试固定），只是把隐含契约写成明说的。
-    if (normalized.startLine > lines.lastIndex) return ""
-    val out = StringBuilder()
-    val startLine = normalized.startLine.coerceAtLeast(0)
-    // 终点可以越界：用裁剪区内的最后一行收尾即可（用户确实选到了末尾）。
-    val endLine = normalized.endLine.coerceAtMost(lines.lastIndex)
-    for (row in startLine..endLine) {
-        val range = normalized.columnRangeOn(row) ?: continue
-        val cells = lines[row].cells
-        val sb = StringBuilder()
-        for (i in cells.indices) {
-            val cell = cells[i]
-            if (cell.isContinuation) continue
-            if (!isCellSelected(range, i, 1)) continue
-            sb.append(cell.char)
-        }
-        // 行尾空白不带走：终端定宽行必然有大量尾空格
-        out.append(sb.toString().trimEnd())
-        if (row != endLine) out.append('\n')
-    }
-    // 整体去掉首尾空行（用户从空白行开始拖很常见）
-    return out.toString().trim('\n')
-}
-
-/**
  * 选择态下的浮出操作条：复制 / 全选 / 完成。
  *
  * 与 [TerminalActionBar] 一样是 Column 里的一段，不是浮层 ——
  * 浮层会压住最后几行，而那正是用户刚选中的内容。
  */
 @Composable
-private fun TerminalSelectionBar(
-    hasRange: Boolean,
-    onCopy: () -> Unit,
-    onSelectAll: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MiuixTheme.colorScheme.surfaceContainerHigh)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "已选中文本",
-            style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceContainerHigh,
-        )
-        Spacer(Modifier.weight(1f))
-        TerminalActionChip(
-            // 没选到东西时禁用复制：空字符串写进剪贴板会**清掉**用户原有的内容，
-            // 那比什么都没做更糟。
-            label = "复制",
-            enabled = hasRange,
-            onClick = onCopy,
-        )
-        TerminalActionChip(
-            label = "全选",
-            enabled = true,
-            onClick = onSelectAll,
-        )
-        TerminalActionChip(
-            label = "完成",
-            enabled = true,
-            onClick = onDismiss,
-        )
-    }
-}
 
 /**
  * 一行终端输出。
@@ -1131,105 +903,38 @@ private fun TerminalSelectionBar(
  * 它是**行内**的局部信息，不是整个选区 —— 这样未涉及的行参数不变，
  * 长按拖动时 Composable 可以跳过未变化的行。
  *
- * [onLongPressAt] 供无障碍/兜底路径使用：直接点某行时把落点列回传。
- * 常规长按拖动由外层 LazyColumn 的拖动手势统一处理（见调用点注释）。
+
+
+/**
+ * 把整个终端屏幕拼成**一条** [AnnotatedString]（行间用 `\n`）。
+ *
+ * ## 为什么是整屏一条而不是一行一条（2026-11-03 改造）
+ *
+ * 输出区改成了「单块文本 + SelectionContainer」，为的是用上**系统自带的**
+ * 选择手柄与复制菜单。而 Compose 的 `SelectionContainer` 在选择上等同于
+ * 一个文本节点 —— 只有把整屏放进同一个 Text，长按才能跨行拖选。
+ *
+ * ## 与逐行渲染的唯一差异：行尾空白
+ *
+ * 复用 [buildAnnotatedLine] 的合并规则（同款式的连续格子并成一个 span），
+ * 但**先裁掉行尾空白**：不裁的话每行都撑满 80 列，「复制」出来会带一长串
+ * 空格，而且在等宽字体下截断处看起来像有内容。
+ *
+ * 空行保留一个空字符串（用 `\n` 表达），终端里的空行是有意义的输出。
  */
-@Composable
-private fun TerminalRow(
-    line: TerminalLine,
-    textStyle: TextStyle,
-    selectionRange: IntRange? = null,
-) {
-    // 默认前景色在这里**读一次**（Composable 上下文），往下全是纯函数。
-    //
-    // 不这样传的话，`TerminalPalette.foregroundOf` 就必须是 `@Composable`，
-    // 而它被 `remember(line) { buildAnnotatedLine(...) }` 调用 ——
-    // `remember` 的 calculation lambda 不是 Composable 上下文，标不上。
-    // 详见 `TerminalPalette.defaultBackground` 的 KDoc。
-    val defaultColor = MiuixTheme.colorScheme.onSurfaceContainer
-
-    // 行尾空白不渲染：否则每行都会撑满宽度，且复制时带一堆空格。
-    val cells = line.cells
-    var lastNonBlank = -1
-    for (i in cells.indices) if (!cells[i].char.isWhitespace()) lastNonBlank = i
-
-    val visible = if (lastNonBlank >= 0) cells.subList(0, lastNonBlank + 1) else emptyList()
-
-    // ## 为什么要把同款式的格子合并成一段，而不是一格一个 Text
-    //
-    // 旧实现一格一个 `Text`，两个后果：
-    //  1. **样式全丢**：`CellStyle` 里的 bold / italic / underline 三个字段
-    //     从头到尾没人读，SGR `1;3;4` 解析出来了却不显示。
-    //  2. **性能**：一行 80 格就是 80 个 `Text` 组合，`ls` 一屏几十行会堆出
-    //     几千个节点；而且每格单独排版，行内字距/字宽都会与整行排版有微差，
-    //     等宽字体看着也就不齐了。
-    //
-    // 合并成 `AnnotatedString` 后：一段同色同款的连续字符只出一个 span，
-    // 整行一次排版，等宽对齐与样式都正确。
-    Row(Modifier.fillMaxWidth()) {
-        if (visible.isEmpty()) {
-            // 空行也要占一行高度（终端里空行是有意义的输出）。
-            Text(
-                text = " ",
-                style = textStyle,
-                color = TerminalPalette.defaultForeground(MiuixTheme.colorScheme.onSurfaceContainer),
-            )
-        } else {
-            // ## key 用 `line` 而不是 `visible`（2026-10-24 性能修）
-            //
-            // `visible` 是 `cells.subList(...)` 新建出来的**视图对象**，每次组合都不同。
-            // 用它作 key 时 `remember` 的判等要逐格比较 80 个 `RenderCell` ——
-            // 一行 80 次比较，一屏 20 行就是 1600 次，而 `publish()` 在每次按键都会触发。
-            //
-            // `line` 是 `TerminalLine`（data class）：当 `linesOf` 复用缓存对象时，
-            // `remember` 的 `==` 先比引用 —— 同一个引用直接短路，零成本命中。
-            // 内容真变了时引用必不同（每行都是新建的），仍会正确重建。
-            //
-            // ## 为什么不用「行号」作 key
-            //
-            // 行号在滚屏时不变、内容却整体上移了 —— 用行号会让 `buildAnnotatedLine`
-            // 拿到旧内容而不重算，画面变成「上滚后文字停在原位」。
-            // ## key 里必须带 `defaultColor`
-            //
-            // 主题切换（浅色 ↔ 深色、换莫奈取色）时 `line` 本身没变，
-            // 但默认前景色变了 —— 只按 `line` 缓存会让这一行保持旧颜色，
-            // 直到文本变化才更新。带上 `defaultColor` 才能正确失效。
-            //
-            // 代价是多一次 `Color.equals` 比较（一个 ULong 比较），可忽略。
-            // ## 选区高亮为什么走 background span，而不是另画一层矩形
-            //
-            // 终端每一行的字符宽度严格等于「列下标 × 字宽」，用它自己的排版结果
-            // 做底色是最准的 —— 另画矩形要自己算左边距、宽字符占两格、行间距，
-            // 任何一个常量漂移都会让色块与文字错位。
-            //
-            // `background` 属于 SpanStyle，只在字形背后填色，不影响行高与
-            // 对齐，正是需要的效果。
-            //
-            // key 带上 selectionRange：选区变了要重算。用 `remember` 而不是
-            // 每次重建，是因为拖动时同一行可能被反复要求渲染，而它多数帧没变。
-            // 选中底色：用主题的 primary 调一层半透明。
-            //
-            // 不用固定色：终端底色跟着莫奈取色变（深色/浅色差异很大），
-            // 写死的色块在某种主题下会看不清或刺眼。取 primary 的 35% 透明度，
-            // 保证在任何底色上都能看出「这里被选中了」而不遮住文字。
-            val selectionColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.35f)
-            val annotated = remember(line, defaultColor, selectionRange, selectionColor) {
-                buildAnnotatedLine(visible, defaultColor, selectionRange, selectionColor)
-            }
-            // 行本身**不挂任何手势**：选择由外层 LazyColumn 的长按拖动手势统一处理。
-            //
-            // 曾经在这里给每行挂过一个 detectTapGestures 兜底，后来删掉了：
-            //  - 外层已经能处理，两条路径会重复触发同一个 selection 赋值；
-            //  - 每行一个 pointerInput 意味着 `ls` 一屏几十行就有几十个手势识别器，
-            //    而它们对滚动的参与判定会让列表滚动手感变差。
-            Text(
-                text = annotated,
-                style = textStyle,
-            )
-        }
+internal fun buildAnnotatedScreen(
+    lines: List<TerminalLine>,
+    defaultColor: Color,
+): AnnotatedString = buildAnnotatedString {
+    lines.forEachIndexed { index, line ->
+        if (index > 0) append('\n')
+        val cells = line.cells
+        var lastNonBlank = -1
+        for (i in cells.indices) if (!cells[i].char.isWhitespace()) lastNonBlank = i
+        if (lastNonBlank < 0) return@forEachIndexed
+        append(buildAnnotatedLine(cells.subList(0, lastNonBlank + 1), defaultColor))
     }
 }
-
 /**
  * 把一行格子拼成带样式的 [AnnotatedString]。
  *
@@ -1249,8 +954,6 @@ private fun TerminalRow(
 private fun buildAnnotatedLine(
     cells: List<RenderCell>,
     defaultColor: Color,
-    selectionRange: IntRange? = null,
-    selectionColor: Color = Color.Transparent,
 ): AnnotatedString =
     buildAnnotatedString {
         var index = 0
@@ -1261,8 +964,6 @@ private fun buildAnnotatedLine(
                 continue
             }
             val key = StyleKey.of(cell.style, defaultColor)
-            // 宽字符占两格；判选中时要把右半格一并算进去。
-            val cellStart = index
             // 往后找同款式的连续格子（跳过宽字符右半格）。
             val runStart = index
             val text = StringBuilder()
@@ -1282,24 +983,7 @@ private fun buildAnnotatedLine(
                 if (index == runStart) index++
                 continue
             }
-            // 这一段字符里只要**有任意一格**落在选区里，就给整段加底色。
-            //
-            // 注意判据是「段内存在选中格」而不是「段首选中」：同一款式的一段
-            // 可能横跨选区边界（比如一行普通输出被从中间选了一半），
-            // 只判段首会漏掉后半截正在变色的那一部分。
-            //
-            // 代价是边界所在的整段都上色（可能出现「多染一个字符」），
-            // 但等宽终端里相邻同款式字符在视觉上本就连成一片，看不出来；
-            // 反过来按字符逐个切 span 会让 AnnotatedString 的 span 数暴涨。
-            val hasSelected = selectionRange != null &&
-                (cellStart..(cellStart + text.length - 1)).any {
-                    isCellSelected(selectionRange, it, 1)
-                }
-            val span = if (hasSelected && selectionColor != Color.Transparent) {
-                key.toSpanStyle().merge(SpanStyle(background = selectionColor))
-            } else {
-                key.toSpanStyle()
-            }
+            val span = key.toSpanStyle()
             withStyle(span) {
                 append(text.toString())
             }

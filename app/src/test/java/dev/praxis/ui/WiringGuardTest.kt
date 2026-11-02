@@ -953,72 +953,53 @@ class WiringGuardTest {
 
 
     /**
-     * 终端选择：长按拖动 → 选择态 → 操作条 → 写剪贴板，四段必须同时在位。
+     * 终端复制粘贴：必须走**系统原生选择**（2026-11-03 改造后）。
      *
-     * ## 为什么单独立一条护栏（2026-11-02）
+     * ## 为什么整条护栏换掉
      *
-     * 用户原话是「终端无法长按复制、无法全选」，排查后确认 `TerminalScreen.kt`
-     * 里**根本没有选择能力** —— 不是坏了，是从没写过。于是补了一套：
+     * 第一版（2026-11-02）补的是自研 cell 坐标选择模型：
+     * `TerminalSelection` + `detectDragGesturesAfterLongPress` + 选择态操作条
+     * 「已选中文本/复制/全选/完成」。用户实测后反馈「自写就太难用」，
+     * 要求改用 Android 自带的复制粘贴 —— 于是整条模型被删掉，换成
+     * `SelectionContainer` 包整屏单块文本。
      *
-     *  - 格子坐标的选择模型 [TerminalSelection]（有 10 条单测）；
-     *  - `detectDragGesturesAfterLongPress` 起选 + `withFocus` 扩选；
-     *  - 选择态才出现的 `TerminalSelectionBar`（复制 / 全选 / 完成）；
-     *  - 复制走 `clipboard.setText`。
+     * 护栏因此必须跟着反向：**断言自研模型确实没了、系统选择确实接上了**。
+     * 留着旧断言会变成「测一个已删除的函数」，比没有更糟（假绿）。
      *
-     * 光有 [TerminalSelection] 这个类是不够的 —— 那正是「能力在、接线不在」的
-     * 经典形态。所以这里对**触发点与落地动作**逐段断言。
+     * ## 为什么锚 SelectionContainer + buildAnnotatedScreen 这两个点
      *
-     * ## 为什么锚 `detectDragGesturesAfterLongPress` 而不是「有没有 selection 变量」
-     *
-     * 只断言「文件里有 selection」太弱：一个声明了却没人用的状态变量照样能让它变绿。
-     * 真正的用户可见行为是「长按 → 出现选择 → 能复制」，所以直接锚手势入口
-     * 与「写剪贴板」这两个首尾动作。
+     * 只断言「文件里有 SelectionContainer」太弱：它可能被套在 LazyColumn 外层，
+     * 那样跨 item 选不中（这正是改造要解决的问题）。
+     * 所以同时锚「整屏拼接函数」—— 两者同时存在才说明是真的整块渲染。
      */
     @Test
-    fun terminalSelection_isWiredFromGestureToClipboard() {
+    fun terminalCopy_usesSystemSelectionOverWholeBuffer() {
         val screen = read("feature/terminal/src/main/java/dev/praxis/feature/terminal/TerminalScreen.kt")
         val flat = screen.replace(Regex("\\s+"), " ")
 
-        // 1) 长按手势入口。
+        // 1) 用系统选择容器。
         assertTrue(
-            "TerminalScreen 没有长按手势，长按选不中任何东西",
-            flat.contains("detectDragGesturesAfterLongPress("),
+            "输出区没有用 SelectionContainer —— 长按不会出现系统选择手柄",
+            flat.contains("SelectionContainer("),
         )
-        // 2) 按下即起选。
+        // 2) 整屏拼成一条 AnnotatedString（否则跨行选不中）。
         assertTrue(
-            "长按后没有创建选择（onDragStart 未设 selection）",
-            flat.contains("onDragStart = { offset ->") &&
-                flat.contains("selection = TerminalSelection("),
+            "没有把整屏拼成单块文本 —— SelectionContainer 包逐行 Text 时跨行选不中",
+            flat.contains("buildAnnotatedScreen(state.active.lines, defaultFg)"),
         )
-        // 3) 拖动扩选。
+        // 3) 输出区不再是 LazyColumn（逐行 item 会让系统选择跨不了行）。
         assertTrue(
-            "拖动没有扩选（onDrag 未调用 withFocus）",
-            flat.contains("selection = cur.withFocus("),
+            "输出区又变回 LazyColumn 了 —— 系统选择无法跨 item",
+            !flat.contains("items( count = state.active.lines.size,"),
         )
-        // 4) 操作条只在选择态出现。
+        // 4) 自研选择模型必须已彻底移除（防「两套并存」）。
         assertTrue(
-            "选择操作条没有按「有选择才显示」渲染",
-            flat.contains("if (activeSelection != null) {") &&
-                flat.contains("TerminalSelectionBar("),
-        )
-        // 5) 复制真的写进剪贴板（这是用户要的最终效果）。
-        assertTrue(
-            "「复制」没有写剪贴板 —— 用户会以为复制成功了",
-            flat.contains("clipboard.setText(AnnotatedString(text))"),
-        )
-        // 6) 全选：从 (0,0) 选到末行末列。
-        assertTrue(
-            "「全选」没有把整个缓冲区纳入选择",
-            flat.contains("onSelectAll = {") &&
-                flat.contains("selection = TerminalSelection(0, 0, lastRow, lastCol)"),
-        )
-        // 7) 取文本用格子坐标模型（不是按像素或按整行硬拼）。
-        assertTrue(
-            "复制取文本没有走 extractSelectionText",
-            flat.contains("extractSelectionText(state.active.lines, activeSelection.normalized)"),
+            "自研的 TerminalSelection 模型又回来了 —— 会与系统选择打架",
+            !flat.contains("TerminalSelection(") &&
+                !flat.contains("TerminalSelectionBar(") &&
+                !flat.contains("extractSelectionText("),
         )
     }
-
     /**
      * proot 启动：可执行文件只能来自 `nativeLibraryDir`，loader 只能靠 PROOT_LOADER 指路。
      *
