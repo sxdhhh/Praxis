@@ -3,12 +3,16 @@ package dev.praxis.ui.widgets
 // Copyright 2025, miuix-kotlin-multiplatform contributors
 // SPDX-License-Identifier: Apache-2.0
 
+import top.yukonga.miuix.kmp.basic.DropdownItem
+import top.yukonga.miuix.kmp.basic.DropdownEntry
+import top.yukonga.miuix.kmp.basic.DropdownDefaults
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -17,23 +21,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import top.yukonga.miuix.kmp.basic.DropdownImpl
-import top.yukonga.miuix.kmp.basic.ListPopupColumn
-import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowUpDown
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.overlay.OverlayListPopup
+import top.yukonga.miuix.kmp.popup.OverlayDropdownPopup
 
 /**
  * A standalone dropdown menu styled to look and feel like a SmallTitle.
@@ -58,6 +57,27 @@ fun MiuixDropdown(
     // State to manage whether the dropdown is expanded or not.
     val isDropdownExpanded = remember { mutableStateOf(false) }
     val hapticFeedback = LocalHapticFeedback.current
+    // 触发行的实测尺寸：交给 OverlayDropdownPopup 的 collapseSize，
+    // 它拿这个矩形当「收起态」的起点，展开时从这块内容长成面板。
+    // 0 尺寸起步是安全的：弹窗内部对 0 会退化成「无收起态动画」而不是崩掉。
+    var triggerSize by remember { mutableStateOf(IntSize.Zero) }
+    // 把 items 包成一个 DropdownEntry：入参是 entry 列表，
+    // 每个 item 的 onClick 自己负责选中并收起。
+    val entry = remember(items, selectedIndex) {
+        DropdownEntry(
+            items = items.mapIndexed { index, text ->
+                DropdownItem(
+                    text = text,
+                    selected = selectedIndex == index,
+                    onClick = {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
+                        onSelectedIndexChange(index)
+                        isDropdownExpanded.value = false
+                    },
+                )
+            },
+        )
+    }
 
     val itemsNotEmpty = items.isNotEmpty()
     val actualEnabled = enabled && itemsNotEmpty
@@ -79,6 +99,7 @@ fun MiuixDropdown(
                     },
                 )
                 // Use the same padding as SmallTitle for consistent layout.
+                .onSizeChanged { triggerSize = it }
                 .padding(horizontal = 28.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -137,75 +158,61 @@ fun MiuixDropdown(
         // 的内部实现一致（见 miuix-preference 的 OverlayDropdownPopup.kt）。
         // `renderInRootScaffold = true` 让它绘制到根 Scaffold 的 overlay 层，
         // 避免被 LazyColumn 的 clip 裁掉。
-        OverlayListPopup(
+        // ## 换成 OverlayDropdownPopup：补上「收起态→展开」的形变动画（2026-11-03）
+        //
+        // 用户原话：「现在只有加号的那个菜单有弹窗动画，模型和功能菜单没有弹出和关闭的动画」。
+        //
+        // `OverlayListPopup` 只有「整体出现/消失」，没有形状插值 —— 收起态就是没有，
+        // 菜单凭空浮出来。而 `OverlayDropdownPopup` 支持把**收起态的胶囊**（当前选中文字
+        // + 箭头）当作起点，用 `collapseSize` + `collapseContent` 描述它，
+        // 弹窗会从这块内容原位长成面板，关闭时再缩回去。
+        //
+        // ## 关于命名的一句话澄清
+        //
+        // 上面那段注释提到「miuix-preference 的 OverlayDropdownPopup」—— 那是**发布版**
+        // 的 API，它没有 `collapseContent` / `collapseSize` 这些参数。
+        // NexioSchedule 用的是它自己 fork 进 `:miuix` 模块的增强版。
+        // 现在这版用的是 Praxis 依赖的**官方 0.9.4**：它有 `collapseSize` / `collapseContent`
+        // / `collapseOnSelection` / `onDismissFinished`，足以做出形变动画。
+        // （已用 javap 从 Maven Central 的 aar 里核实过签名，不是照抄。）
+        OverlayDropdownPopup(
+            entries = listOf(entry),
             show = isDropdownExpanded.value,
-            alignment = PopupPositionProvider.Align.Start,
-            popupPositionProvider = DropdownWithStartMarginProvider,
-            onDismissRequest = { isDropdownExpanded.value = false },
+            onDismiss = { isDropdownExpanded.value = false },
+            onDismissFinished = {
+                // 关闭动画结束：下一帧再允许重新打开，避免「点一下又立刻开」的重叠。
+                isDropdownExpanded.value = false
+            },
+            maxHeight = null,
+            dropdownColors = DropdownDefaults.dropdownColors(),
             renderInRootScaffold = true,
-        ) {
-            ListPopupColumn {
-                items.forEachIndexed { index, text ->
-                    DropdownImpl(
-                        text = text,
-                        optionSize = items.size,
-                        isSelected = selectedIndex == index,
-                        index = index,
-                        onSelectedIndexChange = { newIndex ->
-                            hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
-                            onSelectedIndexChange(newIndex)
-                            isDropdownExpanded.value = false // Close dropdown after selection
-                        },
+            // 单选场景：选中后收起。
+            collapseOnSelection = true,
+            // 收起态尺寸：以触发行为准（测量后再传，否则首帧是 0 会闪一下）。
+            collapseSize = triggerSize,
+            // 收起态内容：与触发行完全一致的「选中文字 + 箭头」，
+            // 弹窗就是从这一块长出来的。
+            collapseContent = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        text = if (itemsNotEmpty) items[selectedIndex] else placeholder,
+                        fontSize = MiuixTheme.textStyles.subtitle.fontSize,
+                        fontWeight = FontWeight.Bold,
+                        color = MiuixTheme.colorScheme.onBackgroundVariant,
+                    )
+                    Image(
+                        modifier = Modifier.size(10.dp, 16.dp),
+                        imageVector = MiuixIcons.Basic.ArrowUpDown,
+                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantActions),
+                        contentDescription = null,
                     )
                 }
-            }
-        }
-    }
-}
-
-/**
- * A custom PopupPositionProvider that is identical to the default dropdown provider,
- * but adds a horizontal margin.
- */
-private val DropdownWithStartMarginProvider = object : PopupPositionProvider {
-    // This positioning logic is copied directly from ListPopupDefaults.DropdownPositionProvider
-    override fun calculatePosition(
-        anchorBounds: IntRect,
-        windowBounds: IntRect,
-        layoutDirection: LayoutDirection,
-        popupContentSize: IntSize,
-        popupMargin: IntRect,
-        alignment: PopupPositionProvider.Align,
-    ): IntOffset {
-        val offsetX = if (alignment == PopupPositionProvider.Align.End) {
-            anchorBounds.right - popupContentSize.width - popupMargin.right
-        } else {
-            anchorBounds.left + popupMargin.left
-        }
-        val offsetY = if (windowBounds.bottom - anchorBounds.bottom > popupContentSize.height) {
-            // Show below
-            anchorBounds.bottom + popupMargin.bottom
-        } else if (anchorBounds.top - windowBounds.top > popupContentSize.height) {
-            // Show above
-            anchorBounds.top - popupContentSize.height - popupMargin.top
-        } else {
-            // Middle
-            anchorBounds.top + anchorBounds.height / 2 - popupContentSize.height / 2
-        }
-        return IntOffset(
-            x = offsetX.coerceIn(
-                windowBounds.left,
-                (windowBounds.right - popupContentSize.width - popupMargin.right).coerceAtLeast(windowBounds.left),
-            ),
-            y = offsetY.coerceIn(
-                (windowBounds.top + popupMargin.top).coerceAtMost(
-                    windowBounds.bottom - popupContentSize.height - popupMargin.bottom,
-                ),
-                windowBounds.bottom - popupContentSize.height - popupMargin.bottom,
-            ),
+            },
         )
     }
-
-    // Provide a 12.dp horizontal margin.
-    override fun getMargins(): PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
 }
+
