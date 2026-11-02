@@ -46,6 +46,11 @@ on:
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
       - 'gradle.properties'
+      # ## 为什么 `docs/**` 与 `tools/**` 故意不在清单里
+      #
+      # 这两类目录只放文档与开发期脚本，不参与任何 Gradle 编译。
+      # 放进来只会让「改了一句文档」也触发一次完整构建，白占 CI 额度。
+      # （真机验证脚本在 tools/，改它不需要重新出 APK。）
       - '.github/workflows/build.yml'
 
 # 同一分支的新提交取消上一次未跑完的（手动触发不取消）。
