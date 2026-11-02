@@ -9,6 +9,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Alignment
+import dev.praxis.ui.widgets.SidebarActionButton
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -478,44 +482,41 @@ private fun SidebarSelectionActions(
     onExit: () -> Unit,
 ) {
     val hasSelection = selectedCount > 0
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        // 全选 / 取消全选：与 DeepSeek 一样放在操作条里，而不是标题栏。
-        MiuixTextActionButton(
-            visible = true,
+    // ## 紧凑横排，不是几个铺满的大色块（2026-11-03 修）
+    //
+    // 第一版用 `MiuixTextActionButton`（内部 fillMaxWidth + error 色），
+    // 真机截图里变成**四块刺眼的红条**，与 DeepSeek 的细线条操作条完全不同。
+    //
+    // 现在：一行 [全选] …… [置顶 N] [删除 N] [完成]。
+    // 中性操作走 secondaryContainer，只有删除用 error 色。
+    //
+    // 没勾选时不显示置顶/删除（而不是「显示但禁用」）：
+    // 没有可执行的操作就不展示，这也贴近 DeepSeek。
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SidebarActionButton(
             text = if (allSelected) "取消全选" else "全选",
             onClick = onToggleSelectAll,
         )
-        // ## 没勾选时不显示这两个按钮，而不是「显示但禁用」
-        //
-        // `MiuixTextActionButton` 只有 (visible, text, onClick, modifier) 四个参数，
-        // 没有 enabled / 颜色入参（已核对 ui/widgets/MiuixButtons.kt:70）。
-        // 与其为了「禁用态」改那个公共组件、让一堆不相关调用点跟着适配，
-        // 不如用 `visible` 表达：没勾选 = 没有可执行的操作 = 不展示。
-        //
-        // 这也更贴近 DeepSeek —— 它没选任何项时底部只有「全选」。
+        Spacer(Modifier.weight(1f))
         if (hasSelection) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Box(Modifier.weight(1f)) {
-                    MiuixTextActionButton(
-                        visible = true,
-                        text = "置顶 $selectedCount",
-                        onClick = onPin,
-                    )
-                }
-                Box(Modifier.weight(1f)) {
-                    MiuixTextActionButton(
-                        visible = true,
-                        text = "删除 $selectedCount",
-                        onClick = onDelete,
-                    )
-                }
-            }
+            SidebarActionButton(
+                text = "置顶 $selectedCount",
+                onClick = onPin,
+            )
+            Spacer(Modifier.width(8.dp))
+            SidebarActionButton(
+                text = "删除 $selectedCount",
+                onClick = onDelete,
+                danger = true,
+            )
+            Spacer(Modifier.width(8.dp))
         }
-        MiuixTextActionButton(
-            visible = true,
+        SidebarActionButton(
             text = "完成",
             onClick = onExit,
         )

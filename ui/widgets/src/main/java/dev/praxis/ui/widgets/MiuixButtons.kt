@@ -92,3 +92,51 @@ fun MiuixTextActionButton(
         )
     }
 }
+
+/**
+ * 多选操作条上的一个紧凑按钮（中性 / 危险两种语气）。
+ *
+ * ## 为什么不复用 [MiuixTextActionButton]（2026-11-03）
+ *
+ * 那个组件的定位是「单条删除的确认按钮」：
+ *  - 内部 `fillMaxWidth()` 铺满；
+ *  - `colors` 写死 errorContainer / onErrorContainer（危险操作语义）。
+ *
+ * 多选操作条拿它拼三个按钮时，结果是**三块铺满宽度的大红色块** ——
+ * 真机截图证实了这点（全选/置顶/删除/完成 全是刺眼红块）。
+ * 而 DeepSeek 那种是细线条文字操作条。
+ *
+ * 与其把一个「删除确认」专用组件改造成万能组件（会让原有调用点的语义变糊），
+ * 不如新增这一个：语气由 [danger] 决定，宽度由调用方用 Modifier 控制。
+ *
+ * @param danger true = 破坏性操作（删除），用 error 色；false = 中性（全选/置顶/完成）。
+ */
+@Composable
+fun SidebarActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    danger: Boolean = false,
+) {
+    val container = if (danger) {
+        MiuixTheme.colorScheme.errorContainer
+    } else {
+        MiuixTheme.colorScheme.secondaryContainer
+    }
+    val content = if (danger) {
+        MiuixTheme.colorScheme.onErrorContainer
+    } else {
+        MiuixTheme.colorScheme.onSecondaryContainer
+    }
+    TextButton(
+        text = text,
+        onClick = onClick,
+        modifier = modifier,
+        colors = ButtonDefaults.textButtonColors(
+            color = container,
+            textColor = content,
+        ),
+        // 32dp 而不是默认高度：三条操作条加起来不能把抽屉底部的列表挤没。
+        minHeight = 32.dp,
+    )
+}
