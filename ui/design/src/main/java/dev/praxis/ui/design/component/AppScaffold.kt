@@ -22,7 +22,6 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isSpecified
-import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
@@ -380,12 +379,16 @@ private fun BlurredTopBar(
                 navigationIcon = {
                     when {
                         leadingAction != null -> leadingAction()
-                        onBack != null -> IconButton(onClick = onBack) {
-                            Icon(
-                                imageVector = MiuixIcons.Regular.Back,
-                                contentDescription = "返回",
-                            )
-                        }
+                        // 返回键用「有底」版本（2026-11-03）。
+                        //
+                        // 原来这里是裸 `IconButton` —— 只有图标、没有底色，
+                        // 悬浮在滚动内容之上时图标直接压在文字上，既看不清、
+                        // 也看不出这是个可点的东西。
+                        onBack != null -> FloatingIconButton(
+                            onClick = onBack,
+                            icon = MiuixIcons.Regular.Back,
+                            contentDescription = "返回",
+                        )
                         else -> Unit
                     }
                 },

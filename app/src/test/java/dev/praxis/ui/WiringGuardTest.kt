@@ -1298,4 +1298,40 @@ class WiringGuardTest {
         }
     }
 
+    /**
+     * 顶栏返回键必须是「有底」的悬浮按钮，不能是裸 IconButton。
+     *
+     * ## 它防的是什么（2026-11-03）
+     *
+     * 改造前 `AppScaffold` 的返回键是裸 `IconButton` —— 只有一个图标。
+     * 它悬浮在会滚动的页面内容之上，滚动时图标直接压在文字/图片上，
+     * 既看不清、也看不出这是个可点的东西。
+     *
+     * 改成 `FloatingIconButton`（圆形底 + 描边 + 内阴影）之后，
+     * 这条护栏防止有人图省事改回裸 IconButton。
+     */
+    @Test
+    fun appScaffold_backButtonHasBackground() {
+        val scaffold = read("ui/design/src/main/java/dev/praxis/ui/design/component/AppScaffold.kt")
+        // 只看代码行，不看注释（注释里会提到旧写法作说明）。
+        val code = scaffold.lines()
+            .filterNot {
+                val t = it.trimStart()
+                t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")
+            }
+            .joinToString("\n")
+        assertTrue(
+            "AppScaffold 的返回键没有用 FloatingIconButton —— 又变回裸 IconButton 了",
+            code.contains("FloatingIconButton("),
+        )
+        // 悬浮按钮本身必须真的有底色与描边，否则「有底」是假的。
+        val btn = read("ui/design/src/main/java/dev/praxis/ui/design/component/FloatingIconButton.kt")
+        assertTrue("FloatingIconButton 缺少 background", btn.contains(".background("))
+        assertTrue("FloatingIconButton 缺少 border 描边", btn.contains(".border("))
+        assertTrue(
+            "FloatingIconButton 缺少内阴影（drawWithContent）",
+            btn.contains(".drawWithContent"),
+        )
+    }
+
 }
