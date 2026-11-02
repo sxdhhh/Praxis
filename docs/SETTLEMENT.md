@@ -313,3 +313,51 @@ dd2e1d5  P4 用量重算
 发布被两件事挡住：真机离线、模拟器装不了 APK。
 在没有真机验证的情况下我不会声称任何一项「完成」——尤其是终端那两个修复，
 它们恰恰是最需要跑起来看的。
+
+## 七、本轮（第 19 轮）新增：预构建就绪
+
+真机仍离线，但把**发布前的准备工作全部做完**，设备一上线即可直接验证 + 发布。
+
+### 全仓静态检查：通过
+
+```
+Kotlin 文件总数              374
+括号/括号/方括号不平衡        0
+字面量检查                   374 个文件，0 个有问题
+词法分析器自测               23/23 通过
+```
+
+（结构检查改为在进程内直接调 `kt_lexer.strip_noncode`，
+避免逐文件启动解释器 —— 374 次进程启动会超时，
+而一次性传 374 个路径会超出 Windows 命令行长度上限。）
+
+### APK 已构建并下载
+
+```
+commit    e5019ef（最新）
+CI        #136 build success
+大小      88.1 MB
+md5       097c86f5aa5f24612d385e0af89d0a79
+zip 完整性 OK
+ABI       ['arm64-v8a']
+路径      C:\creat-agent\apk-in\v136\app-debug.apk
+```
+
+**这个包包含全部改动**（P1/P2/P3/P4/P5a/P5b/P6/终端 loginTail），
+真机一上线就能直接装，不用再等十几分钟构建。
+
+### 真机安装注意
+
+无线 ADB 传 88MB 大文件会丢数据（实测：`adb install` / `adb push` /
+`--no-streaming` 三种方式都报 write failed）。
+**必须分块推送再合并**：
+
+```powershell
+# 切成 3 段（30MB/30MB/29.5MB）
+adb push part0.bin /data/local/tmp/p0.bin
+adb push part1.bin /data/local/tmp/p1.bin
+adb push part2.bin /data/local/tmp/p2.bin
+# 设备端合并
+adb shell 'cat /data/local/tmp/p0.bin /data/local/tmp/p1.bin /data/local/tmp/p2.bin > /data/local/tmp/v136.apk'
+adb shell pm install -r -d /data/local/tmp/v136.apk
+```
