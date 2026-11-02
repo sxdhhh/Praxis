@@ -241,59 +241,55 @@ class WiringGuardTest {
 
 
     /**
-     * 底栏三个浮层必须共用同一套尺寸与抬起量。
+     * 底栏三个浮层必须**共用同一套组件**，而不是三处各自硬编码尺寸去对齐。
      *
-     * ## 它防的是什么
+     * ## 它防的是什么（2026-11-03 重写）
      *
-     * 模型选择 / 功能 / 附件（图片·拍照·记忆…）是**同一块板的三种内容**：
-     * 用户点不同按钮时，卡片应该原地换内容，而不是换位置、换宽窄。
+     * 模型选择 / 功能 / 附件（图片·拍照·记忆…）是同一块板的三种内容，
+     * 用户点不同按钮时卡片应该原地换内容，而不是换位置、换宽窄。
      *
-     * 这三处曾经各写各的：
-     *   - 功能弹窗  bottom=96 / end=8  / width=280 / max=420
-     *   - 模型选择  bottom=44 / end=12 / width=260 / max=380
-     *   - 附件面板  bottom=44 / end=12 / widthIn(max=420)+fillMaxWidth
+     * 这三处曾经各写各的 padding：功能 bottom=96/end=8/width=280，
+     * 模型 bottom=44/end=12/width=260，附件干脆 fillMaxWidth + 九宫格。
+     * 第一版护栏的做法是**断言三处都出现同一组魔法数字**
+     * （`.padding(bottom = 96.dp, end = 8.dp)` + `.width(280.dp)`）。
      *
-     * 结果就是截图上看到的：点开附件面板，卡片**明显更宽、更矮**，底边
-     * 与功能面板不在一条线上。
+     * **那个做法是错的**：它把「靠硬编码常量互相猜着对齐」固化成了契约。
+     * 只要有人改了其中一处，就得同时改三处 + 改测试；而真正的解法是
+     * 让三处**根本不存在各自的尺寸**——都用 miuix 的同一套浮层组件，
+     * 宽度/圆角/阴影/边距由组件自己保证。
      *
-     * 这类偏差**编译器与 lint 都不报**，页面上也“能看”，只是不像同一套 UI。
-     * 只能靠源码断言钉住。
+     * 所以现在断言的是「三者都走同一组件」，并**禁止**再出现那组魔法数字。
+     * 这类偏差编译器与 lint 都不报，只能靠源码断言钉住。
      */
     @Test
-    fun bottomSheets_shareSameSizeAndLift() {
+    fun bottomSheets_shareSameComponent() {
         val settings = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatSettingsBar.kt")
         val attachment = read("feature/chat/src/main/java/dev/praxis/feature/chat/AttachmentPanel.kt")
 
-        // 三处都必须出现这一组值（功能弹窗 + 模型选择 → settings；附件 → attachment）。
-        val expected = listOf(".padding(bottom = 96.dp, end = 8.dp)", ".width(280.dp)")
-        expected.forEach { needle ->
+        // 附件菜单必须走 miuix 下拉（与模型/功能同源）。
+        assertTrue(
+            "AttachmentPanel 没有用 OverlayDropdownPopup —— 又变成自建浮层了",
+            attachment.contains("OverlayDropdownPopup("),
+        )
+        // 它自建的那套必须已彻底移除。
+        assertTrue(
+            "AttachmentPanel 里还有自建的 MiuixAnimatedPopup / Card 九宫格",
+            !attachment.contains("MiuixAnimatedPopup(") &&
+                !attachment.contains("AttachmentCellView("),
+        )
+        // 两边都不许再出现「靠同一组魔法数字对齐」的写法。
+        listOf(".padding(bottom = 96.dp, end = 8.dp)", ".width(280.dp)").forEach { needle ->
             assertTrue(
-                "ChatSettingsBar 缺少统一尺寸 $needle（两个弹窗都要有，出现次数=${countOf(settings, needle)}）",
-                countOf(settings, needle) >= 2,
+                "ChatSettingsBar 又出现了硬编码对齐尺寸 $needle —— " +
+                    "三块浮层应交给 miuix 组件保证，不该各自写常量",
+                !settings.contains(needle),
             )
             assertTrue(
-                "AttachmentPanel 缺少统一尺寸 $needle",
-                attachment.contains(needle),
+                "AttachmentPanel 又出现了硬编码对齐尺寸 $needle",
+                !attachment.contains(needle),
             )
         }
-        // 附件面板的**卡片本身**不允许再出现 fillMaxWidth（会把宽度撑回满屏）。
-        //
-        // 判据不能写成「全文不含 fillMaxWidth()」：格子内部的
-        // `Modifier.fillMaxWidth()` 是正常用法（铺满卡片宽度），
-        // 只有 Card 自己的修饰符链里出现才意味着尺寸被撑回满屏。
-        // 这里按「width(280.dp) 之后紧跟 fillMaxWidth」判，正是当年
-        // 写错时的形态。
-        val cardBlock = attachment.substringAfter(".padding(bottom = 96.dp, end = 8.dp)")
-        assertTrue(
-            "AttachmentPanel 的 Card 不应使用 fillMaxWidth（宽度由 width(280.dp) 决定）",
-            !cardBlock.substringBefore(".heightIn(").contains(".fillMaxWidth()"),
-        )
     }
-
-
-    private fun countOf(haystack: String, needle: String): Int =
-        haystack.split(needle).size - 1
-
 
     /**
      * 功能面板的五个分区必须默认全部折叠。
@@ -671,16 +667,31 @@ class WiringGuardTest {
 
 
     /**
-     * 贴边浮层（AttachmentsPanel）必须有进出场动画。
+     * 附件菜单必须有进出场动画 —— 由 miuix 下拉组件提供，不是自建 Popup。
+     *
+     * ## 2026-11-03 重写
+     *
+     * 原断言是「必须用 MiuixAnimatedPopup（自建的带动画 Popup）」。
+     * 那时附件面板是自建的一整套，为了保证它至少有动画才立的这条。
+     *
+     * 现在附件面板改成了 miuix 的 `OverlayDropdownPopup` —— 动画由组件自带，
+     * 比自建的那套更完整（逐项出现 + onDismissFinished）。
+     * 断言因此改成「走这个组件」，而不是钉住被删掉的旧实现。
      */
     @Test
-    fun attachmentPanel_usesAnimatedPopup() {
+    fun attachmentPanel_usesAnimatedDropdown() {
         val panel = read("feature/chat/src/main/java/dev/praxis/feature/chat/AttachmentPanel.kt")
-        assertTrue("附件面板必须用带动画的 Popup", panel.contains("MiuixAnimatedPopup("))
-        assertTrue("必须用 visible 控制", panel.contains("visible = visible,"))
+        assertTrue(
+            "附件面板没有用 OverlayDropdownPopup —— 会退化成无动画的自建浮层",
+            panel.contains("OverlayDropdownPopup("),
+        )
+        assertTrue("必须用 visible 控制显隐", panel.contains("show = visible,"))
+        // 动画结束回调必须在位，否则「关完再允许重开」无从判断。
+        assertTrue(
+            "缺少 onDismissFinished —— 关闭动画真正结束的时刻拿不到",
+            panel.contains("onDismissFinished ="),
+        )
     }
-
-
 
     /**
      * 「容器是否在跑」必须能从端口层问出来，而不是只靠 ViewModel 字段。
