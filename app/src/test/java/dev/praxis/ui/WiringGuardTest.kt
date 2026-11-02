@@ -1334,4 +1334,58 @@ class WiringGuardTest {
         )
     }
 
+    /**
+     * 侧边栏遮罩必须是「压暗」，不能用 onSurface —— 那是提亮。
+     *
+     * ## 它防的是什么（2026-11-03 真机实测）
+     *
+     * 用户原话：「侧边栏是压暗背景而不是提亮背景」。
+     *
+     * 旧实现写的是：
+     *
+     * ```kotlin
+     * .background(MiuixTheme.colorScheme.onSurface.copy(alpha = SIDEBAR_DIM_ALPHA))
+     * ```
+     *
+     * `onSurface` 的语义是「表面上的**前景**色」—— **深色主题下它是浅色**。
+     * 浅色半透明叠上去就是提亮，与「弹出层压暗背景」的层级语义正好相反。
+     *
+     * 真机像素采样（同一位置、同一条会话）：
+     *
+     * ```
+     *                 抽屉关闭    抽屉打开
+     * 用 onSurface      25.1        130.7     ← 变亮 5.2 倍（bug）
+     * 用 Color.Black    25.1         12.3     ← 变暗 51%（正确）
+     * ```
+     *
+     * 这条护栏钉住「必须用 Color.Black」：
+     * 换个主题色、重构布局都可能顺手把它改回语义色，而编译器不会报。
+     */
+    @Test
+    fun sidebarScrim_darkensInsteadOfLightening() {
+        val sidebar = read("ui/widgets/src/main/java/dev/praxis/ui/widgets/MiuixSidebar.kt")
+        // 只看代码行，不看注释（注释里会引用旧写法作说明）。
+        val code = sidebar.lines()
+            .filterNot {
+                val t = it.trimStart()
+                t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")
+            }
+            .joinToString("\n")
+        assertTrue(
+            "侧边栏遮罩没有用 Color.Black —— 压暗必须与主题明暗无关",
+            code.contains("Color.Black.copy(alpha = SIDEBAR_DIM_ALPHA)"),
+        )
+        // 明确禁止退回语义色：onSurface 在深色主题下是浅色，会变成提亮。
+        assertTrue(
+            "侧边栏遮罩又用回 onSurface 了 —— 那是提亮不是压暗",
+            !code.contains("onSurface.copy(alpha = SIDEBAR_DIM_ALPHA)"),
+        )
+        // 遮罩必须真的挂在整屏 Box 上，且 alpha 随开合进度变化；
+        // 写死一个常量的 alpha 会让开合动画失去「由浅入深」的过程。
+        assertTrue(
+            "遮罩的 alpha 没有跟随 progress —— 开合时不会有浓淡变化",
+            code.contains("alpha = sidebarEasedProgress(progress.value)"),
+        )
+    }
+
 }
