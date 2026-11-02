@@ -123,7 +123,8 @@ Java_dev_praxis_core_terminal_Pty_00024Companion_createSubprocess(
     int master_fd;
     pid_t pid = forkpty(&master_fd, NULL, &tt, &ws);
     if (pid < 0) {
-        LOGE("forkpty failed: %s", strerror(errno));
+        LOGE("forkpty failed: %s (errno=%d) argv[0]=%s cwd=%s",
+             strerror(errno), errno, cmd_len > 0 ? argv[0] : "(empty)", cwd);
         free(cwd);
         for (int i = 0; i < cmd_len; i++) free(argv[i]);
         free(argv);
@@ -133,14 +134,41 @@ Java_dev_praxis_core_terminal_Pty_00024Companion_createSubprocess(
     }
 
     if (pid == 0) {
-        /* 子进程 */
+        /*
+         * 子进程。
+         *
+         * ## ⚠️ 这里每一步都必须 LOGE（2026-11-03 真机实证后补）
+         *
+         * 原来只有 `fprintf(stderr, ...)`。而子进程的 stderr **已经重定向进 PTY**，
+         * 所以失败信息只会出现在终端画面里，**不进 logcat**。
+         *
+         * 后果是整个终端最关键的失败路径完全不可观测：
+         *
+         * ```
+         * forkpty 成功 -> 子进程 execve 失败 -> _exit(1)
+         *   -> Kotlin 侧 200ms 后 isAlive=false -> 静默丢弃这个 PTY
+         *   -> 降级到管道 -> 用户看到 can't access tty
+         * ```
+         *
+         * 真机实测：`logcat -s PraxisPty` **零条**，而终端确实降级了。
+         * 一个能让整个终端静默降级的路径不该一行日志都没有。
+         */
         if (chdir(cwd) != 0) {
+            LOGE("child: chdir(%s) failed: %s", cwd, strerror(errno));
             fprintf(stderr, "chdir to %s failed: %s\n", cwd, strerror(errno));
-            _exit(1);
+            _exit(127);
         }
         execve(argv[0], argv, envp);
+        /*
+         * execve 走到这里说明失败了。errno 是唯一线索：
+         *   ENOENT      -> 文件不存在（nativeLibraryDir 里没有那个 .so？）
+         *   EACCES      -> 不可执行（SELinux / 权限位）
+         *   ENOEXEC     -> 不是可执行格式 / 动态链接器缺失
+         *   ETXTBSY     -> 文件正被写
+         */
+        LOGE("child: execve(%s) failed: %s (errno=%d)", argv[0], strerror(errno), errno);
         fprintf(stderr, "execve(%s) failed: %s\n", argv[0], strerror(errno));
-        _exit(1);
+        _exit(127);
     }
 
     /* 父进程 */

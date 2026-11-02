@@ -1,0 +1,236 @@
+# Praxis 本轮改造计划（调查结论 + 实施方案）
+
+> 计划基于对三件事的实际核查：Praxis 现有实现（读源码）、
+> NexioSchedule 的技术栈（已 clone 到 `C:\creat-agent\ref-nexio`）、
+> 以及用户真机截图。不确定的地方标了「待确认」，不猜。
+
+## 调查结论（已核实的事实）
+
+### 关键发现：两个项目用同一个 miuix 版本 0.9.4
+
+```
+NexioSchedule  gradle/libs.versions.toml:  miuix = "0.9.4"
+Praxis         gradle/libs.versions.toml:  miuix = "0.9.4"
+```
+
+所以 NexioSchedule 用的 `top.yukonga.miuix.kmp.popup.OverlayDropdownPopup`
+在 Praxis 里**可以直接用**，不需要移植、不需要升级依赖。这是本轮最大的有利条件。
+
+### 现有实现与差距
+
+| 项 | Praxis 现状 | 差距 |
+|---|---|---|
+| A 侧边栏 | `ChatSidebar.kt`（351 行）：长按 → 二次确认删除，仅单条 | 缺多选模式 + 底部批量操作条 |
+| C 加号菜单 | `AttachmentPanel.kt`（305 行）：自建 `Popup` + `Card` + 4 列九宫格 | 与 miuix 下拉样式完全不同 |
+| D 动画 | 模型/功能菜单走 `MiuixSmallTitleDropDown` → `OverlayListPopup`（**无尺寸插值**） | 缺收起↔展开的形变动画 |
+| F UI 参考 | — | 未引入 NexioSchedule 的圆角/悬浮/动效体系 |
+
+### B 项根因（已定位到行）
+
+`ContextUsage.used` 由 `ChatViewModel.publishUsage()` 写入，而它的**三个调用点全在发送路径**：
+
+```
+ChatViewModel.kt:1677  publishUsage(buildPreparedMessages(config), config)
+ChatViewModel.kt:1717  publishUsage(buildPreparedMessages(config), config)
+ChatViewModel.kt:2633  publishUsage(buildPreparedMessages(config), config)
+```
+
+`restoreIfNeeded()`（重进 App 的入口）**不调用**它。所以：
+
+- 重进后 `used` 停在 `0` → 进度条显示 `0 / 1.0M`；
+- 用户看到的就是「命中率清零」。
+
+「部分内容消失」另有嫌疑点：`ChatSidebar` 的 KDoc 里记着 `ensureSession` 走
+`@Insert(onConflict = REPLACE)` → SQLite 先 DELETE 再 INSERT → `messages` 表
+`ON DELETE CASCADE` → **整个会话的消息被级联删光**。历史上已踩过一次，
+需要核查是否还有别的调用点在踩。
+
+### E 项（终端）—— 本次调查没能定位，需要真机日志
+
+用户截图里：Linux 环境页显示「容器运行中」，但报
+`stty: 'standard input': Inappropriate ioctl for device`。
+
+已核查：
+- 源码里**没有** `stty` 字样 → 那是容器内 shell 启动脚本（bash 登录 profile）打的；
+- 该路径走 `LinuxEnvViewModel.start()` → `port.startSession(env, loginArgs)`；
+- 说明这条 `loginArgs` 起的 bash **拿不到 tty**。
+
+**我上一轮在 x86 模拟器上验证的是管道降级分支（无 libpty），真机走的是 PTY 分支。**
+所以真机的失败点我并没有覆盖到。这台模拟器上 `libpty.so` 只有 arm64 版、
+x86 加载不了，无法复现 PTY 路径。
+
+**需要用户提供**：真机点「启动」后的完整报错（最好含 `logcat -s ProotTermSession PraxisPty`）。
+没有它，我只能靠读代码推测，那样修出来的东西不可信。
+## 实施方案（按依赖顺序，逐项验证）
+
+### 阶段 0：地基（先做，后面都依赖它）
+
+**0.1 从 NexioSchedule 提炼可复用的 UI 基础**
+
+需要读透并移植/借鉴的文件：
+
+| 文件 | 用途 |
+|---|---|
+| `effects/liquidglass/DampedDragAnimation.kt` | 拖动动画（拖动阻尼 + 回弹）|
+| `effects/liquidglass/InteractiveHighlight.kt` | 按压缩放/高亮反馈 |
+| `effects/motion/MorphTransition.kt` | 形变动画（收起态↔展开态的尺寸插值）|
+| `components/BackToNowFloatingButton.kt` | 悬浮按钮（返回类控件背景）|
+| `basic/OverlayDropdownMenu.kt` | miuix 下拉动画封装（D 项直接受益）|
+
+**验收**：把这批代码读完，提炼成 `ui/design` 里 2~3 个可复用组件 + 一份对照说明。
+不整包抄 —— NexioSchedule 是 KMP 多平台，Praxis 是纯 Android，直接抄会带进一堆
+`expect/actual` 与平台抽象。只取「算法与视觉参数」。
+
+### 阶段 1：D 项 —— 菜单动画统一（改动最小、见效最快）
+
+把 `MiuixSmallTitleDropDown` 从 `OverlayListPopup` 换成 `OverlayDropdownPopup`，
+让它具备「收起态胶囊 → 展开成面板」的形变。
+
+**风险**：`OverlayDropdownPopup` 需要 `collapseContent` / `collapseSize` 等参数，
+签名要按 NexioSchedule 的用法逐个对齐。miuix 0.9.4 同版本，API 存在性无疑，但
+参数形状要核对。
+
+**验收**：模拟器上点开模型菜单，录屏/连续截图确认有展开动画；关闭时有收起动画。
+
+### 阶段 2：C 项 —— 加号菜单改成统一样式
+
+把 `AttachmentPanel` 的九宫格 `Card` 换成与模型/功能菜单同源的 miuix 下拉/面板形态。
+
+**待确认**：8 个附件项是「带图标的网格」语义，直接套 miuix 下拉（纯文字列表）会丢图标。
+两种做法：
+  (a) 用 `OverlayDropdownPopup` 的 `entries` 承载带图标的行（若 miuix 支持 icon slot）；
+  (b) 保留网格布局，但容器/圆角/阴影/尺寸/动画全部对齐 miuix 下拉的视觉参数。
+先读 miuix 的 `DropdownItem` 有没有 icon 位，再定。
+
+**验收**：三块浮层（模型 / 功能 / 附件）同宽、同右边距、同底边；模拟器截图对比。
+
+### 阶段 3：A 项 —— 侧边栏多选批量管理
+
+参照 DeepSeek 截图（用户提供三张）：
+
+```
+长按某条 → 进入多选模式：
+  · 每条左侧出现圆形复选框
+  · 顶部标题变「选择对话」，右侧 ×
+  · 底部出现 [置顶] [删除] 两个操作
+```
+
+改 `ChatSidebar.kt`：加 `selectionMode` / `selectedIds` 状态，行首复选框，
+底部操作条（用统一后的 miuix 按钮），批量置顶/删除走现有 `ChatPersistence`。
+
+**注意**：保留现有的 `justDeletedId` 守卫与「不 REPLACE 当前会话」的教训，
+不要在多选删除里把那个 CASCADE 坑再踩一次。
+
+**验收**：模拟器上多选 3 条 → 批量删除 → 直读数据库确认只剩预期的行。
+
+### 阶段 4：B 项 —— 重进后恢复用量 + 修内容消失
+
+**4.1 用量恢复**：在 `restoreIfNeeded()` 恢复完历史后调一次 `publishUsage`，
+用恢复出来的历史重算 `used`。
+
+**4.2 内容消失**：全仓搜索 `ensureSession` 的所有调用点，逐个核查是否可能在
+「会话已有消息」时被调用（那就会 REPLACE → CASCADE 删消息）。有则改成
+「先查存在性，仅不存在时插入」或改用 UPDATE。
+
+**验收**：模拟器上发几条消息 → 记下 token 数 → 杀掉 App 重进 → 确认数字恢复、
+消息仍在（直读数据库比对行数）。
+
+### 阶段 5：F 项 —— UI 借鉴 NexioSchedule
+
+**明确范围**（用户要求）：
+- ✅ G2 圆角（连续曲率圆角）
+- ✅ 悬浮控件背景（返回按钮等）
+- ✅ 页面排版、控件样式
+- ✅ 拖动动画、展开动画、滑动选择动画
+- ❌ **底部导航栏 / 标签栏不改**
+
+落地清单：
+1. 圆角体系：把现有 `RoundedCornerShape` 的硬编码值收敛成一组 token，
+   关键容器用 G2 连续曲率（NexioSchedule 的 `FusionPairShape` / `LiquidBottomBarShape` 有实现思路）。
+2. 悬浮控件：返回按钮、置底按钮等改成带描边/内阴影的悬浮胶囊。
+3. 动效：接入 `DampedDragAnimation`（拖动）与 `MorphTransition`（展开）。
+4. 滑动选择：长按拖动选择（侧边栏多选、消息选择可用）。
+
+**验收**：每个落地项在模拟器上截图对比改前/改后。
+
+### 阶段 6：E 项 —— 终端（阻塞，需用户日志）
+
+在没有真机日志之前**不动手改**。可以做的准备：
+- 读 DIY Sandbox 参考实现（`C:\creat-agent\ref-diy-sandbox`）的 PTY 用法，
+  对比 Praxis 的 `Pty.kt`；
+- 核查 `loginArgs` 起的 bash 是否真的需要 tty（`stty` 来自 profile）。
+
+**如果用户能提供日志**，优先做这一项 —— 它是用户最直接的痛点。
+
+### 阶段 7：一次性构建 + 发布 + 结算报告
+
+所有项改完、模拟器验证通过后：
+1. 全仓静态检查（`check_kt_files.py` / `check_kt_literals.py` / `test_kt_lexer.py`）；
+2. **一次性** commit + push（不逐条 push，避免触发风控）；
+3. 等 CI 绿；
+4. 触发一次 APK 构建，下载、发布到 `https://sxd.sxdshh.kdns.fr/apk/`；
+5. 写结算报告：改了什么、怎么验的、还有什么没验。
+
+## 顺序理由
+
+0 → 1 → 2 → 3 → 4 是**强依赖**：菜单动画（1）是加号菜单（2）的前提；
+G2 圆角体系（0.1）是多选操作条（3）与所有新控件的前提。
+
+F（阶段 5）放在功能改完之后，因为它要动全局视觉 token —— 先改功能再统一视觉，
+比先统一视觉再塞功能少返工。
+
+E（阶段 6）独立，可以随时插入 —— 取决于能否拿到真机日志。
+
+## 需要用户确认/提供
+
+1. **E 项真机日志**（最重要）：装上当前 APK，点「启动容器」，然后
+   `adb logcat -s ProotTermSession PraxisPty > log.txt`，或截图终端页完整报错。
+2. C 项的取舍：附件菜单要「带图标的网格但视觉对齐下拉」还是「纯 miuix 下拉列表」？
+   我倾向前者（图标对附件功能很重要），但想确认。
+3. 「部分内容消失」具体指什么：是消息气泡消失，还是侧边栏列表条目消失？
+   这决定我查哪条路径。
+## 阶段 0.1 的调查结果（已完成）
+
+### NexioSchedule 的技术栈已摸清
+
+关键结论：**它的动效能力几乎全部来自 miuix 0.9.4 自带 API，不是自研**。
+
+```
+dragSelectState        -> top.yukonga.miuix.kmp.interactive.DropdownPanelDragSelectState
+dropdownPanelDragSelect-> top.yukonga.miuix.kmp.interactive.dropdownPanelDragSelect
+dropdownPanelEntry     -> top.yukonga.miuix.kmp.interactive.dropdownPanelEntry  （滑动选择）
+OverlayDropdownPopup   -> top.yukonga.miuix.kmp.popup.OverlayDropdownPopup     （形变动画）
+```
+
+Praxis 是同一个 miuix 0.9.4，这些**全都能直接用**。
+
+NexioSchedule 自己写的只有 `DampedDragAnimation.kt`（160 行，纯动画算法，
+无平台依赖，可直接移植）与若干 shape 实现。
+
+### 这改变了实施策略
+
+原以为要「移植 NexioSchedule 的动效体系」，实际是：
+
+| 原计划 | 实际做法 |
+|---|---|
+| 移植 `OverlayDropdownMenu`（24KB）| 只把 Praxis 的 `MiuixSmallTitleDropDown` 从 `OverlayListPopup` 换成 `OverlayDropdownPopup`，几十行 |
+| 自研滑动选择 | 用 miuix 的 `dropdownPanelEntry` / `dropdownPanelDragSelect` |
+| 移植拖动动画 | 移植 `DampedDragAnimation`（160 行，纯算法）|
+
+所以 C/D/F 三项的工作量比预估小得多，风险也低（都是官方 API，同版本已验证存在）。
+
+## 修正后的优先级
+
+1. **E 终端**（最高，用户最痛）—— 阻塞在真机日志，但可以先读 DIY Sandbox 参考实现做静态对比
+2. **D 菜单动画**（改几十行就有明显效果）
+3. **C 加号菜单统一样式**
+4. **A 侧边栏多选**
+5. **B 重进丢数据 + 用量清零**
+6. **F 全局视觉统一**
+7. 静态检查 → 一次性提交 → 构建 → 发布 → 结算报告
+
+## 我现在就要开始的
+
+E 项虽然缺真机日志，但我可以做**静态对比**：读 `ref-diy-sandbox` 的 PTY 实现，
+对照 Praxis 的 `Pty.kt` 与 `loginArgs`，找出 PTY 路径上可疑的差异。
+这个不需要真机，且如果找到明确 bug 就能直接修。
