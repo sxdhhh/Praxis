@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import dev.praxis.ui.widgets.ChatDisplayStyle
 import dev.praxis.ui.widgets.MarkdownText
 import dev.praxis.ui.widgets.StreamingText
+import dev.praxis.ui.theme.PraxisRadius
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -200,7 +201,7 @@ fun MessageBubble(
                         Modifier.border(
                             width = 1.dp,
                             color = MiuixTheme.colorScheme.outline.copy(alpha = 0.35f),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = PraxisRadius.LargeShape,
                         )
                     } else {
                         Modifier
@@ -215,8 +216,10 @@ fun MessageBubble(
                 ),
             color = container,
             contentColor = content,
-            // 摘要圆角更小（12dp vs 18dp）：更接近「卡片/块」而不是「气泡」。
-            shape = RoundedCornerShape(if (isSummary) 12.dp else 18.dp),
+            // 摘要与正文统一用 Large 档（2026-11-03）：旧实现是 if(isSummary) 12 else 18，
+            // 两个值都不在令牌档位里，且 18dp 是全仓孤例。
+            // 摘要与正文用同一档：18dp 不在令牌档位内，且两者本就同类元素。
+            shape = PraxisRadius.LargeShape,
         ) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                 // 摘要顶部的小标签。它不是正文的一部分，单独一行、更小字号、
@@ -336,7 +339,7 @@ private fun CursorMessage(
             contentColor = MiuixTheme.colorScheme.onSurface,
             // 8dp 而气泡风格是 18dp：小圆角是「面板 / 文档块」的语言，
             // 大圆角是「聊天气泡」的语言，这个差别本身是两种风格的识别点。
-            shape = RoundedCornerShape(8.dp),
+            shape = PraxisRadius.SmallShape,
         ) {
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
                 if (showLabel) {
@@ -382,7 +385,7 @@ private fun CursorMessage(
                 .combinedClickable(onClick = {}, onLongClick = onLongPress),
             color = MiuixTheme.colorScheme.errorContainer,
             contentColor = MiuixTheme.colorScheme.onErrorContainer,
-            shape = RoundedCornerShape(8.dp),
+            shape = PraxisRadius.SmallShape,
         ) {
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
                 MessageLabel(text = "出错", color = MiuixTheme.colorScheme.onErrorContainer)
@@ -502,7 +505,7 @@ private fun MessageImages(
                     android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                 }.getOrNull()
             }
-            val shape = RoundedCornerShape(10.dp)
+            val shape = PraxisRadius.MediumShape
             Box(
                 modifier = Modifier
                     .fillMaxWidth()

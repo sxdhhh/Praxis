@@ -1255,5 +1255,47 @@ class WiringGuardTest {
                 envPort.contains("put(\"LD_LIBRARY_PATH\", it.absolutePath)"),
         )
     }
-}
+    /**
+     * 圆角必须走 [PraxisRadius] 令牌，不得内联 `RoundedCornerShape(12.dp)`。
+     *
+     * ## 它防的是什么（2026-11-03）
+     *
+     * 改造前全仓 67 处 `RoundedCornerShape(12.dp)` 这类硬编码，取值有
+     * 1/2/3/4/6/8/10/12/16/18/20/24.dp 十二种。同一个「卡片」语义在不同页面
+     * 用了 10、12、16 三种 —— 用户说不出哪错了，但整体观感是散的。
+     *
+     * 这和 `PraxisMotion` 是同一类问题（那边是时长、这边是圆角）。
+     * 令牌一旦建立而不加护栏，下一次改动又会顺手写回 `16.dp`。
+     *
+     * ## 为什么只查这几个文件，不是全仓
+     *
+     * 全仓 67 处一次性迁完风险太大（改错了编译器不报，只是「看着不对」）。
+     * 先迁最高频的几处 + 护栏守住**这几个文件**不再回退。
+     * 其余文件的迁移分批做，每批都靠这条护栏的同一套判据。
+     */
+    @Test
+    fun cornerRadius_goesThroughToken() {
+        val files = listOf(
+            "feature/chat/src/main/java/dev/praxis/feature/chat/widget/MessageBubble.kt",
+            "ui/widgets/src/main/java/dev/praxis/ui/widgets/MiuixSidebar.kt",
+            "feature/chat/src/main/java/dev/praxis/feature/chat/queue/PendingQueuePanel.kt",
+        )
+        files.forEach { rel ->
+            val text = read(rel)
+            // 只看代码行，不看注释（注释里会引用旧写法作说明）。
+            val code = text.lines()
+                .filterNot {
+                    val t = it.trimStart()
+                    t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")
+                }
+                .joinToString("\n")
+            val inline = Regex("RoundedCornerShape\\(\\s*\\d+\\.dp")
+            val hit = inline.find(code)
+            assertTrue(
+                "$rel 里还有内联圆角 \${hit?.value} —— 应改用 PraxisRadius 令牌",
+                hit == null,
+            )
+        }
+    }
 
+}

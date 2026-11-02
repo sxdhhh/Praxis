@@ -67,6 +67,7 @@ import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.icon.extended.Pin
 import top.yukonga.miuix.kmp.icon.extended.Unpin
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 侧边栏（左侧抽屉）。
@@ -412,7 +413,7 @@ fun MiuixSidebar(
             color = MiuixTheme.colorScheme.surface,
             // 只在右侧做圆角：面板贴左边缘滑出，左侧圆角会露出屏幕边缘、
             // 在 edge-to-edge + 圆角屏上看到「切角」。
-            shape = RoundedCornerShape(topEnd = 20.dp, bottomEnd = 20.dp),
+            shape = PraxisRadius.SideSheetShape,
         ) {
             SidebarPanel(
                 title = title,
@@ -584,7 +585,7 @@ fun SidebarSessionRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(PraxisRadius.MediumShape)
             .background(container)
             // 点击打开，长按进入删除确认态。
             // 不在 pointerInput 里自己量长按时长：系统长按时长、无障碍长按、
@@ -712,7 +713,7 @@ fun SidebarSectionLabel(text: String, expanded: Boolean, onToggle: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(PraxisRadius.MediumShape)
             .background(MiuixTheme.colorScheme.surfaceContainerHigh)
             .clickable(onClick = onToggle)
             .padding(horizontal = 12.dp, vertical = 8.dp),

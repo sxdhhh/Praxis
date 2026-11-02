@@ -12,6 +12,10 @@ dependencies {
     api(project(":ui:widgets"))
     api(project(":ui:navigation"))
     api(project(":ui:design"))
+    // 圆角令牌 `PraxisRadius` 在 :ui:theme 里（与 `PraxisMotion` 同一处）。
+    // :ui:design 只 `api` 了 :ui:theme 给自己用，不向下传递到 :feature:chat，
+    // 所以这里必须显式声明 —— 否则 `PraxisRadius` 在这个模块里不可见。
+    implementation(project(":ui:theme"))
     implementation(project(":core:model"))
     implementation(project(":core:ai"))
     implementation(project(":core:tool"))

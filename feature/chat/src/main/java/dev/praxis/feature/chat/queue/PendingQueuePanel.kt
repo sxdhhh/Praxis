@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.praxis.feature.chat.QueuedMessage
 import dev.praxis.ui.theme.PraxisMotion
+import dev.praxis.ui.theme.PraxisRadius
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -209,7 +210,7 @@ private fun QueueRow(
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = itemColor),
-        shape = RoundedCornerShape(12.dp),
+        shape = PraxisRadius.MediumShape,
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Row(
@@ -306,7 +307,7 @@ private fun QueueIconAction(
     Box(
         modifier = Modifier
             .size(26.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(PraxisRadius.TinyShape)
             .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
