@@ -617,6 +617,13 @@ fun SidebarSessionRow(
                     //
                     // 与其再找一个「长得像勾」的图标凑合（大小/线宽/端点都会
                     // 跟 11dp 的圆不成比例），不如画两条线：零依赖、比例可控。
+                    // ## 颜色必须在 Composable 上下文里取出来（CI #119 修）
+                    //
+                    // `Canvas` 的 draw lambda 是 `DrawScope.() -> Unit`，**不是**
+                    // Composable 上下文。在里面直接读 `MiuixTheme.colorScheme`
+                    // 会报「@Composable invocations can only happen from the
+                    // context of a @Composable function」。先取成局部值再传进去。
+                    val checkColor = MiuixTheme.colorScheme.onPrimary
                     Canvas(modifier = Modifier.size(11.dp)) {
                         val w = size.width
                         val h = size.height
@@ -627,7 +634,7 @@ fun SidebarSessionRow(
                         }
                         drawPath(
                             path = path,
-                            color = MiuixTheme.colorScheme.onPrimary,
+                            color = checkColor,
                             style = Stroke(
                                 width = w * 0.16f,
                                 cap = StrokeCap.Round,
