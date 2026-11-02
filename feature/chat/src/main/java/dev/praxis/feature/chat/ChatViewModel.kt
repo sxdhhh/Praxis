@@ -646,6 +646,32 @@ class ChatViewModel(
             // 只有走到这里才算「真的恢复过」。放在 try 的末尾而不是开头，
             // 是因为上面几个提前 return 的分支（读库失败 / 空库）都还没恢复成功。
             restored = true
+
+            // ## 恢复后必须重算上下文用量（2026-11-03 修「重进后命中率清零」）
+            //
+            // `ContextUsage.used` 只由 `publishUsage()` 写入，而它的三个调用点
+            // **全在发送路径**（send 里两处 + 压缩完成后一处）。重进 App 只走
+            // `restoreIfNeeded()`，一次都不发送 —— 于是 `used` 一直停在 0，
+            // 进度条从 `3.6k / 1.0M` 变成 `0 / 1.0M`。
+            //
+            // 用户报的是「命中率清零」，看到的就是这个 0。
+            // 而 `history` 在上面已经完整重建了，用量完全可以算出来 ——
+            // 之前只是漏了调这一步。
+            //
+            // ## 为什么放在 `restored = true` 之后
+            //
+            // 上面的提前 return（读库失败 / 空库）都还没恢复成功，
+            // 那时算出来的是空历史的量，写进去反而是错的。
+            //
+            // ## 为什么用 runCatching 包住
+            //
+            // `readRuntimeConfig()` 要读 DataStore，可能因 IO 抛异常。
+            // 而「算不出用量」不该让整条恢复流程失败 —— 历史已经恢复好了，
+            // 用量算不出来顶多是进度条显示 0，比聊天记录显示不出来轻得多。
+            runCatching {
+                val config = readRuntimeConfig()
+                publishUsage(buildPreparedMessages(config), config)
+            }
             } finally {
                 // 无论成功失败都要清：否则一次失败会把后续 attempt 全挡住。
                 restoreInFlight = false
