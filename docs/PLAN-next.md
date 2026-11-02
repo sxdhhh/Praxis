@@ -343,3 +343,68 @@ v123（修复后）    25.1         12.3     变暗 51% —— 压暗（正确�
 
 要做这个区分，需要一个「只删一部分、另一部分消息必须完好」的实验。
 当前数据库已被清空，下一轮需要先造数据再验。**这一条留待补验。**
+## 本轮（第 6 轮）完成与受阻
+
+### ✅ P3 级联安全红线：已实证（这是本轮最重要的产出）
+
+上一轮用的是「全选全删」，无法区分「正确删除」与「CASCADE 误删」。
+本轮造了精确测试数据后只删一条：
+
+```
+造数（root 拉库 → PC 上 sqlite3 插入 → push 回设备）：
+  seedA 待删  3 条消息
+  seedB 保留  5 条消息
+  seedC 保留  7 条消息（且 pinned=1）
+
+真机操作：长按 seedA → 多选 → 点「删除 1」
+
+结果（直读数据库）：
+  sessions:  s1793653106785(当前对话) / seedB / seedC
+  messages:  seedB 5 条 ✓   seedC 7 条 ✓
+  seedA 已删除 ✓        App 存活（pid 18042）✓
+```
+
+**PASS**：批量删除只影响目标会话，其它会话消息未被级联删除。
+目标里那条「多选删除绝不能走 ensureSession/@Insert(REPLACE)」的红线守住了。
+
+### ✅ P3 操作条样式：代码已改，真机未验（受阻）
+
+真机截图显示多选操作条是**四块铺满宽度的刺眼红块**，与 DeepSeek 不符。
+根因：用了 `MiuixTextActionButton`（内部 fillMaxWidth + 写死 errorContainer）。
+
+改法：新增 `SidebarActionButton(text, onClick, modifier, danger)`，
+宽度由调用方控制、语气由 danger 决定。操作条改成一行横排。
+
+**CI #124 / preview #26 全绿，但装不上真机**（见下）。
+
+### ❌ 受阻：无线 ADB 无法稳定传输 88MB APK
+
+本轮装了 5 次全部失败，三种方式都试过：
+
+```
+adb install              -> failed（无错误信息）
+adb push + pm install    -> adb: error: 30534-byte write failed: No error
+adb install --no-streaming -> adb: error: 65544-byte write failed: No error
+```
+
+已排除的原因：
+  - APK 本身没问题（zip 完整性 OK、1265 条目、88.1MB，与能装上的 v123 同尺寸）
+  - /data/local/tmp 可写（touch 测试通过）
+  - 磁盘有空间（此前 df 显示 19G 可用）
+  - 不是 PackageManager 拒绝（日志里没有对应的 install 记录）
+
+**结论：无线 ADB 传输 88MB 文件时数据丢失**。之前几次成功属于侥幸，
+本轮彻底不稳定（连 push 都报写失败）。
+
+### 这也解释了之前几次「装上了」的差别
+
+v123 在 04:50 装成功；v125 从 05:26 起连试 5 次全失败。
+差别不是代码，而是 ADB 通道状态随时间恶化。
+
+### 下一步建议
+
+1. **USB 连接**：最可靠。用户在家时可以插线，`adb devices` 会显示 USB 序列号。
+2. 或重启手机的无线调试（重新配对）后再试。
+3. 或把 APK 放到设备可访问的位置（如 `/sdcard/Download`）再用设备上的文件管理器安装。
+
+**这属于测试基础设施问题，不是代码缺陷。**
