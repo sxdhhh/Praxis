@@ -1,6 +1,7 @@
 package dev.praxis.ui.widgets
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -275,7 +276,20 @@ fun MiuixSidebar(
                     // 同曲线之后两者是同一件事的两个投影。
                     alpha = sidebarEasedProgress(progress.value)
                 }
-                .background(MiuixTheme.colorScheme.onSurface.copy(alpha = SIDEBAR_DIM_ALPHA))
+                // ## 遮罩必须是「压暗」，所以用 Color.Black 而不是 onSurface（2026-11-03 修）
+                //
+                // 用户原话：「侧边栏是压暗背景而不是提亮背景」。
+                //
+                // 旧实现在这里写的是 `MiuixTheme.colorScheme.onSurface.copy(alpha=...)`。
+                // `onSurface` 的语义是「表面上的**前景**色」——
+                // 深色主题下它是**浅色**，浅色半透明叠上去 = **提亮**。
+                // 于是抽屉一开，后面的聊天内容反而变亮了，与「弹出层应该压暗背景」
+                // 的层级语义正好相反。
+                //
+                // 全仓其它遮罩都是 `Color.Black.copy(alpha=...)`：
+                //   FloatingBottomBar.kt:595 / InnerShadow.kt:39 / LiquidToggle.kt:280
+                // 这里跟上那个口径 —— 压暗与主题明暗无关，永远用黑。
+                .background(Color.Black.copy(alpha = SIDEBAR_DIM_ALPHA))
                 .then(
                     if (open && !dragging) {
                         Modifier.clickable(onClick = currentDismiss)
