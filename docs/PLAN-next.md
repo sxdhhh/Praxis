@@ -234,3 +234,47 @@ NexioSchedule 自己写的只有 `DampedDragAnimation.kt`（160 行，纯动画�
 E 项虽然缺真机日志，但我可以做**静态对比**：读 `ref-diy-sandbox` 的 PTY 实现，
 对照 Praxis 的 `Pty.kt` 与 `loginArgs`，找出 PTY 路径上可疑的差异。
 这个不需要真机，且如果找到明确 bug 就能直接修。
+## P5b 真机验证（2026-11-03 03:17）
+
+### 证据：模型下拉弹出，样式已是 OverlayDropdownPopup
+
+点底部「deepseek-v4.1-flash」后弹出模型列表，可见：
+
+  - 每个选项**右侧有单选框圆点** —— 这是 `OverlayDropdownPopup` 的样式，
+    旧的 `OverlayListPopup` 没有这个；
+  - 选中项（deepseek-v4.1-flash）高亮为橙色；
+  - 10 个选项全部来自新包装的 `DropdownEntry`（每项 onClick 负责选中并收起）。
+
+说明组件替换生效、数据通路正确。
+
+### 没验证到的：动画本身
+
+截图是**静态的**，证明不了「有弹出/关闭动画」。要证明需要录屏或连拍帧。
+而真机的 `uiautomator` 本轮全程 `could not get idle state`，无法自动驱动
+「点开→关闭」并连续取帧。
+
+**所以「动画已补上」目前只有代码依据（换成了带逐项动画的组件），
+没有运行时视觉证据。** 这一条要如实标为未验证。
+
+### 一个必须记下的错误（同一个错犯了两次）
+
+第一次：在计划里写「两项目 miuix 版本相同，OverlayDropdownPopup API 直接可用」。
+第二次：在实现里照着 NexioSchedule 的调用写 `collapseSize` / `collapseContent`，
+         CI #109 直接编译失败。
+
+真相：NexioSchedule **vendored（fork）了整个 miuix 模块**，
+它调的是 `miuix/src/commonMain/.../popup/LiquidOverlayDropdownPopup.kt`（292 行），
+参数比官方多 4 个。官方 0.9.4（javap 从 Maven Central aar 核实）只有 8 个参数：
+
+  entries / show / onDismiss / onDismissFinished / maxHeight
+  dropdownColors / renderInRootScaffold / collapseOnSelection
+
+**教训：抄第三方项目的 API 调用前，先 javap 一遍自己依赖的那个 aar。
+版本号相同不代表 API 相同。**
+
+### 「胶囊长成面板」的形变仍做不到
+
+那需要 `collapseSize` / `collapseContent`，官方没有。想要只能：
+  (a) fork miuix（像 NexioSchedule 那样），或
+  (b) 自己手写形变插值。
+归到 P6 范围，本轮没有硬塞。
