@@ -95,3 +95,43 @@ TerminalRow 的 selectionRange 参数与高亮绘制
 3. 点「复制」后，去别处粘贴，内容与选中的终端文本一致；
 4. 输入框长按 → 出现系统「粘贴」，能粘贴上一步复制的内容；
 5. ANSI 配色在选择态下仍然正确显示。
+## P1 终端复制粘贴（2026-11-03）
+
+### 已完成的
+
+  改造：自研 cell 坐标选择模型 -> SelectionContainer + 单块 AnnotatedString
+  新增：buildAnnotatedScreen()（整屏拼接，逐行裁行尾空白）
+  删除：TerminalSelection.kt、TerminalExtractSelectionTest.kt、TerminalSelectionTest.kt
+        （共 -828 行）
+  滚动：AutoFollowScrollLazy -> AutoFollowScroll(ScrollState)
+  护栏：WiringGuardTest 那条选择护栏**反向**，改为断言
+        「系统选择已接上 + 自研模型确实没了 + 输出区不再是 LazyColumn」
+
+### 验证状态
+
+  ✅ CI #105 / preview #16 全绿（编译 + 全部单测通过）
+  ✅ 静态检查：371 个文件零问题；lexer 23/23
+  ✅ 装到真机后 App 正常运行（对话页渲染正常，无崩溃）
+  ⏳ **终端页的长按行为尚未在真机上看到**
+
+  未看到的原因：真机的 uiautomator 在 02:05 左右停止响应
+  （dump 返回空），无法可靠定位并点中底部导航的「终端」tab。
+  这是排查手段受限，不是已知的功能缺陷。
+
+### 途中踩的坑（已修，值得记住）
+
+  CI #104 失败，63 条 Unresolved reference，根因是删除函数时留下结构残留：
+
+    TerminalSelectionBar 的 KDoc（函数已删）
+    孤立的 @Composable（原本属于被删的函数）
+    TerminalRow 的 KDoc 片段（函数已删，且没有闭合的 */）
+
+  那段未闭合的 `/**` 一直吃到下一个 `*/`，注释边界全乱、
+  编译器恢复时丢掉后面的声明，于是 `TerminalUiState`（明明就在同文件）变成未解析。
+
+  **这是我在这个项目里第三次栽在「多步字符串删除留下结构残留」上。**
+  这次的收获是找到了可靠的复核手段，以后每次删声明都该跑一遍：
+
+    1) `/**` 与 `*/` 数量必须相等（故障时 44 vs 43）
+    2) 每个 `@Composable` 的下一个实质行必须是一个声明
+    3) 不允许出现「*/ 之后紧跟 /**」的相邻 KDoc
