@@ -42,6 +42,7 @@ import dev.praxis.ui.widgets.markdown.MdInline
 import kotlinx.coroutines.ensureActive
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * Markdown 渲染：把 [MarkdownParser] 的块列表画成 Compose 节点。
@@ -333,7 +334,7 @@ private fun QuoteBlock(text: String, color: Color, baseStyle: TextStyle) {
             Modifier
                 .width(3.dp)
                 .height(quoteBarHeight(baseStyle))
-                .background(color.copy(alpha = 0.35f), RoundedCornerShape(2.dp)),
+                .background(color.copy(alpha = 0.35f), PraxisRadius.MicroShape),
         )
         Spacer(Modifier.width(8.dp))
         Text(
@@ -362,7 +363,7 @@ private fun CodeBlock(block: MdBlock.Code) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(PraxisRadius.MediumShape)
             .background(MiuixTheme.colorScheme.surfaceContainerHigh)
             .padding(vertical = 8.dp),
     ) {
@@ -404,7 +405,7 @@ private fun TableBlock(block: MdBlock.Table, color: Color, baseStyle: TextStyle)
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(PraxisRadius.SmallShape)
             .background(MiuixTheme.colorScheme.surfaceContainer)
             .horizontalScroll(rememberScrollState())
             .padding(6.dp),
@@ -503,7 +504,7 @@ private fun StreamingCursor(color: Color) {
     Box(
         Modifier
             .size(width = 2.dp, height = 14.dp)
-            .background(color.copy(alpha = alpha), RoundedCornerShape(1.dp)),
+            .background(color.copy(alpha = alpha), PraxisRadius.MicroShape),
     )
 }
 /**

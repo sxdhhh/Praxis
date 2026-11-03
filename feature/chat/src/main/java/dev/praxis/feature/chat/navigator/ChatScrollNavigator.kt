@@ -63,6 +63,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /** 导航浮条的自动隐藏延时（与上游 `NAVIGATOR_HIDE_DELAY_MS` 一致）。 */
 private const val NAVIGATOR_HIDE_DELAY_MS = 1200L
@@ -391,7 +392,7 @@ private fun ChatMessageLocatorDialog(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
                 .heightIn(max = 560.dp),
-            shape = RoundedCornerShape(24.dp),
+            shape = PraxisRadius.HugeShape,
             color = MiuixTheme.colorScheme.surface.copy(alpha = 0.95f),
             tonalElevation = 6.dp,
             shadowElevation = 8.dp,
@@ -529,7 +530,7 @@ private fun ChatMessageLocatorRow(
 
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
+        shape = PraxisRadius.LargeShape,
         color = containerColor,
         border = BorderStroke(width = 1.dp, color = borderColor),
         tonalElevation = if (isCurrent) 2.dp else 0.dp,

@@ -44,6 +44,22 @@ import androidx.compose.ui.unit.dp
  */
 object PraxisRadius {
 
+    /**
+     * 微末元素：引用条、文本光标、1~3dp 的细装饰。
+     *
+     * ## 为什么补这一档（2026-11-03 复查）
+     *
+     * 首版只做了 4/8/12/16/20 五档，迁移到第 10 处后回头查剩余 47 处，
+     * 发现实际用量里还有 1/2/3/6/10/18/24 dp 这些值没有对应档位。
+     *
+     * 1~3dp 的用途很集中：`MarkdownText` 的引用竖条（宽 3dp）、
+     * `ChatContextUi` 的细装饰。这类元素的**尺寸本身只有 2~3dp**，
+     * 给它们 4dp 圆角等于「整个元素都是圆的」，视觉上会变成圆点。
+     *
+     * 所以需要单独一档，而不是把 1~3 硬归到 4。
+     */
+    val Micro = 2.dp
+
     /** 极小元素：标签、徽章、行内代码块。 */
     val Tiny = 4.dp
 
@@ -59,16 +75,26 @@ object PraxisRadius {
     /** 大容器：全屏抽屉、底部抽屉的顶角。 */
     val ExtraLarge = 20.dp
 
+    /**
+     * 超大面板：高度可达 560dp 的浮层（如 `ChatScrollNavigator` 的跳转面板）。
+     *
+     * 圆角要与元素尺寸成比例 —— 20dp 用在一个 560dp 高的面板上会显得方正，
+     * 24dp 才有「大圆角浮层」的观感。
+     */
+    val Huge = 24.dp
+
     // ── 预置 Shape（避免调用点反复 new 同一个对象）──────────────────
     //
     // `RoundedCornerShape(dp)` 每次调用都会新建一个对象。放在 Composable
     // 的组合路径上（每帧可能执行）会产生可观的对象分配。这里直接持有实例。
 
+    val MicroShape = RoundedCornerShape(Micro)
     val TinyShape = RoundedCornerShape(Tiny)
     val SmallShape = RoundedCornerShape(Small)
     val MediumShape = RoundedCornerShape(Medium)
     val LargeShape = RoundedCornerShape(Large)
     val ExtraLargeShape = RoundedCornerShape(ExtraLarge)
+    val HugeShape = RoundedCornerShape(Huge)
 
     /** 抽屉这类「只圆一侧」的容器：右侧两角圆，左侧贴边。 */
     val SideSheetShape = RoundedCornerShape(topEnd = ExtraLarge, bottomEnd = ExtraLarge)
