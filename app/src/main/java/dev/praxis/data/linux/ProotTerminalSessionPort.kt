@@ -169,12 +169,22 @@ class ProotTerminalSessionPort(
         // `stty: 'standard input': Inappropriate ioctl for device`。
         // 这正是用户看到的那句。
         //
-        // 改用 `loginTail(env)`（= `loginShell(env) + "-l"`）：
+        // 改用 `loginArgs(env)`（尾部是 `loginShell(env) + "-l"`）：
         //   - `-l` 是**登录 shell** 语义，它自己判断要不要交互，
         //     不需要 `-i` 强行指定，因此不会在非 tty 上刷 stty 错误；
         //   - shell 从 rootfs 里探测，容器里有什么就用什么；
         //   - 探测规则只有 `loginShell` 一处，不会在这儿写第二份。
-        val args = ProotCommand.sessionArgs(env, ProotCommand.loginTail(env))
+        // ## 等价简化（2026-11-03 自查）
+        //
+        // 上一版写的是 `sessionArgs(env, loginTail(env))`。
+        // 而 `sessionArgs(env, X) = loginArgs(env).dropLast(2) + X`，
+        // `loginTail(env)` 又恰好等于 `loginArgs(env)` 的尾部两个元素 ——
+        // 去掉再加回去，结果就是 `loginArgs(env)` 本身。
+        //
+        // 功能上两者等价，但绕了一圈：读代码的人得在脑子里做一次代入
+        // 才能确认「终端用的确实是容器里的登录 shell」。核心路径上
+        // 不该有这种绕法，直接调 `loginArgs`。
+        val args = ProotCommand.loginArgs(env)
         // ## 铺文件只做一次，`PROOT_LOADER` 与别名目录都从它来（2026-11-01 修）
         //
         // 之前 `ptyEnvironment` 内部自己调了一次 `prootLoaderFileFor()`，

@@ -506,20 +506,6 @@ object ProotCommand {
      * 那种情况说明 rootfs 根本没解好或路径不对，报错信息应当指向
      * 「找不到 bash」这个真实问题，而不是被这里掩盖成别的样子。
      */
-    /**
-     * `loginArgs` 的尾部两个元素：`<登录 shell> -l`。
-     *
-     * ## 为什么单独暴露它（2026-11-03）
-     *
-     * [sessionArgs] 会用调用方给的 program **替换**掉 `loginArgs` 的尾部两个元素。
-     * 终端会话要的恰恰就是「登录 shell」，于是它得把这两个元素原样传回去 ——
-     * 也就是 `sessionArgs(env, loginTail(env))`。
-     *
-     * 若调用方自己拼 `listOf("/bin/sh", "-i")`（旧实现就是这样），
-     * 就绕过了 [loginShell] 的探测：容器里装了 bash 也用不上。
-     * 把尾部收敛成一个函数，探测规则就只有一处。
-     */
-    fun loginTail(env: LinuxEnvironment): List<String> = listOf(loginShell(env), "-l")
     internal fun loginShell(env: LinuxEnvironment): String {
         val candidates = listOf("/bin/bash", "/usr/bin/bash", "/bin/sh", "/usr/bin/sh")
         val found = candidates.firstOrNull { File(env.rootfsDir, it.removePrefix("/")).isFile }
