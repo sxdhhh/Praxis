@@ -1,0 +1,149 @@
+# ⚠️ 这不是生效的 workflow —— 目录是 docs/，不是 .github/workflows/
+#
+# 用途：A′ 发布方案的定稿草稿，等用户批准后，
+# 把它移动到 .github/workflows/release.yml 即生效。
+#
+# 为什么不直接放进去：推送 workflow 等于在公开仓库里单方面开启发布通道、
+# 并产生公开可见的 Release。这属于对外动作，应由项目所有者确认。
+#
+# 移动命令：
+#   Move-Item docs/release-workflow-draft.yml .github/workflows/release.yml
+name: release
+
+# 手动触发的发布工作流：构建 debug APK 并挂到 GitHub Release。
+#
+# ## 为什么是 debug 而不是 release
+#
+# 仓库里没有 keystore（也不该有）。app/build.gradle.kts 的签名配置在
+# 缺料时会走 else 分支，release 产物保持**未签名** —— 而未签名的 APK
+# 装不上（Android 强制要求签名）。
+#
+# 所以本工作流发布 app-debug.apk：
+#   - debug 自带调试签名，可以直接安装
+#   - 包名是 dev.praxis.debug（带 .debug 后缀），不会覆盖正式包
+#   - 用途是「给人试用」，不是上架
+#
+# 要发正式签名包，需要在仓库 Secrets 里配置：
+#   PRAXIS_KEYSTORE       keystore 文件的 base64（或改成路径 + 上传文件）
+#   PRAXIS_STORE_PASS
+#   PRAXIS_KEY_PASS
+#   PRAXIS_KEY_ALIAS      可选，默认 praxis
+# 并让构建步骤导出这些环境变量。**这些材料必须由项目所有者提供**，
+# 不能由 CI 或助手生成 —— 生成一个只会让用户装到两个互不兼容的 Praxis。
+#
+# ## 为什么不用 tag 触发
+#
+# tag 触发会让人以为「打 tag 就等于发布」，但签名材料缺失时打 tag 只会
+# 产出一个装不上的包。手动触发让「我要发布」这个意图显式化。
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release 标签（留空则用 v<版本号>-<短哈希>）'
+        required: false
+        type: string
+      prerelease:
+        description: '标记为预发布'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 与 build.yml 完全一致：platform 37 只在 canary 通道、
+      # 包名是 android-37.0。装不上就不阻断，让 Gradle 自己报。
+      - name: Install Android SDK platform 37
+        run: |
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "::warning::sdkmanager 不在预期路径，跳过"
+            exit 0
+          fi
+          set +e
+          yes | "$SDKMANAGER" --install "platforms;android-37" > /dev/null 2>&1
+          if [ $? -ne 0 ]; then
+            yes | "$SDKMANAGER" --channel=3 --install "platforms;android-37.0" > /dev/null 2>&1
+          fi
+          yes | "$SDKMANAGER" --install "build-tools;37.0.0" > /dev/null 2>&1
+          set -e
+
+      # 与 build.yml 一致：只替换 jvmargs 那一行，不整体覆盖。
+      - name: Tune Gradle memory for CI
+        run: |
+          sed -i 's|^org\.gradle\.jvmargs=.*|org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=2g -XX:+UseParallelGC|' gradle.properties
+          echo "kotlin.daemon.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=1g" >> gradle.properties
+          grep -q '^android.useAndroidX=true' gradle.properties \
+            || { echo "::error::gradle.properties 丢了 android.useAndroidX"; exit 1; }
+
+      - name: Write local.properties
+        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Locate APK
+        id: apk
+        run: |
+          set -e
+          found=$(find app/build/outputs/apk -name "*.apk" -type f | head -1)
+          if [ -z "$found" ]; then
+            echo "::error::没找到 APK"
+            exit 1
+          fi
+          echo "path=$found" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$found")" >> "$GITHUB_OUTPUT"
+          ls -lh "$found"
+
+      - name: Compute tag
+        id: tag
+        run: |
+          set -e
+          input="${{ github.event.inputs.tag }}"
+          if [ -n "$input" ]; then
+            echo "tag=$input" >> "$GITHUB_OUTPUT"
+          else
+            # 版本号来自 app/build.gradle.kts 顶部常量，用 grep 取
+            ver=$(grep -oP 'PRAXIS_VERSION_NAME\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
+            short=$(git rev-parse --short HEAD)
+            echo "tag=v${ver:-0.0.0}-$short" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Praxis ${{ steps.tag.outputs.tag }}
+          body: |
+            自动构建的 Praxis 调试包。
+
+            - 提交：`${{ github.sha }}`
+            - 包名：`dev.praxis.debug`（带 .debug 后缀，不会覆盖正式包）
+            - ABI：arm64-v8a（模拟器 x86_64 装不上）
+
+            **这是调试包，不是签名正式包。** 仓库无 keystore，
+            release 变体未签名无法安装。
+          files: ${{ steps.apk.outputs.path }}
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
