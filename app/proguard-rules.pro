@@ -33,3 +33,83 @@
 
 # 反射调用的成员不能被混淆，否则运行时会 NoSuchMethodException
 -keep class miui.util.HapticFeedbackUtil { *; }
+
+# ── R8 运行时保命规则（2026-11-03 release 闪退排查）──────────────────────────
+#
+# ## 现象
+#
+# 正式包 7.5MB，装上打开就闪退。debug 包 88MB 正常。
+# 两者唯一差别是 release 走了 R8（isMinifyEnabled=true + isShrinkResources=true）。
+#
+# ## 为什么之前只有 4 行规则还不够
+#
+# 用一个空白规则跑 R8，等于让 R8 用「最激进」的策略：
+#   - 枚举被拆成 int 常量（优化），valueOf/values 消失 -> NoSuchMethodError
+#   - Kotlin 元数据被剥 -> 反射拿不到类型信息
+#   - Serializable 的 serialVersionUID 变化 -> 反序列化失败
+#   - 注解被剥 -> Room / Compose 运行时找不到
+#
+# 这个项目里有 31 个 enum class，且 Room / Compose / Kotlin 反射大量使用，
+# 所以必须显式保留。
+
+# ## 枚举
+#
+# `proguard-android-optimize.txt` 默认会做「枚举优化」：把 enum 常量内联成 int，
+# 并删除 valueOf(String) / values()。但代码里只要有 `EnumType.valueOf(...)`, `values()`,
+# 或依赖 name() 做序列化/持久化，运行时就会抛 NoSuchMethodError。
+-keepclassmembers class * extends java.lang.Enum {
+    <fields>;
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+
+# ## Kotlin 反射 / 元数据
+-keep class kotlin.Metadata { *; }
+-keepclassmembers class kotlin.Metadata {
+    public <methods>;
+}
+-keepattributes RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations, RuntimeVisibleTypeAnnotations
+
+# ## Room
+#
+# Room 生成的 *_Impl 通过反射按名字查找，类名不能被混淆。
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+-keep @androidx.room.Entity class * { *; }
+-keep @androidx.room.Dao interface * { *; }
+-keep class androidx.room.RoomDatabase { *; }
+
+# ## Serializable / Parcelable
+-keepclassmembers class * implements java.io.Serializable {
+    static final long serialVersionUID;
+    private static final java.io.ObjectStreamField[] serialPersistentFields;
+    !static !transient <fields>;
+    private void writeObject(java.io.ObjectOutputStream);
+    private void readObject(java.io.ObjectInputStream);
+    java.lang.Object writeReplace();
+    java.lang.Object readResolve();
+}
+-keepclassmembers class * implements android.os.Parcelable {
+    public static final ** CREATOR;
+}
+
+# ## Shizuku（通过 Class.forName 反射）
+#
+# AndroidHostShellPort / CapabilityDetector 里用 Class.forName("rikka.shizuku.Shizuku")
+# 再 getMethod("pingBinder")。R8 看不到这条路，会把符号改名或删掉。
+-dontwarn rikka.shizuku.**
+-keep class rikka.shizuku.** { *; }
+
+# ## JNI native 方法
+#
+# Pty.kt 里的 external fun 由 libpty.so 按符号名查找。
+# 类名/方法名被混淆后符号对不上，所以整个含 native 方法的类都要保留。
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
+# ## Compose
+-dontwarn androidx.compose.**
+-keep class androidx.compose.runtime.** { *; }
+
+# ## Kotlin 协程
+-dontwarn kotlinx.coroutines.**
