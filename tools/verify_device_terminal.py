@@ -111,3 +111,70 @@ print("  >>> can't access tty？ ", ("tty" in alltext and "access" in alltext))
 print("  >>> 有提示符？         ", ("#" in alltext) or ("$" in alltext))
 print()
 print("  判定：以上三个都应为「否/否/是」才算修复生效。")
+
+
+# ─────────────────────────────────────────────────────────────
+# 分节：批量置顶顺序（P3 待验证项）
+#
+# 目标里 P3 的验收写的是「批量置顶顺序正确」，而我此前只确认了
+# 「置顶不报错」，从没查过排序结果。这一节补上。
+#
+# 做法：造 3 条会话 → 多选置顶其中 2 条 → 直读 sessions 表，
+# 看 pinned 与 displayOrder 是否符合「置顶的排在前面」。
+# ─────────────────────────────────────────────────────────────
+
+def check_pin_order():
+    import sqlite3
+    import shutil
+
+    print()
+    print("=" * 58)
+    print("步骤 2：批量置顶顺序（P3 未验证项）")
+    print("=" * 58)
+
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "analysis", "db_pin")
+    out = os.path.abspath(out)
+    shutil.rmtree(out, ignore_errors=True)
+    os.makedirs(out, exist_ok=True)
+
+    sh("am force-stop dev.praxis.debug")
+    time.sleep(3)
+    for f in ["praxis.db", "praxis.db-wal", "praxis.db-shm"]:
+        src = "/data/data/dev.praxis.debug/databases/" + f
+        sh("cp %s /data/local/tmp/%s && chmod 666 /data/local/tmp/%s" % (src, f, f))
+        subprocess.run([ADB, "-s", DEVICE, "pull", "/data/local/tmp/" + f,
+                        os.path.join(out, f)], capture_output=True)
+
+    db = os.path.join(out, "praxis.db")
+    if not os.path.exists(db):
+        print("  [跳过] 拿不到数据库")
+        return
+
+    con = sqlite3.connect(db)
+    cur = con.cursor()
+    print("  当前 sessions（按 pinned desc, displayOrder asc）:")
+    rows = list(cur.execute(
+        "select id,title,pinned,displayOrder from sessions "
+        "order by pinned desc, displayOrder asc"))
+    for sid, title, pin, order in rows:
+        print("    %-20s pinned=%-2s order=%-3s %s" % (sid[:20], pin, order, (title or "")[:20]))
+    con.close()
+
+    if len(rows) < 2:
+        print("  [跳过] 会话数不足 2，无法验证排序")
+        return
+
+    # 判据：pinned=1 的必须全部排在 pinned=0 之前
+    seen_unpinned = False
+    ok = True
+    for sid, title, pin, order in rows:
+        if pin == 0:
+            seen_unpinned = True
+        elif seen_unpinned:
+            ok = False
+            print("  [失败] %s 是置顶的，却排在未置顶之后" % sid)
+    print()
+    print("  >>> 置顶排序正确？", ok)
+    print("  （此节只读数据库，不做修改；置顶操作需人工在多选模式下点一次）")
+
+check_pin_order()
