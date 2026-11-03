@@ -142,6 +142,25 @@ jobs:
           echo "path=$found" >> "$GITHUB_OUTPUT"
           echo "name=$(basename "$found")" >> "$GITHUB_OUTPUT"
 
+      # ## R8 诊断产物（2026-11-03 排查「正式包闪退」）
+      #
+      # mapping.txt  混淆映射：原名 -> 混淆名。用来确认某个类有没有被改名。
+      # usage.txt    **被 R8 删掉的**类/方法清单。闪退排查的关键证据：
+      #              如果某个运行时要用的类出现在这里，就是它。
+      # seeds.txt    保留入口。
+      #
+      # 只在构建成功后上传 —— 失败时也有价值，所以用 always()。
+      - name: Upload R8 reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r8-reports
+          path: |
+            app/build/outputs/mapping/release/mapping.txt
+            app/build/outputs/mapping/release/usage.txt
+            app/build/outputs/mapping/release/seeds.txt
+          retention-days: 14
+          if-no-files-found: ignore
       - name: Compute tag
         id: tag
         run: |
