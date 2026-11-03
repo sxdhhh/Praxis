@@ -33,6 +33,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 压缩摘要的分割线（1:1 移植 Operit `SummaryMessageComposable`，
@@ -102,7 +103,7 @@ fun SummaryDivider(
                 modifier = Modifier
                     .background(
                         color = MiuixTheme.colorScheme.primary.copy(alpha = 0.12f),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = PraxisRadius.MediumShape,
                     )
                     .padding(horizontal = 10.dp, vertical = 3.dp),
             ) {

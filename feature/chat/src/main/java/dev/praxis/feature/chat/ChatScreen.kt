@@ -94,6 +94,7 @@ import top.yukonga.miuix.kmp.icon.extended.Reply
 import top.yukonga.miuix.kmp.icon.extended.Send
 import top.yukonga.miuix.kmp.icon.extended.Stopwatch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 聊天页。
@@ -1549,7 +1550,7 @@ private fun ChatInputBar(
                         .fillMaxWidth()
                         .padding(bottom = 6.dp),
                     color = MiuixTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(8.dp),
+                    shape = PraxisRadius.SmallShape,
                 ) {
                     Row(
                         modifier = Modifier
@@ -2152,7 +2153,7 @@ private fun AttachmentThumbnail(image: dev.praxis.core.ai.ChatImage) {
             android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         }.getOrNull()
     }
-    val shape = RoundedCornerShape(10.dp)
+    val shape = PraxisRadius.MediumShape
     Box(
         modifier = Modifier
             .size(80.dp)

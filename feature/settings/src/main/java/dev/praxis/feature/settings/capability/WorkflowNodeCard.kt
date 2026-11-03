@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 工作流节点卡片。
@@ -67,7 +68,7 @@ fun WorkflowNodeCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(PraxisRadius.TinyShape)
                             .background(kindColor.copy(alpha = 0.16f))
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     ) {

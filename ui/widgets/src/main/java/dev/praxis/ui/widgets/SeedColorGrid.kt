@@ -31,6 +31,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 品牌色选择网格。
@@ -142,14 +143,14 @@ private fun SeedColorSwatch(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
+            .clip(PraxisRadius.ExtraLargeShape)
             .clickable(onClick = onClick)
             .padding(vertical = 8.dp),
     ) {
         Box(
             modifier = Modifier
                 .size(64.dp)
-                .background(color = swatch.frame, shape = RoundedCornerShape(16.dp)),
+                .background(color = swatch.frame, shape = PraxisRadius.LargeShape),
             contentAlignment = Alignment.Center,
         ) {
             Box(

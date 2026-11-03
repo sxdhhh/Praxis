@@ -77,6 +77,7 @@ import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 终端页。
@@ -687,7 +688,7 @@ private fun TerminalTabItem(
     }
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(PraxisRadius.MediumShape)
             .background(container)
             .clickable(onClick = onClick)
             .padding(
@@ -833,7 +834,7 @@ private fun TerminalIconChip(
     }
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(PraxisRadius.MediumShape)
             .background(container)
             .clickable(onClickLabel = description, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp),
@@ -867,7 +868,7 @@ private fun TerminalActionChip(
     }
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(PraxisRadius.MediumShape)
             .background(
                 if (enabled) {
                     MiuixTheme.colorScheme.secondaryContainer
