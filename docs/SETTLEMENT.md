@@ -778,3 +778,133 @@ release 一开 minify，R8 的缺失类检测把它们全报出来。
 
 这个包通过了 **R8 / 编译 / 验签**，但**功能验收仍是 7/24 条**（真机仍离线）。
 发布不等于验证通过 —— 用户实际使用后的反馈才是最有价值的验证。
+
+## 十四、正式包闪退根因与修复（2026-11-04，真机实测确认）
+
+### 结论
+
+**已修复并在真机验证通过。**
+
+### 用户反馈的两个问题
+
+1. 「release 包只有 8MB 而且打开就闪退」
+2. 「GitHub action 的构建产物无法下载 APK」
+
+两个都已解决。
+
+---
+
+### 问题二：构建产物下载不到（已修）
+
+`build.yml` 的上传步骤带了条件：
+
+```yaml
+if: github.event_name == 'workflow_dispatch' && github.inputs.upload_artifact != 'false'
+```
+
+**push 触发的构建**会静默跳过上传，产物里只剩 `verify-reports`，
+从列表看就像「构建没产出 APK」。已改成无条件上传。
+
+验证：build #144 产物里已有 `praxis-apk`（26 MB）。
+
+---
+
+### 问题一：正式包闪退
+
+#### 真机抓到的完整证据（Redmi 25053RT47C / Android 17）
+
+```
+FATAL EXCEPTION: main
+java.lang.RuntimeException: Unable to start activity ComponentInfo{dev.praxis/
+    com.sevtinge.hyperceiler.provision.activity.DefaultActivity}
+Caused by: android.view.InflateException: Binary XML file line #24 in
+    dev.praxis:layout/miuix_appcompat_group_buttons_layout
+Caused by: java.lang.reflect.InvocationTargetException
+    at android.view.LayoutInflater.createView(LayoutInflater.java:757)
+    at dm.addGroupButtons(r8-map-id-69e473ab...)
+    at com.sevtinge.hyperceiler.provision.activity.DefaultActivity.onCreate(...)
+
+并且：
+java.lang.NoSuchMethodError: No static method spring(FF)
+    Lfan/animation/utils/EaseManager$EaseStyle; in class Lfan/animation/utils/EaseManager;
+Rejecting re-init on previously-failed class java.lang.Class<vh>
+```
+
+#### 因果链
+
+```
+引导页加载 miuix 的 XML 布局
+  -> 布局里按「类名字符串」反射创建自定义 View
+  -> 该 View 的 <clinit> 调用 EaseManager.spring(float, float)
+  -> R8 判定 spring 无人引用，删掉了它
+  -> 类初始化失败 -> NoClassDefFoundError
+  -> 布局 inflate 失败 -> DefaultActivity 起不来 -> 闪退
+```
+
+#### 为什么前两轮规则没修好
+
+| 轮次 | 补了什么 | 为什么不够 |
+|---|---|---|
+| 第 1 轮 | `-dontwarn` 缺失类 | 只压掉编译期报错，运行时照样崩 |
+| 第 2 轮 | 枚举 / Room / JNI / Kotlin 元数据 | 这些是通用风险，不是本次真正的问题源 |
+| 第 3 轮 | **`fan.**` / `miui.**` / `com.sevtinge.**`** | ★ 命中根因 |
+
+真正的问题源是 `third_party/miuix` 下的 AAR（包名 `fan.*` / `miui.*`）。
+它们**不带 consumer ProGuard 规则**，而入口是 XML 里的**字符串**，
+R8 的静态分析根本枚举不到。
+
+#### 修法
+
+```proguard
+-keep class fan.**  { *; }
+-keep class miui.** { *; }
+-keep class com.sevtinge.** { *; }
+// 兜底：所有 View 子类的 XML 构造器
+// 兜底：枚举的 values()/valueOf()（XML 属性值走 valueOf）
+```
+
+包体 7.5MB -> 12.33MB（多保住约 3MB 代码），换来能打开。
+
+#### 排除过的假设（都做了实测，不是猜）
+
+| 假设 | 实测结论 |
+|---|---|
+| JNI 类名被混淆 | ❌ `Pty` 类在 release dex 里完好，`.so` 符号也对得上 |
+| native 库打包方式 | ❌ release/debug 都是 DEFLATED + `extractNativeLibs=true` |
+| Manifest 类名错 | ❌ `PraxisApplication`/`MainActivity` 都正确 |
+| 硬编码 `.debug` 包名路径 | ❌ 全仓 0 处 |
+| 枚举 `valueOf` 被优化 | ❌ 全仓仅 1 处，且有 `runCatching` 保护 |
+| 资源按名查找 | ❌ `DeviceCornerRadius` 查的是系统资源且有保护 |
+| 用户装的是旧包 | ❌ 设备上 APK 9.7MB = 新包 564f395，确实仍崩 |
+
+#### 真机验证结果
+
+```
+日志 162,532 行
+异常 0 条（无 FATAL / NoSuchMethodError / InflateException）
+Activity 走通 5 个：
+  DefaultActivity -> TermsAndStatementActivity -> PermissionSettingsActivity
+  -> CongratulationActivity -> MainActivity
+进程持续运行，主界面完整渲染
+```
+
+主界面确认可见：侧边栏按钮、对话标题、默认模型菜单、
+悬浮底部导航栏（对话/终端/记忆/设置）、输入框、模型下拉。
+
+#### 产出
+
+```
+v1.0.0-5db0407   app-release.apk   12.33 MB
+https://github.com/sxdhhh/Praxis/releases/tag/v1.0.0-5db0407
+```
+
+#### 一条可复用的教训
+
+**引入任何自带 XML 布局的第三方 UI 库（尤其国产 ROM 系）时，
+必须给它加整包 keep 规则。** 理由是结构性的：
+
+  - XML 里的类名是字符串，R8 不解析资源
+  - 这类库内部常经动画框架做动态调用
+  - AAR 的 consumer rules 经常是空的
+
+静态分析看不到的入口，只能靠整包保留。
