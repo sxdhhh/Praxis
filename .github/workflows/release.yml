@@ -1,0 +1,174 @@
+name: release
+
+# 正式签名包发布：构建 signed release APK 并挂到 GitHub Release。
+#
+# ## 与 build.yml 的区别
+#
+# build.yml 只跑 assembleDebug —— 仓库里没有 keystore 时，release 变体未签名、
+# 装不上（Android 强制要求签名）。本工作流从 **GitHub Secrets** 取签名材料，
+# 在 CI 里还原 keystore，产出**可安装的正式签名包**。
+#
+# ## 需要的 Secrets
+#
+#   PRAXIS_KEYSTORE_BASE64   keystore 文件的 base64
+#   PRAXIS_STORE_PASS        keystore 口令
+#   PRAXIS_KEY_PASS          key 口令
+#   PRAXIS_KEY_ALIAS         key 别名（默认 praxis）
+#
+# 签名身份（keystore）一旦用于发布就不能更换 —— 换了之后用户无法覆盖安装。
+# 本地备份：C:\creat-agent\keys\praxis-release.jks
+# SHA256: F0:91:0A:01:30:A9:BF:AE:1D:2F:CE:3D:C7:26:07:6D:
+#         D3:C3:E3:E5:4E:13:CC:1C:ED:93:06:B1:2F:61:EF:97
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release 标签（留空则自动生成 v<版本号>-<短哈希>）'
+        required: false
+        type: string
+      prerelease:
+        description: '标记为预发布'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 与 build.yml 完全一致：platform 37 只在 canary 通道、包名 android-37.0
+      - name: Install Android SDK platform 37
+        run: |
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "::warning::sdkmanager 不在预期路径，跳过"
+            exit 0
+          fi
+          set +e
+          yes | "$SDKMANAGER" --install "platforms;android-37" > /dev/null 2>&1
+          if [ $? -ne 0 ]; then
+            yes | "$SDKMANAGER" --channel=3 --install "platforms;android-37.0" > /dev/null 2>&1
+          fi
+          yes | "$SDKMANAGER" --install "build-tools;37.0.0" > /dev/null 2>&1
+          set -e
+
+      # 与 build.yml 一致：只替换 jvmargs 那一行，不整体覆盖
+      - name: Tune Gradle memory for CI
+        run: |
+          sed -i 's|^org\.gradle\.jvmargs=.*|org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=2g -XX:+UseParallelGC|' gradle.properties
+          echo "kotlin.daemon.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=1g" >> gradle.properties
+          grep -q '^android.useAndroidX=true' gradle.properties \
+            || { echo "::error::gradle.properties 丢了 android.useAndroidX"; exit 1; }
+
+      - name: Write local.properties
+        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+      # ## 还原 keystore（关键步骤）
+      #
+      # build.gradle.kts 读的是这三个环境变量 + PRAXIS_KEYSTORE 路径：
+      #   PRAXIS_KEYSTORE      -> keystore 文件路径
+      #   PRAXIS_STORE_PASS    -> keystore 口令
+      #   PRAXIS_KEY_PASS      -> key 口令
+      #   PRAXIS_KEY_ALIAS     -> key 别名
+      # 四者缺一，releaseSigning 就是 null，产物未签名。
+      - name: Restore keystore from secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.PRAXIS_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::PRAXIS_KEYSTORE_BASE64 未配置，无法生成签名包"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/keys"
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/keys/release.jks"
+          ls -l "$RUNNER_TEMP/keys/release.jks"
+          echo "PRAXIS_KEYSTORE=$RUNNER_TEMP/keys/release.jks" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        env:
+          PRAXIS_STORE_PASS: ${{ secrets.PRAXIS_STORE_PASS }}
+          PRAXIS_KEY_PASS: ${{ secrets.PRAXIS_KEY_PASS }}
+          PRAXIS_KEY_ALIAS: ${{ secrets.PRAXIS_KEY_ALIAS }}
+        run: ./gradlew assembleRelease --stacktrace
+
+      # ## 必须验证「真的签名了」
+      #
+      # 缺任一 secret 时 AGP 会**静默产出未签名包**，构建照样 SUCCESS。
+      # 不检查就会把一个装不上的包发出去。
+      - name: Verify APK is actually signed
+        id: apk
+        run: |
+          set -e
+          found=$(find app/build/outputs/apk/release -name "*.apk" -type f | head -1)
+          if [ -z "$found" ]; then
+            echo "::error::没找到 release APK"
+            exit 1
+          fi
+          echo "找到: $found"
+          ls -lh "$found"
+
+          # apksigner 在 build-tools 里
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort | tail -1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::找不到 apksigner"
+            exit 1
+          fi
+          echo "用 $APKSIGNER 验签"
+          if ! "$APKSIGNER" verify --print-certs "$found"; then
+            echo "::error::APK 未签名或签名无效 —— 检查 secrets 是否齐全"
+            exit 1
+          fi
+
+          echo "path=$found" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$found")" >> "$GITHUB_OUTPUT"
+
+      - name: Compute tag
+        id: tag
+        run: |
+          set -e
+          input="${{ github.event.inputs.tag }}"
+          if [ -n "$input" ]; then
+            echo "tag=$input" >> "$GITHUB_OUTPUT"
+          else
+            ver=$(grep -oP 'PRAXIS_VERSION_NAME\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
+            short=$(git rev-parse --short HEAD)
+            echo "tag=v${ver:-0.0.0}-$short" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Praxis ${{ steps.tag.outputs.tag }}
+          body: |
+            Praxis 正式签名包。
+
+            - 提交：`${{ github.sha }}`
+            - 包名：`dev.praxis`（无 .debug 后缀）
+            - ABI：arm64-v8a
+            - 已通过 apksigner 验签
+
+            可直接覆盖安装此前的签名包（签名身份一致）。
+          files: ${{ steps.apk.outputs.path }}
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
