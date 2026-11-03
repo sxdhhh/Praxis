@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * token 用量条：会话级累计消耗。
@@ -59,7 +60,7 @@ fun TokenUsageBadge(
 
     Row(
         modifier = modifier
-            .background(bg, RoundedCornerShape(8.dp))
+            .background(bg, PraxisRadius.SmallShape)
             .padding(horizontal = 8.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),

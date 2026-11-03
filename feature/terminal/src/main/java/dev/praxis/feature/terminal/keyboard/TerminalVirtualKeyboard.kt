@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 终端虚拟键盘（**结构尺寸 1:1 对齐 Operit，配色全部取自莫奈**）。
@@ -199,7 +200,7 @@ private fun KeyCap(
         contentColor = content,
         // 4.dp 圆角与 Operit 同值。这是「键帽」与「色块」的分界 ——
         // 直角会看起来像表格单元格。
-        shape = RoundedCornerShape(4.dp),
+        shape = PraxisRadius.TinyShape,
     ) {
         Box(
             modifier = Modifier.padding(

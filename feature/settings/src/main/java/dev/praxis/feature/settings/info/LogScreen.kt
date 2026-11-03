@@ -66,6 +66,7 @@ import top.yukonga.miuix.kmp.icon.extended.ExpandLess
 import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.io.File
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 日志页。
@@ -300,7 +301,7 @@ private fun LogEntryCard(entry: LogEntry, modifier: Modifier = Modifier) {
                 entry.level?.let { level ->
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(PraxisRadius.TinyShape)
                             .background(levelColor(level))
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     ) {

@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 消息的一个片段（1:1 对齐 Operit `ParsedMessagePart`）。
@@ -295,8 +296,8 @@ fun MessageEditor(
             modifier = Modifier
                 .widthIn(max = 520.dp)
                 .fillMaxWidth(0.9f)
-                .shadow(elevation = 8.dp, shape = RoundedCornerShape(20.dp)),
-            shape = RoundedCornerShape(20.dp),
+                .shadow(elevation = 8.dp, shape = PraxisRadius.ExtraLargeShape),
+            shape = PraxisRadius.ExtraLargeShape,
             color = MiuixTheme.colorScheme.surface,
             tonalElevation = 1.dp,
         ) {
@@ -422,7 +423,7 @@ private fun RawEditPane(content: MutableState<String>) {
         // 16 行而不是无限：这段内容在弹窗里，太高会把「保存」按钮挤出屏幕。
         maxLines = 16,
         minLines = 6,
-        shape = RoundedCornerShape(12.dp),
+        shape = PraxisRadius.MediumShape,
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MiuixTheme.colorScheme.primary,
             unfocusedBorderColor = MiuixTheme.colorScheme.outline.copy(alpha = 0.5f),
@@ -482,7 +483,7 @@ private fun VisualEditPane(
                                 Text("文本", style = MaterialTheme.typography.bodySmall)
                             },
                             placeholder = { Text("输入文本内容") },
-                            shape = RoundedCornerShape(12.dp),
+                            shape = PraxisRadius.MediumShape,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = MiuixTheme.colorScheme.primary,
                                 unfocusedBorderColor = MiuixTheme.colorScheme.outline.copy(alpha = 0.5f),
@@ -525,7 +526,7 @@ private fun VisualEditPane(
         ) {
             OutlinedButton(
                 onClick = onAddText,
-                shape = RoundedCornerShape(16.dp),
+                shape = PraxisRadius.LargeShape,
                 border = BorderStroke(1.dp, MiuixTheme.colorScheme.primary.copy(alpha = 0.5f)),
                 colors = ButtonDefaults.outlinedButtonColors(
                     contentColor = MiuixTheme.colorScheme.primary,
@@ -539,7 +540,7 @@ private fun VisualEditPane(
 
             OutlinedButton(
                 onClick = onAddTag,
-                shape = RoundedCornerShape(16.dp),
+                shape = PraxisRadius.LargeShape,
                 border = BorderStroke(1.dp, MiuixTheme.colorScheme.primary.copy(alpha = 0.5f)),
                 colors = ButtonDefaults.outlinedButtonColors(
                     contentColor = MiuixTheme.colorScheme.primary,
@@ -595,7 +596,7 @@ private fun XmlTagItem(
         modifier = Modifier
             .fillMaxWidth()
             .animateContentSize(),
-        shape = RoundedCornerShape(12.dp),
+        shape = PraxisRadius.MediumShape,
         // 用 primary 8% 做底色：与「文本片段」的普通输入框形成区分，
         // 让用户一眼看出「这个块是特殊结构，不是普通文字」。
         colors = CardDefaults.cardColors(
@@ -753,7 +754,7 @@ private fun EditorActions(
     ) {
         TextButton(
             onClick = onCancel,
-            shape = RoundedCornerShape(16.dp),
+            shape = PraxisRadius.LargeShape,
         ) {
             Text(
                 "取消",
@@ -769,7 +770,7 @@ private fun EditorActions(
             // 实心 = 主要动作。用户改完想重发时，多半就是想点右边那个。
             OutlinedButton(
                 onClick = onSave,
-                shape = RoundedCornerShape(16.dp),
+                shape = PraxisRadius.LargeShape,
                 border = BorderStroke(1.dp, MiuixTheme.colorScheme.outline.copy(alpha = 0.6f)),
             ) {
                 Text(
@@ -783,7 +784,7 @@ private fun EditorActions(
 
             Button(
                 onClick = onResend,
-                shape = RoundedCornerShape(16.dp),
+                shape = PraxisRadius.LargeShape,
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MiuixTheme.colorScheme.primary,
@@ -804,7 +805,7 @@ private fun EditorActions(
         } else {
             Button(
                 onClick = onSave,
-                shape = RoundedCornerShape(16.dp),
+                shape = PraxisRadius.LargeShape,
             ) {
                 Text(
                     "保存",
@@ -858,8 +859,8 @@ private fun TagEditorDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.9f)
-                .shadow(elevation = 8.dp, shape = RoundedCornerShape(20.dp)),
-            shape = RoundedCornerShape(20.dp),
+                .shadow(elevation = 8.dp, shape = PraxisRadius.ExtraLargeShape),
+            shape = PraxisRadius.ExtraLargeShape,
             color = MiuixTheme.colorScheme.surface,
             tonalElevation = 2.dp,
         ) {
@@ -970,7 +971,7 @@ private fun TagEditorDialog(
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = PraxisRadius.MediumShape,
                     textStyle = MaterialTheme.typography.bodyMedium,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MiuixTheme.colorScheme.primary,
@@ -989,7 +990,7 @@ private fun TagEditorDialog(
                     },
                     placeholder = { Text("例如 color=\"red\"") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = PraxisRadius.MediumShape,
                     textStyle = MaterialTheme.typography.bodyMedium,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MiuixTheme.colorScheme.primary,
@@ -1009,7 +1010,7 @@ private fun TagEditorDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(120.dp),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = PraxisRadius.MediumShape,
                     textStyle = MaterialTheme.typography.bodyMedium,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MiuixTheme.colorScheme.primary,
@@ -1032,7 +1033,7 @@ private fun TagEditorDialog(
                 ) {
                     OutlinedButton(
                         onClick = onDismiss,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = PraxisRadius.LargeShape,
                         border = BorderStroke(1.dp, MiuixTheme.colorScheme.outline.copy(alpha = 0.6f)),
                         modifier = Modifier.weight(1f),
                     ) {
@@ -1061,7 +1062,7 @@ private fun TagEditorDialog(
                         // 标签名不能为空：空标签名回写成 `<></>`，解析时无法配对，
                         // 整条消息的结构就坏了。
                         enabled = tagName.isNotBlank(),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = PraxisRadius.LargeShape,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(

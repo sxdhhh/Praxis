@@ -58,6 +58,7 @@ import top.yukonga.miuix.kmp.basic.Slider
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Memory
 import top.yukonga.miuix.kmp.basic.Switch
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 输入区右下角的设置入口 —— 1:1 对齐 Operit `ClassicChatSettingsBar`。
@@ -729,7 +730,7 @@ fun ModelPill(
                 .border(
                     width = 1.dp,
                     color = MiuixTheme.colorScheme.outline.copy(alpha = 0.2f),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = PraxisRadius.MediumShape,
                 )
                 .clickable { expanded = !expanded }
                 .padding(horizontal = 10.dp),

@@ -54,6 +54,7 @@ import dev.praxis.feature.chat.ChatCopyContent
 import dev.praxis.feature.chat.ChatCopyText
 import dev.praxis.feature.chat.MessageAction
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 长按消息弹出的上下文菜单 —— 1:1 移植 Operit `ChatArea.kt:706-1200`。
@@ -122,7 +123,7 @@ fun MessageContextMenu(
                 // 用户在 2026-10-23 报「长按弹窗没跟随莫奈」，根因是它读的是
                 // 当时恒为蓝的 M3 色板。
                 MiuixTheme.colorScheme.surface,
-                shape = RoundedCornerShape(6.dp),
+                shape = PraxisRadius.SmallShape,
             ),
         // 三个参数都有语义，缺一个就是行为退化：
         //  - focusable：能接收按键事件（否则焦点留在输入框，按返回键没反应）；

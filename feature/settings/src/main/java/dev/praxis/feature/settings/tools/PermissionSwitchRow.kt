@@ -21,6 +21,7 @@ import dev.praxis.ui.design.glass.kyant.rememberPageBackdropOrFallback
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 工具这次调用会得到的**实际判定结果**。
@@ -164,7 +165,7 @@ private fun AccessBadge(access: ToolAccessLevel) {
     }
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
+            .clip(PraxisRadius.TinyShape)
             .background(color.copy(alpha = 0.14f))
             .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {

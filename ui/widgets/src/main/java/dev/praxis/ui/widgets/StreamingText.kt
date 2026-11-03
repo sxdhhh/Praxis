@@ -22,6 +22,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 流式文本：打字机式追加 + 末尾闪烁光标。
@@ -78,6 +79,6 @@ private fun BlinkingCursor(color: Color) {
         Modifier
             .alpha(alpha)
             .size(width = 2.dp, height = 14.dp)
-            .background(color, RoundedCornerShape(1.dp)),
+            .background(color, PraxisRadius.MicroShape),
     )
 }

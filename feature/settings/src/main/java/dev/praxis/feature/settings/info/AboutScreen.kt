@@ -67,6 +67,7 @@ import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 关于页 —— **1:1 照 InstallerX `MiuixAboutPage.kt`（892 行）**。
@@ -346,7 +347,7 @@ fun AboutScreen(
                             .requiredSize(160.dp)
                             .textureBlur(
                                 backdrop = backdrop,
-                                shape = RoundedCornerShape(16.dp),
+                                shape = PraxisRadius.LargeShape,
                                 blurRadius = 200f,
                                 noiseCoefficient = BlurDefaults.NoiseCoefficient,
                                 colors = BlurColors(blendColors = logoBlend),
@@ -381,7 +382,7 @@ fun AboutScreen(
                     if (backdrop != null && logoBlend != null) {
                         Modifier.textureBlur(
                             backdrop = backdrop,
-                            shape = RoundedCornerShape(16.dp),
+                            shape = PraxisRadius.LargeShape,
                             blurRadius = 150f,
                             noiseCoefficient = BlurDefaults.NoiseCoefficient,
                             colors = BlurColors(blendColors = logoBlend),
@@ -566,7 +567,7 @@ private fun GlassCard(
                 if (glass) {
                     Modifier.textureBlur(
                         backdrop = backdrop!!,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = PraxisRadius.LargeShape,
                         // 卡片的模糊半径比图标小：大半径在卡片这种大面积上
                         // 会把背景糊成一片纯色，看不出「玻璃」只看得出「脏」。
                         blurRadius = 60f,
