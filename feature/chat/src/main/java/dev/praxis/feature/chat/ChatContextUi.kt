@@ -31,6 +31,7 @@ import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.praxis.ui.theme.PraxisRadius
 
 /**
  * 上下文用量条（输入栏上方那一行）。
@@ -118,7 +119,7 @@ internal fun ContextUsageBar(
                             modifier = Modifier
                                 .width(2.dp)
                                 .height(6.dp)
-                                .clip(RoundedCornerShape(1.dp))
+                                .clip(PraxisRadius.MicroShape)
                                 .background(MiuixTheme.colorScheme.onSurfaceVariantActions),
                         )
                     }
@@ -130,7 +131,7 @@ internal fun ContextUsageBar(
                 modifier = Modifier
                     .weight(1f)
                     .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
+                    .clip(PraxisRadius.MicroShape)
                     .background(MiuixTheme.colorScheme.surfaceContainerHigh),
             )
         }
