@@ -701,3 +701,80 @@ KDoc 里提 X            -> 历史说明，可留
 ```
 
 这三者从文本上完全一样，只能靠上下文判断。
+
+## 十三、正式签名包已发布（第 66 轮）
+
+### 发布信息
+
+```
+标签    v1.0.0-51479a8
+页面    https://github.com/sxdhhh/Praxis/releases/tag/v1.0.0-51479a8
+下载    https://github.com/sxdhhh/Praxis/releases/download/v1.0.0-51479a8/app-release.apk
+```
+
+### 逐项验证（本地下载后复验，不只是信 CI 日志）
+
+| 项 | 结果 |
+|---|---|
+| 包名 | `dev.praxis`（**无 `.debug` 后缀**）|
+| 版本 | `1.0.0` (versionCode 10) |
+| 应用名 | Praxis |
+| minSdk / targetSdk | 28 / 37 |
+| 签名 | `CN=Praxis`，SHA-256 `f0910a01...2f61ef97` |
+| 签名是否与 keystore 一致 | **是**（与本地 keytool 读出的指纹逐字相同）|
+| ABI | arm64-v8a |
+| 大小 | 7.5 MB（R8 压缩后；debug 包是 88.1 MB）|
+| zip 完整性 | OK |
+
+### 为此做的事
+
+**1. 生成 release keystore**（仓库此前一份签名材料都没有）
+
+```
+C:\creat-agent\keys\praxis-release.jks
+SHA256 F0:91:0A:01:30:A9:BF:AE:1D:2F:CE:3D:C7:26:07:6D:
+       D3:C3:E3:E5:4E:13:CC:1C:ED:93:06:B1:2F:61:EF:97
+```
+
+**2. 写入 4 个 GitHub Secrets**（API 加密上传，已回读确认）：
+`PRAXIS_KEYSTORE_BASE64` / `PRAXIS_STORE_PASS` / `PRAXIS_KEY_PASS` / `PRAXIS_KEY_ALIAS`
+
+**3. 新增 `release.yml`**：还原 keystore → `assembleRelease` → **验签** → 建 Release
+
+### 关键防护：验签失败就不发
+
+缺任一 secret 时 AGP 会**静默产出未签名包**，构建照样 SUCCESS。
+所以发布前跑 `apksigner verify --print-certs`，签名无效直接 fail。
+
+不检查的话，就会把一个装不上的包发出去 —— 而 CI 是绿的，很难察觉。
+
+### 一个只在正式包才暴露的问题
+
+第一次 release 构建失败：
+
+```
+ERROR: R8: Missing class com.android.internal.view.menu.MenuBuilder
+       Missing class miui.util.HapticFeedbackUtil
+> Task :app:minifyReleaseWithR8 FAILED
+```
+
+**Kotlin 编译错误 0 条。**
+
+原因：debug 变体 `isMinifyEnabled = false`、**从不跑 R8**，这些引用从没被检查过。
+release 一开 minify，R8 的缺失类检测把它们全报出来。
+
+它们是 MIUI / AOSP 的**私有 API**，App 通过反射访问（拿不到就降级），
+编译期本就不需要存在。补了 `-dontwarn` + `-keep` 规则。
+
+**教训：debug 全绿不代表 release 能过 —— 两者走不同的构建路径。**
+
+### ⚠️ keystore 必须备份
+
+签名身份一旦发布就不能更换 —— 换了之后用户无法覆盖安装。
+请备份 `C:\creat-agent\keys\praxis-release.jks` 与口令。
+**丢失 = 以后所有版本必须换包名重新开始。**
+
+### 验收状态说明
+
+这个包通过了 **R8 / 编译 / 验签**，但**功能验收仍是 7/24 条**（真机仍离线）。
+发布不等于验证通过 —— 用户实际使用后的反馈才是最有价值的验证。
