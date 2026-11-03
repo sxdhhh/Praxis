@@ -198,6 +198,8 @@ class ProotTerminalSessionPort(
         //    窗口大小按手机常见列数给（80x24 会让 top 错位）。
         //    候选 argv 逐个试：第一个是别名路径，起不来（fork 后立刻死）就换下一个。
         var pty: dev.praxis.core.terminal.Pty? = null
+        // 每条候选 PTY 的失败原因。全部失败时会写进终端，让用户看到为什么降级。
+        val ptyFailureReasons = mutableListOf<String>()
         for (argv in argvCandidates) {
             val started = dev.praxis.core.terminal.Pty.start(
                 command = argv.toTypedArray(),
@@ -228,6 +230,15 @@ class ProotTerminalSessionPort(
                 "PTY 子进程 200ms 内已退出（exit=$exitNow），丢弃该候选并降级到管道；" +
                     "argv[0]=${argv.firstOrNull()}"
             )
+            // ## 把原因**留下来**，后面要写进终端（2026-11-03，P7 待办③）
+            //
+            // 上面那条 Log.w 只有 logcat 能看到。用户看到的却是
+            // 「终端能敲命令但 vim/top 打不开、Ctrl+C 不生效」——
+            // 完全不知道系统已经悄悄降级到了管道。
+            //
+            // 127 是 pty.c 里 execve/chdir 失败；其它值多半是 shell 自己退出。
+            // 把它记下来，降级时一并显示，用户与模型都能看到真实原因。
+            ptyFailureReasons += "argv[0]=${argv.firstOrNull()} 退出码=$exitNow"
             runCatching { started.destroy() }
         }
         if (pty != null) {
@@ -316,6 +327,18 @@ class ProotTerminalSessionPort(
         // ② 降级：libpty 不可用（32 位设备 / CI 缺库）时用管道。
         //    功能不全但仍能跑 ls/apt/cat，好过整页崩掉。
         //
+        // ## 降级必须让用户看见（2026-11-03，P7 待办③）
+        //
+        // 旧实现降级时**一声不响**：终端照样出提示符、照样能敲命令，
+        // 只是 vim/top 打不开、Ctrl+C 不生效、输出延迟。
+        // 用户只会觉得「这终端怎么怪怪的」，无从知道系统已经退到了管道。
+        //
+        // 这里在管道会话开好后，往输出流头里写一条醒目提示 + 收集到的
+        // 每条候选的退出码。这样：
+        //   - 用户看到「已降级到管道模式」就知道真因；
+        //   - 退出码 127 = execve/chdir 失败（pty.c 约定），
+        //     其它值 = shell 自己退出，两者能直接区分。
+        //
         // 候选 argv 同样逐个试：这里没有 200ms 预判的机会（ProcessBuilder 要
         // 等到 400ms 存活检查才知道），所以只对「启动阶段就抛异常」的情形换下一个。
         val argv = argvCandidates.first()
@@ -360,6 +383,27 @@ class ProotTerminalSessionPort(
         val item = Live(info, process, writer, tap)
         live[id] = item
         refreshCwd(item)
+        // ## 把「已降级到管道」写进终端（P7 待办③，2026-11-03）
+        //
+        // 走到这里说明所有 PTY 候选都失败了，当前是管道路径。
+        // 管道模式下：
+        //   - 没有终端窗口概念（`resize` 无效，`top`/`vim` 排版错乱）
+        //   - 没有 Ctrl+C 之类的信号键
+        //   - 输出被行缓冲，长命令不会实时刷新
+        //
+        // 旧实现在这种情况下**什么都不说**，用户只会觉得终端「怪怪的」。
+        // 这里显式写一行提示 + 每条候选的退出码，让原因可见。
+        //
+        // 为什么先写提示再让 pump 继续：tap 是有序队列，
+        // 此刻 shell 还没输出（刚启动），这条提示会排在最前面。
+        if (ptyFailureReasons.isNotEmpty()) {
+            runCatching {
+                tap.offer("[Praxis] 真 PTY 不可用，已降级到管道模式。")
+                tap.offer("[Praxis] 影响：vim/top 无法正常显示、Ctrl+C 无效、输出有延迟。")
+                ptyFailureReasons.forEach { tap.offer("[Praxis]   $it") }
+                tap.offer("[Praxis] 退出码 127 = 容器内找不到可执行文件（rootfs 可能不完整）。")
+            }
+        }
         live[id]!!.info
     }
 
