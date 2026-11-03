@@ -562,14 +562,14 @@ private fun ChatMessageLocatorRow(
                 modifier = Modifier
                     .weight(1f)
                     .height(38.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(PraxisRadius.MediumShape)
                     .background(MiuixTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f)),
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxHeight()
                         .fillMaxWidth(messageBarFraction(preview.contentLength, maxMessageLength))
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(PraxisRadius.MediumShape)
                         .background(fillColor.copy(alpha = 0.9f)),
                 )
                 Text(

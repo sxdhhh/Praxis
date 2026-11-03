@@ -1275,27 +1275,39 @@ class WiringGuardTest {
      */
     @Test
     fun cornerRadius_goesThroughToken() {
-        val files = listOf(
-            "feature/chat/src/main/java/dev/praxis/feature/chat/widget/MessageBubble.kt",
-            "ui/widgets/src/main/java/dev/praxis/ui/widgets/MiuixSidebar.kt",
-            "feature/chat/src/main/java/dev/praxis/feature/chat/queue/PendingQueuePanel.kt",
-        )
-        files.forEach { rel ->
-            val text = read(rel)
-            // 只看代码行，不看注释（注释里会引用旧写法作说明）。
-            val code = text.lines()
-                .filterNot {
-                    val t = it.trimStart()
-                    t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")
+        // ## 全仓扫描（2026-11-03：迁移完成后收紧）
+        //
+        // 迁移刚起步时这条护栏只查 3 个文件 —— 那时全仓还有 67 处硬编码，
+        // 一次全查会红一片，没有意义。
+        //
+        // 现在 67 处已全部迁完，护栏必须覆盖全仓：
+        // 否则第 4~67 处可以随便被改回去而不报警。
+        val roots = listOf("app", "core", "feature", "ui", "preview")
+        val violations = mutableListOf<String>()
+        roots.forEach { root ->
+            val dir = File(root)
+            if (!dir.isDirectory) return@forEach
+            dir.walkTopDown()
+                // 跳过 build 产物与测试源码：测试里可以有构造用的假数据。
+                .onEnter { it.name != "build" }
+                .filter { it.isFile && it.extension == "kt" }
+                .filterNot { it.path.contains("/src/test/") }
+                .forEach { file ->
+                    val code = file.readText().lines()
+                        .filterNot {
+                            val t = it.trimStart()
+                            t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")
+                        }
+                        .joinToString("\n")
+                    Regex("RoundedCornerShape\\(\\s*\\d+\\.dp")
+                        .find(code)
+                        ?.let { violations += file.path + " -> " + it.value }
                 }
-                .joinToString("\n")
-            val inline = Regex("RoundedCornerShape\\(\\s*\\d+\\.dp")
-            val hit = inline.find(code)
-            assertTrue(
-                "$rel 里还有内联圆角 \${hit?.value} —— 应改用 PraxisRadius 令牌",
-                hit == null,
-            )
         }
+        assertTrue(
+            "以下文件仍有内联圆角，应改用 PraxisRadius 令牌：" + violations.joinToString("; "),
+            violations.isEmpty(),
+        )
     }
 
     /**
