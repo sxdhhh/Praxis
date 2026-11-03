@@ -435,3 +435,54 @@ adb shell pm install -r -d /data/local/tmp/v136.apk
 
 在你回答之前，**我不会去猜凭据**，也不会擅自建 GitHub Release
 （那会在你的仓库里留下公开可见的 release，属于对外动作）。
+
+### 发布方案的可行性核查（第 23 轮）
+
+上一轮给了三条发布路径让用户选。本轮先把「我能不能自主完成 A 方案」查实。
+
+#### A 方案（GitHub Release）的真实边界
+
+`app/build.gradle.kts` 的签名配置：
+
+```kotlin
+val releaseKeystore = localProp("PRAXIS_KEYSTORE", "PRAXIS_KEYSTORE", "").takeIf { it.isNotBlank() }
+val storePass = System.getenv("PRAXIS_STORE_PASS")
+val keyPass   = System.getenv("PRAXIS_KEY_PASS")
+if (keystorePath != null && !storePass.isNullOrBlank() && !keyPass.isNullOrBlank()) {
+    signingConfigs.create("release") { ... }
+} else {
+    // 缺料就不建签名配置；release 产物保持未签名，
+    // 让「忘了配签名」在安装阶段暴露，而不是产出一个看起来正常的包。
+    null
+}
+```
+
+当前环境实测：
+
+| 项 | 状态 |
+|---|---|
+| keystore 文件（`*.jks` / `*.keystore` / `*.p12`） | **全仓库无** |
+| `PRAXIS_KEYSTORE` 环境变量 | 未设置 |
+| `PRAXIS_STORE_PASS` / `PRAXIS_KEY_PASS` | 未设置 |
+| `local.properties` 里的 keystore 配置 | 无 |
+| `version.properties` | **不存在**（版本号来自 build.gradle.kts 顶部常量）|
+
+#### 结论：A 方案能出包，但只能出 debug 包
+
+没有签名材料时 `release` 产物是**未签名的**，装不上（Android 要求 APK 必须签名）。
+所以「走 GitHub Release」实际只能发布 `app-debug.apk`。
+
+而 debug 包本身是**可以安装**的（自带 debug 签名），包名 `dev.praxis.debug`，
+与现在真机/模拟器上装的是同一个。对「给人试用」这个目的够用。
+
+#### 所以 A 方案修正为
+
+**A′. 用 GitHub Release 发布 `app-debug.apk`**
+  - 我能完全自主完成
+  - 下载地址是 GitHub Release，不是 `sxd.sxdshh.kdns.fr/apk/`
+  - 缺点：debug 包带 `.debug` 后缀，不能覆盖安装正式包
+
+如果将来要发正式签名的包，需要提供：keystore 文件 + `PRAXIS_KEYSTORE` 路径 +
+`PRAXIS_STORE_PASS` / `PRAXIS_KEY_PASS`（以及可选的 `PRAXIS_KEY_ALIAS`）。
+**这四个我没法自己生成** —— 签名密钥必须由项目所有者持有，
+我生成一个只会导致「用户装了两个互不兼容的 Praxis」。
