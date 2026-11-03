@@ -651,3 +651,53 @@ if (keystorePath != null && !storePass.isNullOrBlank() && !keyPass.isNullOrBlank
 
 P6 的「能确定做什么」的部分已经做完；剩下两项是「需要看效果才能决定」的，
 **不是没做，是没有判断依据**。
+
+## 十二、删除符号的残留审计（第 47 轮，结论：干净）
+
+这次改造删除了不少东西。担心文档或注释里留下过时引用，做了一次全仓审计。
+
+审计对象（6 个已删除/改名的符号）：
+
+| 符号 | 删除原因 |
+|---|---|
+| `TerminalSelection` / `TerminalSelectionBar` / `extractSelectionText` | P1 改用系统原生选择 |
+| `AttachmentCellView` / `MiuixAnimatedPopup` | P5a 改用 miuix 下拉 |
+| `loginTail` | 发现是绕路，改用 `loginArgs` 直调 |
+
+### 结果
+
+代码侧**无残留**。所有命中都在两类地方：
+
+**1. 负向断言（应保留）**
+
+```kotlin
+// WiringGuardTest.kt:1014-1017
+"自研的 TerminalSelection 模型又回来了 —— 会与系统选择打架",
+!flat.contains("TerminalSelection(") &&
+!flat.contains("TerminalSelectionBar(") &&
+!flat.contains("extractSelectionText("),
+```
+
+这类断言**必须**写出已删除符号的名字 —— 它守的就是「不许把它们加回来」。
+
+**2. 历史说明（应保留）**
+
+```
+SETTLEMENT.md / PLAN-terminal-copy.md / TERMINAL-PROOT.md / README.md
+TerminalScreen.kt:978 KDoc / WiringGuardTest.kt:680 KDoc
+```
+
+这些在陈述「改造前是什么样」，是给后来人看的演进记录。
+
+### 一个值得记的判断
+
+「已删除符号出现在代码里」看起来像 bug，但**负向断言必须提到它**。
+审计脚本最初把这类命中也标成「代码行!」，需要人工区分：
+
+```
+出现 X（正向使用）      -> 残留，要删
+!contains("X")         -> 护栏，要留
+KDoc 里提 X            -> 历史说明，可留
+```
+
+这三者从文本上完全一样，只能靠上下文判断。
