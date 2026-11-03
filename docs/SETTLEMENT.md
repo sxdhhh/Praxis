@@ -393,3 +393,45 @@ adb shell pm install -r -d /data/local/tmp/v136.apk
 3. 或者由你手动上传，我只负责产出 APK（已备好，见第七节）
 
 在这一点明确之前，**「发布」这一环无法完成**，报告不能标为已交付。
+
+### 进一步核查（第 21 轮）：这个发布通道此前从未建立过
+
+翻遍 `docs/memories/all-memories.md`（42262 行，跨项目长期记忆），结论是：
+
+**没有任何 Praxis APK 发布到 `/apk/` 的记录。**
+
+反向证据（记忆库里 Praxis 自己的一条记载）：
+
+> 上游「检查更新」未照抄：**Praxis 未发布，无更新通道**，点了没反应的按钮比没有更糟。
+
+也就是说：`https://sxd.sxdshh.kdns.fr/apk/` 这个下载页**不是为 Praxis 建好的**，
+或者至少没有任何一次 Praxis 发布走过它。目标里写的「发布到该地址」，
+是一个**尚未建立**的通道，而不是「照旧上传即可」。
+
+### 这个域名上已有的东西（供判断）
+
+记忆里 `sxd.sxdshh.kdns.fr` 与 `sxd91.kdns.fr` 是同一套自建服务（LocalHub）的域名，
+已有用途：
+
+  - `/deepseek/`：DeepSeek Harness 的 Web GUI（在跑）
+  - `/server/<仓库名>`：把仓库部署成 Node 服务（`uses: localhub/host-node@v1`）
+  - git 服务：`https://sxd91.kdns.fr/sxd/<repo>.git`，推送用 `https://sxd:<token>@...`
+
+**`/apk/` 不在这个清单里。** 它可能是后来加的静态目录（需认证），也可能只是计划中的路径。
+
+### 因此需要的不是「上传操作」，而是先决定通道
+
+我把可选项收敛成两条，都只需你一句话：
+
+**A. 走 GitHub Release（推荐，我能自主完成）**
+  - 我补一个 `release.yml`：读 `version.properties`，跑 `assembleRelease`，
+    建 tag 并上传 APK 作为 release asset
+  - 用现有 token（已确认含 `workflow` 权限）
+  - 缺点：下载地址是 GitHub 的，不是你那个域名
+
+**B. 你给 `/apk/` 的上传方式**
+  - 需要：认证凭据 + 上传协议（rsync over ssh / scp / HTTP PUT / WebDAV）
+  - 我可以写一个可重复使用的 `tools/publish_apk.*`，以后每次发布一条命令
+
+在你回答之前，**我不会去猜凭据**，也不会擅自建 GitHub Release
+（那会在你的仓库里留下公开可见的 release，属于对外动作）。
