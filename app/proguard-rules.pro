@@ -113,3 +113,66 @@
 
 # ## Kotlin 协程
 -dontwarn kotlinx.coroutines.**
+
+# ── 经典 Android 版 miuix（third_party/miuix 1.0.13.0）★ 实测闪退根因（2026-11-04）──
+#
+# ## 真机崩溃证据（Redmi 25053RT47C / Android 17）
+#
+#   FATAL EXCEPTION: main
+#   java.lang.RuntimeException: Unable to start activity ComponentInfo{dev.praxis/
+#       com.sevtinge.hyperceiler.provision.activity.DefaultActivity}
+#   Caused by: android.view.InflateException: Binary XML file line #24 in
+#       dev.praxis:layout/miuix_appcompat_group_buttons_layout
+#   Caused by: java.lang.reflect.InvocationTargetException
+#       at android.view.LayoutInflater.createView(LayoutInflater.java:757)
+#       at dm.addGroupButtons(...)
+#       at com.sevtinge.hyperceiler.provision.activity.DefaultActivity.onCreate(...)
+#
+#   并且：
+#   java.lang.NoSuchMethodError: No static method spring(FF)
+#       Lfan/animation/utils/EaseManager$EaseStyle; in class Lfan/animation/utils/EaseManager;
+#   Rejecting re-init on previously-failed class java.lang.Class<vh>
+#
+# ## 因果链
+#
+#   引导页加载 miuix 的 XML 布局
+#     -> 布局里按「类名字符串」反射创建自定义 View
+#     -> 该 View 的 <clinit> 调用 EaseManager.spring(float, float)
+#     -> R8 判定 spring 无人引用，把它删了
+#     -> 类初始化失败 -> NoClassDefFoundError
+#     -> 布局 inflate 失败 -> DefaultActivity 起不来 -> 闪退
+#
+# ## 为什么静态分析看不到
+#
+#   1. XML 里的类名是**字符串**，R8 不做资源/字符串解析
+#   2. miuix 内部大量经过 folme 动画框架做动态调用
+#   3. third_party/miuix 下的 AAR 都**不带** consumer ProGuard 规则
+#
+# 所以整包保留 fan./miui. 不是偷懒 —— 它们的入口无法静态枚举。
+# 代价是包体变大（实测 7.5MB -> 9.3MB，可接受），换来的是能打开。
+
+-keep class fan.** { *; }
+-dontwarn fan.**
+-keep class miui.** { *; }
+-dontwarn miui.**
+
+# 引导模块（HyperCeiler 的 provision）同样用 XML 布局 + 自定义 View
+-keep class com.sevtinge.** { *; }
+-dontwarn com.sevtinge.**
+
+# 兜底：XML 里引用的自定义 View 必须保留三个标准构造器与 setter。
+# 即使以后换别的 View 库，这条也能挡住同类问题。
+-keep public class * extends android.view.View {
+    public <init>(android.content.Context);
+    public <init>(android.content.Context, android.util.AttributeSet);
+    public <init>(android.content.Context, android.util.AttributeSet, int);
+    public <init>(android.content.Context, android.util.AttributeSet, int, int);
+    public void set*(...);
+    public void get*(...);
+}
+
+# XML 里出现的枚举（如 app:xxx="value"）走 valueOf，不能被优化掉
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
