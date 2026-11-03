@@ -361,3 +361,35 @@ adb push part2.bin /data/local/tmp/p2.bin
 adb shell 'cat /data/local/tmp/p0.bin /data/local/tmp/p1.bin /data/local/tmp/p2.bin > /data/local/tmp/v136.apk'
 adb shell pm install -r -d /data/local/tmp/v136.apk
 ```
+
+## 八、发布路径核查（第 20 轮，发现阻塞）
+
+目标要求「下载发布到 `https://sxd.sxdshh.kdns.fr/apk/`」。本轮去准备这一步时发现**发布路径本身不通**，而不是差最后一步操作。
+
+### 核查结果
+
+| 检查项 | 结果 |
+|---|---|
+| 本地发布脚本 | **无**（`C:\creat-agent` 与仓库内都没有 publish 脚本） |
+| `.github/workflows/release.yml` | **不存在**（只有 `build.yml` / `preview.yml`） |
+| GitHub Releases | **一个都没有**（API 查询返回空数组） |
+| `https://sxd.sxdshh.kdns.fr/apk/` | **401 Authorization Required**（nginx） |
+| `/apk/index.html`、`/apk/praxis.apk`、`/apk/app-debug.apk` | 全部 **401** |
+| 本地凭据文件（`.netrc` 等） | **无** |
+
+### 结论
+
+下载页需要 HTTP 认证，而**当前环境里没有该站点的任何凭据**。
+
+我不能靠猜绕过它：
+  - 猜账号密码属于瞎试，且会把失败次数记到服务器
+  - 这个域名由 LocalHub 托管（自建 git 服务），上传可能需要该服务的管理权限
+
+### 需要用户提供（三选一）
+
+1. **该站点的上传凭据**（用户名+密码，或 token），并说明上传方式（rsync/scp/HTTP PUT）
+2. 或者确认改走 **GitHub Release** —— 我可以补一个 `release.yml`，
+   用现有 token 建 release 并上传 APK 资产
+3. 或者由你手动上传，我只负责产出 APK（已备好，见第七节）
+
+在这一点明确之前，**「发布」这一环无法完成**，报告不能标为已交付。
