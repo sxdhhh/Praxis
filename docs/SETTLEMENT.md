@@ -188,7 +188,13 @@
 - `-i` 强制交互模式，交互 shell 会 `tcgetattr(stdin)`；
   落到管道降级分支时 stdin 不是 tty，于是刷 `stty: Inappropriate ioctl`
 
-修法：新增 `loginTail(env)` = `loginShell(env) + "-l"`，`-l` 自己判断要不要交互。
+修法：`create()` 改用 `ProotCommand.loginArgs(env)` —— 它的尾部就是
+`loginShell(env) + "-l"`，`-l` 是登录 shell 语义、自己判断要不要交互，
+因此不会在非 tty 上刷 stty 错误。
+
+> 演进记录：中间曾抽出 `loginTail(env)` 供 `sessionArgs` 传回，后来发现
+> `sessionArgs(env, loginTail(env))` 等价于 `loginArgs(env)`（去掉尾部再加回去），
+> 于是删掉多余函数、直接调 `loginArgs`。核心路径上不该有需要心算代入的绕法。
 
 **状态**：CI #131 通过。**真机未验证**（验证脚本 `tools/verify_device_terminal.py` 已就绪）。
 
