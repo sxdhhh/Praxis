@@ -290,7 +290,11 @@ jobs:
           ls -lh "$found"
 
       - name: Upload APK
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.upload_artifact != 'false' }}
+        # 只要构建出了 APK 就上传 —— push 触发的构建同样需要能下载。
+        #
+        # 原来只在 workflow_dispatch 且 upload_artifact != false 时才传。
+        # 结果 push 触发的 run 里 APK 被静默跳过，只剩 verify-reports，
+        # 从产物列表看就像「构建没产出 APK」。
         uses: actions/upload-artifact@v4
         with:
           name: praxis-apk
