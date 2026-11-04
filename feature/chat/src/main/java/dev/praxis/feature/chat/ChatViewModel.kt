@@ -200,6 +200,49 @@ class ChatViewModel(
     private val assistantRowIds = mutableMapOf<Long, Long>()
 
     /**
+     * 行号尚未注册时暂存的正文：气泡 id → 最新正文。
+     *
+     * ## 它修的是什么（2026-11-04）
+     *
+     * 落盘是**异步**的（`launchPersist` 丢到 `persistScope`），而 `startStream`
+     * 紧随其后就在 `viewModelScope` 上开跑。两者谁先到没有保证：
+     *
+     * ```
+     * launchPersist { val rowId = appendMessage(...); assistantRowIds[id] = rowId }
+     * startStream(id)        // ← 可能先吐 delta
+     * ```
+     *
+     * 而 `persistContent` 的第一步是 `assistantRowIds[id] ?: return` ——
+     * 行号还没注册就**静默丢弃**这一帧。首个 delta 丢失还算轻的：
+     * 若整轮都在竞态窗口内（工具续跑那条路曾经连注册都没有），
+     * 正文就一个字都不会入库，重启后凭空消失。
+     *
+     * ## 为什么用暂存而不是加锁 / 改成同步
+     *
+     * 加锁会把网络流与数据库串起来；改成同步要动三条调用链的顺序，
+     * 每条都得重新论证。暂存是最小改动：注册一到位就补写，
+     * 期间不管来了多少帧都只留最新一份（正文是全量替换，不是增量拼接）。
+     *
+     * 只在「注册前」有值；`registerRowId` 写完即清，不会积累。
+     */
+    private val pendingContent = mutableMapOf<Long, String>()
+
+    /**
+     * 注册气泡对应的数据库行号，并把注册前暂存的正文补写进去。
+     *
+     * 所有 `assistantRowIds[x] = rowId` 都应走这里 —— 直接赋值会让
+     * [pendingContent] 里的那一份永远没人接。
+     */
+    private fun registerRowId(bubbleId: Long, rowId: Long) {
+        assistantRowIds[bubbleId] = rowId
+        val pending = pendingContent.remove(bubbleId) ?: return
+        // 立即落盘：暂存意味着「流已经在跑」，这一份很可能已经是终态。
+        contentWriter.submit(rowId, pending)
+        contentWriter.flush(rowId)
+        contentWriter.forget(rowId)
+    }
+
+    /**
      * 当前已生效的压缩结果。
      *
      * 只在内存里：它是一份「派生产物」，原始消息仍在 [history] 与数据库里。
@@ -473,7 +516,7 @@ class ChatViewModel(
 
                 val bubbleId = nextId++
                 // 记住行 id，后续流式增量才能定位到正确的那一行。
-                assistantRowIds[bubbleId] = row.id
+                registerRowId(bubbleId, row.id)
                 val role = when (row.role) {
                     "user" -> BubbleRole.User
                     "assistant" -> BubbleRole.Assistant
@@ -755,7 +798,7 @@ class ChatViewModel(
             if (latestBubbleId != b.id) {
                 val latestRow = assistantRowIds[latestBubbleId]
                 if (latestRow != null) {
-                    assistantRowIds[b.id] = latestRow
+                    registerRowId(b.id, latestRow)
                 }
             }
             b.copy(
@@ -827,15 +870,33 @@ class ChatViewModel(
         }
     }
 
-    /** 流式期间提交正文（可能被节流丢弃，留待 flush）。 */
+    /**
+     * 流式期间提交正文（可能被节流丢弃，留待 flush）。
+     *
+     * 行号还没注册时**不丢弃**，暂存到 [pendingContent]，等 `registerRowId` 补写。
+     * 旧实现直接 `?: return`，那一帧就没了 —— 见 [pendingContent] 的说明。
+     */
     private fun persistContent(bubbleId: Long, content: String) {
-        val rowId = assistantRowIds[bubbleId] ?: return
+        val rowId = assistantRowIds[bubbleId]
+        if (rowId == null) {
+            pendingContent[bubbleId] = content
+            return
+        }
         contentWriter.submit(rowId, content)
     }
 
-    /** 终态强制写入：流结束 / 失败 / 取消时调用，保证不丢最后一段。 */
+    /**
+     * 终态强制写入：流结束 / 失败 / 取消时调用，保证不丢最后一段。
+     *
+     * 同 [persistContent]：行号未注册就暂存。这条尤其重要 —— 它是**最后**
+     * 一次写入机会，丢了就真的没有下一次了。
+     */
     private fun flushContent(bubbleId: Long, content: String) {
-        val rowId = assistantRowIds[bubbleId] ?: return
+        val rowId = assistantRowIds[bubbleId]
+        if (rowId == null) {
+            pendingContent[bubbleId] = content
+            return
+        }
         // 先把最新内容放进暂存区，再 flush —— 提交可能因节流窗口被丢弃。
         contentWriter.submit(rowId, content)
         contentWriter.flush(rowId)
@@ -1094,7 +1155,7 @@ class ChatViewModel(
                 role = "assistant",
                 content = "",
             )
-            assistantRowIds[assistantId] = assistantRowId
+            registerRowId(assistantId, assistantRowId)
         }
 
         // ── ★ 标题生成必须在 launchPersist 的**外面**单独起协程（2026-11-01 修）
@@ -1311,7 +1372,7 @@ class ChatViewModel(
                 }
             }
             val rowId = appendVariant(sessionId, groupId, newIndex, "")
-            assistantRowIds[assistantId] = rowId
+            registerRowId(assistantId, rowId)
         }
         startStream(assistantId)
     }
@@ -1463,7 +1524,7 @@ class ChatViewModel(
         // 而 UI 上刚才明明显示过 —— 用户会认为「继续的成果丢了」。
         launchPersist {
             val rowId = appendMessage(sessionId, role = "assistant", content = "")
-            assistantRowIds[assistantId] = rowId
+            registerRowId(assistantId, rowId)
         }
         startStream(assistantId)
     }
@@ -2032,6 +2093,42 @@ class ChatViewModel(
                 ),
                 isStreaming = true,
             )
+        }
+        // ★ 占位行必须落盘并注册映射（2026-11-04 修，P4「重进丢内容」根因）
+        //
+        // ## 漏掉这一步会怎样
+        //
+        // `persistContent` / `flushContent` 的第一步都是：
+        //
+        //     val rowId = assistantRowIds[bubbleId] ?: return
+        //
+        // 没注册就没有 rowId，于是整轮正文**一个字都不会写库**，
+        // 而且不报错、不告警、界面上完全看不出来。
+        //
+        // 表现：只要模型调用过工具，最终回答在屏幕上正常显示，
+        // 重启后凭空消失，**必然复现**（每次工具调用都走这条路）。
+        //
+        // 真机证据（dev.praxis 的 main 会话，2026-11-04）：
+        //   1 user      你好
+        //   2 assistant 你好！我是 Praxis...
+        //   3 user      ls
+        //   4 assistant ''              <- 工具轮占位行（有落盘）
+        //   5 tool      list_dir 结果
+        //   （「工作区根目录是空的…」这条从未入库，库里没有第 6 行）
+        //
+        // ## 为什么直接 await，不用 launchPersist
+        //
+        // 必须保证「注册完成」早于「第一个 delta」：
+        // `launchPersist` 是异步的，`startStream` 可能先吐 delta，
+        // 那一帧会被 `persistContent` 丢掉（注册还没发生）。
+        // 本函数本身是 suspend，直接 await 最省事也最稳。
+        chatRepository?.let { repo ->
+            val followUpRowId = repo.appendMessage(
+                sessionId = sessionId,
+                role = "assistant",
+                content = "",
+            )
+            registerRowId(followUpId, followUpRowId)
         }
         startStream(followUpId)
     }
@@ -3212,7 +3309,7 @@ class ChatViewModel(
                 if (persisted != null) {
                     // 记住行 id：摘要气泡不需要流式更新，但保持一致，
                     // 便于将来「编辑摘要」这类功能按 id 定位。
-                    assistantRowIds[bubble.id] = persisted
+                    registerRowId(bubble.id, persisted)
                 }
                 tokenCache.reset()
             } catch (t: Throwable) {

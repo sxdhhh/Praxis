@@ -492,10 +492,31 @@ private fun SidebarSelectionActions(
     //
     // 没勾选时不显示置顶/删除（而不是「显示但禁用」）：
     // 没有可执行的操作就不展示，这也贴近 DeepSeek。
+    //
+    // ## 宽度账（2026-11-04 真机修）
+    //
+    // 真机截图：四个按钮「粘在一起」，最右的「完成」被挤成竖排。
+    //
+    // 侧边栏宽 = `min(屏宽 × 0.84, 400dp)` = 该机约 **358dp**。
+    // 旧标签实测约需 349dp（四个按钮 325 + 三处 8dp 间距），
+    // **超出可用宽度约 11dp** —— Row 按顺序布局，最后的「完成」
+    // 只能拿到剩余空间，不足一个字宽就折行。
+    //
+    // 修法（不动控件类型，仍是 Miuix 的 TextButton）：
+    //   1. 外边距 12dp → 8dp：省 8dp
+    //   2. 标签去掉中间空格：「置顶 1」→「置顶1」：省约 14dp
+    // 合计省下约 22dp，按钮组约 327dp，留出约 31dp 余量 ——
+    // 系统字体放大一档也不至于再折行。
+    //
+    // ## 为什么不去掉「完成」
+    //
+    // 去掉它能省 74dp，最省事。但退出多选是高频动作，
+    // 抽屉顶部当前没有可点的 × （只有一支编辑笔），把它挪上去
+    // 等于改交互，超出「修一个折行」的范围。
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SidebarActionButton(
@@ -505,12 +526,12 @@ private fun SidebarSelectionActions(
         Spacer(Modifier.weight(1f))
         if (hasSelection) {
             SidebarActionButton(
-                text = "置顶 $selectedCount",
+                text = "置顶$selectedCount",
                 onClick = onPin,
             )
             Spacer(Modifier.width(8.dp))
             SidebarActionButton(
-                text = "删除 $selectedCount",
+                text = "删除$selectedCount",
                 onClick = onDelete,
                 danger = true,
             )
