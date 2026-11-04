@@ -1850,13 +1850,19 @@ private fun ChatInputBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // ── 模型胶囊（撑满剩余空间）──────────────────
-                if (models.isNotEmpty() || onOpenModelSettings != null) {
+                // 有分组数据时也要显示胶囊（即使当前配置没填模型 ——
+                // 别的配置可能有，用户要能从这里切过去）。
+                if (models.isNotEmpty() || modelGroups.isNotEmpty() || onOpenModelSettings != null) {
                     ModelPill(
                         modelName = modelName,
                         models = models,
                         activeIndex = activeModelIndex,
                         onClickModel = { index: Int -> onSelectModelIndex?.invoke(index) },
                         onManageModels = { onOpenModelSettings?.invoke() },
+                        // 多配置：分组列表与分组点击回调。
+                        // 两者都为空/null 时 ModelPill 退回单组渲染。
+                        groups = modelGroups,
+                        onClickGroupedModel = onSelectGroupedModel,
                         modifier = Modifier.weight(1f),
                     )
                 } else {
