@@ -299,7 +299,12 @@ class TerminalViewModel(
         val port = snapshotPort ?: return
         viewModelScope.launch {
             val snapshot = runCatching { port.load() }.getOrNull() ?: return@launch
-            if (snapshot.tabs.isEmpty()) return@launch
+            if (snapshot.tabs.isEmpty()) {
+                // 没有存档（首次启动）也要同步一次：AI 可能在用户第一次
+                // 打开终端页之前就已经建好会话了。
+                syncExternalSessions()
+                return@launch
+            }
 
             val restored = snapshot.tabs.map { saved ->
                 tabSeq++
@@ -340,6 +345,10 @@ class TerminalViewModel(
             ptySessionIds.values.forEach { sid -> runCatching { ptyPort?.close(sid) } }
             ptySessionIds.clear()
             restored.forEach { startPtySession(it) }
+            // 恢复完之后再同步一次外部会话（AI 在别处建的）：
+            // 顺序放在最后，是为了让「历史 tab」先就位，
+            // 新补进来的会话追加在后面，不会打乱用户熟悉的顺序。
+            syncExternalSessions()
         }
     }
 
@@ -421,6 +430,69 @@ class TerminalViewModel(
         // 真终端模式下给这个会话开一个 PTY（幂等，已在则不发）。
         // 放在 publish 之后：PTY 开会话是 suspend 的，不能让 UI 等它。
         startPtySession(tab)
+    }
+
+    /**
+     * 把「端口里有、tab 里没有」的会话补成 tab。
+     *
+     * ## 它修的是什么（2026-11-05）
+     *
+     * 真机反馈：「终端页面还是看不到智能体创建的终端会话」。
+     *
+     * 根因是**两套会话表**：
+     *
+     * ```
+     * AI 侧   TerminalSessionPort.create("main")  -> 真的开了个 PTY
+     * UI 侧   tabList（DataStore 快照恢复）        -> 终端页只画这些
+     * ```
+     *
+     * 两者共用同一个 `ProotTerminalSessionPort` 单例，PTY 确实只有一个；
+     * 但**终端页的 tab 是 UI 自建的** —— `init` 里 `addTab()` 一个，
+     * 之后从快照恢复，从不问「现在 port 里有哪些会话」。
+     * 于是 AI 建出来的会话进程活着，界面上却没有入口。
+     *
+     * ## 为什么按名字对齐
+     *
+     * `port.open(name, ...)` 本身就是**按名幂等**的（同名返回既有会话），
+     * 而 tab 的持久化键也是 `title`。名字是两边天然的公共键。
+     *
+     * ## 为什么只增不删
+     *
+     * 反向（tab 里有、port 里没有）不在这里处理：那可能是用户刚建的 tab、
+     * PTY 还没起来，盲目删 tab 会把他正在用的会话关掉。
+     * 关会话是 `closeTab` 的职责，由用户显式触发。
+     *
+     * ## 幂等
+     *
+     * 每次调用只补缺失的；已经在 tabList 里的名字直接跳过。
+     * 所以可以在恢复后、每次页面可见时都安全地调一次。
+     */
+    fun syncExternalSessions() {
+        val port = ptyPort ?: return
+        viewModelScope.launch {
+            // 端口不支持枚举（或底层异常）时直接跳过 —— 退化成
+            // 「不同步」，也就是这个功能没做之前的状态。
+            val names = runCatching { port.sessionNames() }.getOrDefault(emptyList())
+            if (names.isEmpty()) return@launch
+            val existing = tabList.map { it.title }.toSet()
+            val missing = names.filterNot { it in existing }
+            if (missing.isEmpty()) return@launch
+            missing.forEach { name ->
+                tabSeq++
+                val tab = Tab(
+                    id = "t" + tabSeq,
+                    // 标题直接用会话名：用户/AI 认的是这个名字，
+                    // 换一个界面自造的名字反而对不上。
+                    title = name,
+                    session = newSession(),
+                )
+                tabList += tab
+                // 复用同一个入口：`open` 按名幂等，会拿到 AI 建的那个会话，
+                // 并把它的屏幕快照回填进来（见 `startPtySession`）。
+                startPtySession(tab)
+            }
+            publish()
+        }
     }
 
     /**
@@ -532,6 +604,19 @@ class TerminalViewModel(
                     publish()
                 }
             }
+            // ## 每个会话一个增量解码器（2026-11-05，修「部分乱码」）
+            //
+            // 旧写法是 `String(bytes, Charsets.UTF_8)` —— **每个块独立解码**。
+            //
+            // PTY 的输出块边界是任意的（内核缓冲区满、调度、ANSI 转义都会切），
+            // 而一个中文字符占 3 字节、emoji 占 4 字节。一旦某个字符横跨两块，
+            // 两块各自解码时都会得到 U+FFFD（`�`）——
+            // 这正是用户报的「终端有时会出现乱码字符」「只是部分乱码」：
+            // 整段正常，中间零星几个 `�`，且**不可复现**（取决于内核怎么切块）。
+            //
+            // 增量解码器会把「末尾不完整的序列」留在自己内部，
+            // 下一块到来时自动接上 —— 跨块字符因此能正确还原。
+            val decoder = Utf8StreamDecoder()
             port.outputFlow(sessionId)
                 .onEach { bytes ->
                     // ## 为什么在 IO 线程直接 feed
@@ -540,7 +625,10 @@ class TerminalViewModel(
                     // 几万字节也就毫秒级。转发到主线程再 feed 反而会攒帧、
                     // 让输出成块跳。publish 里用 StateFlow，线程安全。
                     withContext(ioDispatcher) {
-                        tab.session.feed(String(bytes, Charsets.UTF_8))
+                        val text = decoder.decode(bytes)
+                        // 空串说明这一块全是「半个字符」，已经留在解码器里了。
+                        // 不判空会 feed 一个空串 —— 无害但白跑一次 ANSI 扫描。
+                        if (text.isNotEmpty()) tab.session.feed(text)
                     }
                     publish()
                 }
@@ -875,5 +963,80 @@ class TerminalViewModel(
             "|  __/ |  _ <  / ___ \\  /  \\  | |  ___) |",
             "|_|    |_| \\_\\/_/   \\_\\/_/\\_\\|___||____/ ",
         )
+    }
+}
+
+/**
+ * 跨字节块增量解码 UTF-8。
+ *
+ * ## 它解决什么（2026-11-05）
+ *
+ * 用户反馈：「终端有时会出现乱码字符」「只是部分乱码」。
+ *
+ * 根因不在终端渲染，而在**解码方式**：旧代码对每个输出块独立做
+ * `String(bytes, Charsets.UTF_8)`。而 PTY 的输出块边界是任意的 ——
+ * 内核缓冲区满、进程调度、甚至一个 ANSI 转义序列都可能把块切开。
+ *
+ * UTF-8 里一个字符占 1~4 字节（中文 3、emoji 4）。只要某个字符横跨两块：
+ *
+ * ```
+ * 块 A: [E4 BD]         <- 「你」的前 2 字节，独立解码 -> �
+ * 块 B: [A0 ...]        <- 第 3 字节 + 后续，独立解码 -> �
+ * ```
+ *
+ * 于是屏幕上冒出两个替换字符。它**不可复现**（取决于内核怎么切块），
+ * 也解释了为什么「只是部分乱码」—— 大多数块恰好落在字符边界上。
+ *
+ * ## 为什么用 CharsetDecoder 而不是自己攒字节
+ *
+ * `CharsetDecoder.decode(in, out, endOfInput = false)` 的语义正是「输入可能
+ * 还没完」：末尾那个不完整的序列会被它**留在内部状态里**，
+ * 下次 decode 自动接上。手写「攒 leftover 字节」要自己判断
+ * 「这几个字节是不是一个合法前缀」，而 UTF-8 的前缀判定有坑
+ * （过长编码、代理对、非法续字节），抄一遍不值当。
+ *
+ * ## 为什么每个会话一个实例
+ *
+ * 解码器**有状态**（记住半个字符）。两个会话共用一个，
+ * A 的半个字符会被 B 的字节补成垃圾。
+ *
+ * ## 为什么 malformed 用 REPLACE 而不是 REPORT
+ *
+ * 真终端里出现非法字节是常态（程序输出二进制、编码声明错、
+ * `cat` 一个非文本文件）。抛异常会让整条输出流断掉 ——
+ * 那是把「显示一个 �」升级成「终端没反应」，代价不对等。
+ */
+// `internal` 而不是 `private`：`private` 顶层声明**只在同文件可见**，
+// 单测（另一个文件）引用不到。
+internal class Utf8StreamDecoder {
+
+    private val decoder = Charsets.UTF_8.newDecoder()
+        .onMalformedInput(java.nio.charset.CodingErrorAction.REPLACE)
+        .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPLACE)
+
+    /** 输出缓冲。一次 PTY 读通常几百字节到几 KB，8K 字符足够。 */
+    private val out = java.nio.CharBuffer.allocate(8192)
+
+    /**
+     * 解码一块字节。
+     *
+     * 返回空串是**正常**的：这一块整个都是某个字符的前缀，
+     * 已经留在解码器里等下一块。调用方应跳过空串（省一次 ANSI 扫描）。
+     */
+    fun decode(bytes: ByteArray): String {
+        if (bytes.isEmpty()) return ""
+        val input = java.nio.ByteBuffer.wrap(bytes)
+        val sb = StringBuilder(bytes.size)
+        // 循环是必须的：输出缓冲可能装不下一次输入（虽然 8K 很难触发），
+        // 而 `decode` 遇到 OVERFLOW 会返回已写部分并停下 ——
+        // 不循环就会**静默丢掉**装不下的那些字符。
+        while (true) {
+            out.clear()
+            val result = decoder.decode(input, out, false)
+            out.flip()
+            sb.append(out)
+            if (result != java.nio.charset.CoderResult.OVERFLOW) break
+        }
+        return sb.toString()
     }
 }

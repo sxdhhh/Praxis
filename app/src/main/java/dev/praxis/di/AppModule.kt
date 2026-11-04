@@ -59,6 +59,11 @@ val appModule = module {
                 PraxisDatabase.MIGRATION_6_7,
 
                 PraxisDatabase.MIGRATION_7_8,
+                // v9：messages 加 reasoning（模型思考过程）。
+                //
+                // 同样只加一个可空列，NULL 就是老消息的正确值，无需回填。
+                // 但**仍必须是显式迁移** —— messages 存的是全部聊天记录。
+                PraxisDatabase.MIGRATION_8_9,
             )
             .build()
     }

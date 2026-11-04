@@ -38,6 +38,10 @@ class RoomChatPersistence(
         repository.updateMessageContent(messageId, content)
     }
 
+    override suspend fun updateMessageReasoning(messageId: Long, reasoning: String?) {
+        repository.updateMessageReasoning(messageId, reasoning)
+    }
+
     /**
      * 中间插入（摘要用）。
      *
@@ -62,6 +66,11 @@ class RoomChatPersistence(
                 id = row.id,
                 role = row.role,
                 content = row.content,
+                // 思考过程（v9）：恢复后要在气泡上重建折叠块，
+                // 否则「看过的推理」重进就消失。
+                // 两条路径（loadMessages / loadVariants）都要带 ——
+                // 变体切换后的那条同样有自己的思考。
+                reasoning = row.reasoning,
                 toolName = row.toolName,
                 // 透出参数：恢复后的工具卡片要能在折叠区显示「当时跑的是什么」。
                 toolArgs = row.toolArgs,
@@ -106,6 +115,11 @@ class RoomChatPersistence(
                 id = row.id,
                 role = row.role,
                 content = row.content,
+                // 思考过程（v9）：恢复后要在气泡上重建折叠块，
+                // 否则「看过的推理」重进就消失。
+                // 两条路径（loadMessages / loadVariants）都要带 ——
+                // 变体切换后的那条同样有自己的思考。
+                reasoning = row.reasoning,
                 toolName = row.toolName,
                 // 透出参数：恢复后的工具卡片要能在折叠区显示「当时跑的是什么」。
                 toolArgs = row.toolArgs,

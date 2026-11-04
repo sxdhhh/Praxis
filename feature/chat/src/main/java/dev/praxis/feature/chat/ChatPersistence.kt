@@ -31,6 +31,20 @@ interface ChatPersistence {
     suspend fun updateMessageContent(messageId: Long, content: String)
 
     /**
+     * 写入这一轮回答的思考过程（v9 新增）。
+     *
+     * ## 为什么默认实现是空操作
+     *
+     * 与其它可选能力（[insertMessageAt] 等）同一纪律：端口先给一个
+     * 安全的默认值，这样存量实现与测试替身不用改就能编译。
+     * Room 实现会覆写它；不覆写的场景（测试、预览）只是「思考不持久」，
+     * 不影响正文与工具卡 —— 而正文才是用户真正不能丢的东西。
+     *
+     * @param reasoning null 表示这轮没有思考（模型不支持 / 用户没开）
+     */
+    suspend fun updateMessageReasoning(messageId: Long, reasoning: String?) {}
+
+    /**
      * 在**指定位置**插入一条消息（不追加到末尾），返回数据库行 id。
      *
      * ## 为什么端口必须提供它（2026-10-24）
@@ -168,6 +182,16 @@ data class PersistedMessage(
     val id: Long,
     val role: String,
     val content: String,
+    /**
+     * 这条回答的思考过程（v9，仅 `role = "assistant"` 可能有值）。
+     *
+     * ## 为什么必须从库里带出来（2026-11-05）
+     *
+     * 思考块最初只活在内存里，重启就没了 —— 用户的原话是
+     * 「思考完后不能消失」。不带这一列，恢复后的气泡上就没有折叠块，
+     * 等于「看过的东西重进就少一块」。
+     */
+    val reasoning: String? = null,
     val toolName: String?,
     /**
      * 工具参数原文（仅 `role = "tool"` 有值）。

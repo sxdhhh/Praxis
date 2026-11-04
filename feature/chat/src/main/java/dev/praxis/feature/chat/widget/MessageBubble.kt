@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -316,7 +317,12 @@ else -> {
                         //  - 只想要结论的人默认看不到它，不占屏；
                         //  - 顺序上是「先想后答」，符合阅读直觉。
                         if (!reasoning.isNullOrBlank()) {
-                            ReasoningBlock(reasoning = reasoning, contentColor = content)
+                            ReasoningBlock(
+                                reasoning = reasoning,
+                                contentColor = content,
+                                // 还在流 -> 保持展开；流一结束 -> 自动收起。
+                                streaming = streaming,
+                            )
                             Spacer(Modifier.height(8.dp))
                         }
                         MarkdownText(
@@ -357,8 +363,33 @@ else -> {
  * 任何主题下都是「比周围略深一点的同一色系」，不会撞色。
  */
 @Composable
-private fun ReasoningBlock(reasoning: String, contentColor: Color) {
-    var expanded by remember { mutableStateOf(false) }
+private fun ReasoningBlock(
+    reasoning: String,
+    contentColor: Color,
+    /**
+     * 这段思考**还在写**吗。
+     *
+     * 展开状态由它驱动（2026-11-05 按用户要求改）：
+     *  - 写的时候**默认展开** —— 用户要看模型在想什么，不是等写完才给看；
+     *  - 写完了**自动折叠** —— 推理常有上千字，不收起来会把答案挤出屏幕。
+     */
+    streaming: Boolean = false,
+) {
+    // 默认展开：用户明确要求「思考应该默认展开」。
+    var expanded by remember { mutableStateOf(true) }
+    // 用户是否手动点过。点过就不再自动收放 —— 否则他刚展开想看，
+    // 流一结束就被收走，那是在跟用户抢控制权。
+    var manuallyToggled by remember { mutableStateOf(false) }
+
+    // ## 为什么用 LaunchedEffect(streaming) 而不是 remember 里算
+    //
+    // 展开/收起是一个**随流状态变化**的动作，不是每帧的结果。
+    // 写在组合里会在每次重组都跑一遍（流式期间一秒几十次），
+    // 而 `streaming` 本身在流期间不变 —— 只在首尾各变一次。
+    LaunchedEffect(streaming) {
+        if (manuallyToggled) return@LaunchedEffect
+        expanded = streaming
+    }
     val arrowRotation by animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
         animationSpec = tween(
@@ -373,7 +404,11 @@ private fun ReasoningBlock(reasoning: String, contentColor: Color) {
             .fillMaxWidth()
             .clip(PraxisRadius.SmallShape)
             .background(contentColor.copy(alpha = 0.06f))
-            .clickable { expanded = !expanded }
+            .clickable {
+                // 手动点过就打标记：之后流结束不再自动收放。
+                manuallyToggled = true
+                expanded = !expanded
+            }
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -523,6 +558,7 @@ private fun CursorMessage(
                 ReasoningBlock(
                     reasoning = reasoning,
                     contentColor = MiuixTheme.colorScheme.onSurface,
+                    streaming = streaming,
                 )
                 Spacer(Modifier.height(8.dp))
             }

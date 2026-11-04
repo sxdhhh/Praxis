@@ -172,6 +172,20 @@ class ChatRepository(
     }
 
     /**
+     * 写入这一轮的思考过程（v9）。
+     *
+     * 只在流结束时调用一次 —— 思考没法像正文那样边写边存：
+     * 它在 UI 上是一个整体（折叠块），中途的半截文本没有单独价值，
+     * 而每秒几十次的写库会把 SQLite 打满。
+     *
+     * 不做 `touchSession`：思考是「这一轮回答的附属信息」，
+     * 会话的最近活跃时间由正文那条写入负责。
+     */
+    suspend fun updateMessageReasoning(messageId: Long, reasoning: String?) {
+        messageDao.updateReasoning(messageId, reasoning)
+    }
+
+    /**
      * 把一条消息挂进变体组（首次重试时把原回答吸收成第 0 版）。
      *
      * 不做 `touchSession`：改的是「这条消息属于哪个组」，
