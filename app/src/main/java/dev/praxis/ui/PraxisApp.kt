@@ -187,6 +187,10 @@ fun PraxisApp(
     val terminalPtyPort: dev.praxis.feature.terminal.PtySessionPort =
         org.koin.compose.koinInject()
 
+    /** AI 建的终端会话名登记表（持久化，跨进程有效）。 */
+    val terminalSessionRegistry: dev.praxis.data.terminal.TerminalSessionRegistry =
+        org.koin.compose.koinInject()
+
     // 系统授权检测：需 Activity 上下文（查权限 / 跳系统设置页），只在这一层取。
     val capabilityDetector: dev.praxis.core.data.permission.CapabilityDetector =
         org.koin.compose.koinInject()
@@ -475,6 +479,9 @@ fun PraxisApp(
                 snapshotPort = terminalSnapshotPort,
                 // 真终端：有容器就走 forkpty，`cd` / `vim` / Ctrl+C 才成立。
                 ptyPort = terminalPtyPort,
+                // AI 建的会话名（持久化）：进程重启后 port 的 live 表是空的，
+                // 只能靠这份名字按名重建，否则终端页永远看不到 AI 的会话。
+                externalSessionNames = { terminalSessionRegistry.names() },
             )
         }
     val terminalState by terminalViewModel.state.collectAsStateWithLifecycle()

@@ -125,6 +125,23 @@ class TerminalViewModel(
      * 毫无关系。可空 + 默认值的好处是：不传时行为与改动前**完全一致**。
      */
     private val ptyPort: PtySessionPort? = null,
+    /**
+     * 外部（AI）建的会话名来源。
+     *
+     * ## 为什么不能只靠 `ptyPort.sessionNames()`（2026-11-05）
+     *
+     * `ProotTerminalSessionPort.live` 是**内存 map**，App 进程一死就空。
+     * AI 建的会话只活在当时那个进程里 —— 用户下次打开终端页时，
+     * `sessionNames()` 返回空列表，同步自然同步不出任何东西。
+     *
+     * 所以还需要一份**持久化**的名字表：AI 建会话时登记（见
+     * `CreateTerminalSessionTool.onSessionCreated`），这里读出来按名重建。
+     *
+     * `create(name)` / `open(name)` 都是幂等的，重建成同名就是同一个会话。
+     *
+     * 可空：单测与预览不传，行为与改动前完全一致。
+     */
+    private val externalSessionNames: (suspend () -> List<String>)? = null,
 ) : ViewModel() {
 
     /** 该会话对应的 PTY 会话 id（管道模式为 null）。 */
@@ -470,9 +487,17 @@ class TerminalViewModel(
     fun syncExternalSessions() {
         val port = ptyPort ?: return
         viewModelScope.launch {
-            // 端口不支持枚举（或底层异常）时直接跳过 —— 退化成
-            // 「不同步」，也就是这个功能没做之前的状态。
-            val names = runCatching { port.sessionNames() }.getOrDefault(emptyList())
+            // 两个来源合并：
+            //  ① port 里**当前活着**的会话（同一进程内 AI 刚建的）；
+            //  ② 持久化的名字表（跨进程，AI 上次启动时建的）。
+            //
+            // 只查①会漏掉「AI 建完、App 重启」这种最常见的场景 ——
+            // 而那正是用户报「终端页看不到智能体创建的会话」时的实际情况。
+            // 只查②会漏掉「同一进程内刚建、还没来得及登记」的窗口。
+            val live = runCatching { port.sessionNames() }.getOrDefault(emptyList())
+            val remembered = runCatching { externalSessionNames?.invoke().orEmpty() }
+                .getOrDefault(emptyList())
+            val names = (live + remembered).distinct()
             if (names.isEmpty()) return@launch
             val existing = tabList.map { it.title }.toSet()
             val missing = names.filterNot { it in existing }

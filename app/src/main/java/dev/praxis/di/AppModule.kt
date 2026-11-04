@@ -213,6 +213,18 @@ val appModule = module {
         )
     }
 
+    /**
+     * 外部终端会话名登记表（AI 建的会话，进程重启后按名重建）。
+     *
+     * 与 [TerminalSnapshotPort] 用**同一个** DataStore 文件：
+     * 同文件只能有一个 DataStore 实例，否则启动时抛异常。
+     */
+    single {
+        dev.praxis.data.terminal.TerminalSessionRegistry(
+            dataStore = dev.praxis.core.data.settings.createAppPreferencesStore(androidContext()),
+        )
+    }
+
     // 设置存储：主题等持久化都走这里（DataStore，非 Room）。
     single { createSettingsRepository(androidContext()) }
 
@@ -319,8 +331,14 @@ val appModule = module {
                 // 保证「AI 装好的环境设置页能看到」——两份实例会得到两份 rootfs 视图。
                 // 取上面的 single，不要自己 new：两份实例 = 两张会话表（见上）。
                 val sessionPort = get<dev.praxis.core.linux.TerminalSessionPort>()
+                // 登记表：AI 建的会话名要持久化，否则进程一死终端页就
+                // 再也看不到它（见 `TerminalSessionRegistry` 的 KDoc）。
+                val sessionRegistry = get<dev.praxis.data.terminal.TerminalSessionRegistry>()
                 registerAll(
-                    dev.praxis.core.linux.CreateTerminalSessionTool(sessionPort),
+                    dev.praxis.core.linux.CreateTerminalSessionTool(
+                        port = sessionPort,
+                        onSessionCreated = { name -> sessionRegistry.remember(name) },
+                    ),
                     dev.praxis.core.linux.ExecuteInTerminalSessionTool(sessionPort),
                     dev.praxis.core.linux.ExecuteInTerminalSessionStreamingTool(sessionPort),
                     dev.praxis.core.linux.CloseTerminalSessionTool(sessionPort),
