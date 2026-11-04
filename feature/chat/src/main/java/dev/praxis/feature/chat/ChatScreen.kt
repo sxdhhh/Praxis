@@ -1268,6 +1268,9 @@ fun ChatScreen(
             models = models,
             activeModelIndex = activeModelIndex,
             onSelectModelIndex = onSelectModelIndex,
+            // 多配置：分组列表透传给设置条里的模型胶囊。
+            modelGroups = modelGroups,
+            onSelectGroupedModel = onSelectGroupedModel,
             autoMemoryEnabled = autoMemoryEnabled,
             onToggleAutoMemory = onToggleAutoMemory,
             skillNames = skillNames,
@@ -1437,6 +1440,10 @@ private fun ChatInputBar(
     activeModelIndex: Int = 0,
     /** 选第 index 个模型；null 表示不支持就地切换。 */
     onSelectModelIndex: ((Int) -> Unit)? = null,
+    /** 按配置分组的完整模型列表（多配置）。空 = 退回单组渲染。 */
+    modelGroups: List<ModelGroup> = emptyList(),
+    /** 点某个配置里的某个模型（配置名, 池内下标）。 */
+    onSelectGroupedModel: ((profileName: String, modelIndex: Int) -> Unit)? = null,
     autoMemoryEnabled: Boolean = true,
     onToggleAutoMemory: ((Boolean) -> Unit)? = null,
     skillNames: List<String> = emptyList(),
