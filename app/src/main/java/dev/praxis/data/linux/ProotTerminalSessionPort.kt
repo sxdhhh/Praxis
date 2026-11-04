@@ -734,6 +734,68 @@ class ProotTerminalSessionPort(
         ReadOutcome(0, false)
     }
 
+    /**
+     * 把一行原始字节按 UTF-8 解码。
+     *
+     * ## 为什么用 `String(bytes, UTF_8)` 在这里是**对的**
+     *
+     * 这个方法只在**行边界**（`\n` / `\r`）被调用，此时 [lineBytes] 里
+     * 是一个完整的行 —— UTF-8 的多字节序列不可能跨行（`\n` 是单字节
+     * 0x0A，绝不会出现在多字节序列中间）。所以整行解码不会把字符劈开。
+     *
+     * 旧实现错在**逐字节** `b.toChar()`，那是把字节当码点，与这里无关。
+     *
+     * 非法字节用 REPLACE（默认行为）：真终端里 `cat` 二进制文件是常态，
+     * 抛异常会断掉整条输出流。
+     */
+    private fun decodeLine(bytes: java.io.ByteArrayOutputStream): String =
+        if (bytes.size() == 0) "" else String(bytes.toByteArray(), Charsets.UTF_8)
+
+    /** 只解码前 [length] 个字节（其余留给下一次）。 */
+    private fun decodeBytes(bytes: ByteArray, length: Int): String =
+        if (length <= 0) "" else String(bytes, 0, length, Charsets.UTF_8)
+
+    /**
+     * 从缓冲区里找出「最后一个完整 UTF-8 字符之后」的偏移。
+     *
+     * ## 为什么要它
+     *
+     * 半行 flush（`partialFlushChars` 触发）时，缓冲区末尾可能正好停在
+     * 一个多字节字符中间。此时整段解码会把那半个字符变成替换字符 ——
+     * 又回到用户报的乱码。
+     *
+     * 做法：从末尾往前找 UTF-8 起始字节（`110xxxxx` / `1110xxxx` /
+     * `11110xxx`，即 `(b & 0xC0) != 0x80`），再看它声明了几个字节、
+     * 当前是否够长。够长就 flush 到它结尾；不够就退到它前面。
+     *
+     * 最多回退 3 字节（UTF-8 最长 4 字节），所以循环上界很小。
+     */
+    private fun safeFlushLength(bytes: java.io.ByteArrayOutputStream): Int {
+        val size = bytes.size()
+        if (size == 0) return 0
+        val arr = bytes.toByteArray()
+        // 从末尾往前最多看 4 个字节，找最后一个「字符起点」。
+        var back = 1
+        while (back <= 4 && back <= size) {
+            val b = arr[size - back].toInt() and 0xFF
+            if ((b and 0xC0) != 0x80) {
+                // 找到一个起点，看它声明的长度。
+                val need = when {
+                    (b and 0x80) == 0x00 -> 1
+                    (b and 0xE0) == 0xC0 -> 2
+                    (b and 0xF0) == 0xE0 -> 3
+                    (b and 0xF8) == 0xF0 -> 4
+                    else -> 1 // 非法起始字节，当单字节处理（解码器会替换）
+                }
+                // 这个字符在缓冲区里是否完整。
+                return if (back >= need) size else size - back
+            }
+            back++
+        }
+        // 连着 4 个续字节（异常数据）：不 flush，等更多字节。
+        return 0
+    }
+
     /** 读 `/tmp/.praxis_cwd`（容器内绝对路径对应宿主上的位置）。 */
     private fun readCwdFile(): String? = runCatching {
         val env = envPort.defaultEnvironment(distroProvider())
@@ -775,7 +837,21 @@ class ProotTerminalSessionPort(
             // 都作为独立行交给 [ScreenTap]（不丢弃）—— 下游的
             // `TerminalBuffer` 才知道「这一行要回车重写」而不是「新起一行」。
             val buffer = ByteArray(4096)
-            val line = StringBuilder()
+            // ## 累积**字节**而不是 Char（2026-11-05 修「终端乱码」）
+            //
+            // 旧实现是 `line.append(b.toChar())` —— 把单个字节当成
+            // Unicode 码点。而 UTF-8 里一个中文占 3 字节，于是「你好」
+            // 的 6 个字节被拆成 6 个 Latin-1 字符，屏幕上显示成
+            // `ä½ å¥½` 这种形态。
+            //
+            // 这正是用户报的「终端有时会出现乱码字符」「只是部分乱码」：
+            // ASCII 部分完全正常（单字节就是码点），只有非 ASCII 炸掉；
+            // 而「有时」是因为取决于输出里有没有中文。
+            //
+            // 改成先攒字节、遇到行边界再整体按 UTF-8 解码：
+            //  - 行内多字节字符天然完整（不会被单字节截断）；
+            //  - 跨 read 边界的半个字符也会等下一轮补齐（同一个 buffer 里累积）。
+            val lineBytes = java.io.ByteArrayOutputStream(256)
             while (true) {
                 val count = input.read(buffer)
                 if (count <= 0) break
@@ -791,27 +867,39 @@ class ProotTerminalSessionPort(
                     val b = buffer[i].toInt() and 0xFF
                     when (b) {
                         0x0A -> { // LF
-                            tap.offer(line.toString())
-                            line.setLength(0)
+                            tap.offer(decodeLine(lineBytes))
+                            lineBytes.reset()
                         }
                         0x0D -> { // CR：先交出当前内容，再单独交一个空行表示「回车」
-                            tap.offer(line.toString())
-                            line.setLength(0)
+                            tap.offer(decodeLine(lineBytes))
+                            lineBytes.reset()
                             tap.offer(CR_MARKER)
                         }
-                        else -> line.append(b.toChar())
+                        else -> lineBytes.write(b)
                     }
                     i++
                 }
                 // 缓冲里可能一个行边界都没有（比如一整块进度条文字），
                 // 此时先进一版，避免用户长时间看不到东西；
-                // 行号不丢：`line` 继续累积，下一次遇到边界时一起交。
-                if (line.length >= partialFlushChars) {
-                    tap.offer(line.toString())
-                    line.setLength(0)
+                // 行号不丢：`lineBytes` 继续累积，下一次遇到边界时一起交。
+                //
+                // ## 为什么这里要判「够不够一个字符」
+                //
+                // 直接在半个字符处 flush 会把它解成替换字符 —— 又回到乱码。
+                // `safeFlushLength` 只取到最后一个完整字符的边界，
+                // 剩下的半个留在缓冲里等下一轮。
+                if (lineBytes.size() >= partialFlushChars) {
+                    val safe = safeFlushLength(lineBytes)
+                    if (safe > 0) {
+                        tap.offer(decodeBytes(lineBytes.toByteArray(), safe))
+                        // 把没消费的尾部搬回缓冲头部。
+                        val tail = lineBytes.toByteArray().copyOfRange(safe, lineBytes.size())
+                        lineBytes.reset()
+                        lineBytes.write(tail)
+                    }
                 }
             }
-            if (line.isNotEmpty()) tap.offer(line.toString())
+            if (lineBytes.size() > 0) tap.offer(decodeLine(lineBytes))
         }.getOrThrow()
     }
 
