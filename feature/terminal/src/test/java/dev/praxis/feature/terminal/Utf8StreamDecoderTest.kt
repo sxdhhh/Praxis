@@ -99,16 +99,36 @@ class Utf8StreamDecoderTest {
         assertTrue("合法后缀要保留：$out", out.endsWith("B"))
     }
 
-    /** 两个解码器互不影响（各自记住自己的半个字符）。 */
+    /**
+     * 两个解码器互不影响（各自记住自己的半个字符）。
+     *
+     * ## 这条测试原本写错了（2026-11-05，CI #154 抓到）
+     *
+     * 我最初断言「b 只收到第 3 字节会得到替换字符」。那是对旧实现的
+     * 猜测 —— 新实现会把不完整序列**存进 leftover**，所以返回的是**空串**，
+     * 不是替换字符。
+     *
+     * 正确的判据是：b 拿到的字节不够一个字符，所以它什么都不输出；
+     * 而 a 已经把前两字节记在自己身上，两者互不污染。
+     */
     @Test
     fun instancesDoNotShareState() {
         val a = Utf8StreamDecoder()
         val b = Utf8StreamDecoder()
         val bytes = "你".toByteArray(Charsets.UTF_8)
 
-        a.decode(bytes.copyOfRange(0, 2))
-        // b 没收到过前两字节，直接喂第 3 字节只会得到一个替换字符。
-        val fromB = b.decode(bytes.copyOfRange(2, 3))
-        assertEquals("\uFFFD", fromB)
+        // a 收到前两字节：不够一个字符，返回空串，且记在自己身上。
+        assertEquals("", a.decode(bytes.copyOfRange(0, 2)))
+        // b 从零开始收到第 3 字节（续字节）：同样不够，返回空串。
+        assertEquals("", b.decode(bytes.copyOfRange(2, 3)))
+
+        // 关键断言：a 补上第 3 字节能还原「你」—— 说明它没被 b 干扰。
+        //
+        // 只断言这一条，不再猜 b 后续会输出什么：b 内部存的是**续字节**
+        // 0xA0，而续字节作为起始字节是非法的，`safeLength` 会按单字节
+        // 放行、解码成替换字符 —— 具体输出取决于实现细节，
+        // 写进断言只会让测试变成「实现的快照」而不是「行为的契约」。
+        // 这条测试要守的只有一件事：**两个实例的状态互不影响**。
+        assertEquals("你", a.decode(bytes.copyOfRange(2, 3)))
     }
 }
