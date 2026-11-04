@@ -89,7 +89,7 @@ class SettingsRepository(
         val activeId = prefs[KEY_PROFILE_ACTIVE]
         // 只有 activeId 真的在一个已知 profile 里才用前缀读；
         // 否则（老用户 / 刚删完）退回旧 key。
-        val known = prefs[KEY_PROFILE_IDS].orEmpty()
+        val known = parseIds(prefs[KEY_PROFILE_IDS])
         val profileId = activeId?.takeIf { it in known }
         readModelSettings(prefs, profileId)
     }
@@ -183,8 +183,22 @@ class SettingsRepository(
     // 「默认配置」的 profile（见 `ensureDefaultProfile`）。用户升级后
     // 看到的是自己原来的配置，不是一张白纸。
 
-    /** 所有配置 id（有序：新建的排在后面）。 */
+    /**
+     * 所有配置 id，**换行分隔的有序串**。
+     *
+     * ## 为什么不用 `stringSetPreferencesKey`
+     *
+     * StringSet **无序**，而配置列表必须保持用户建的顺序（新建的排最后）。
+     * 用 Set 就只能在读取时另外排序，而「按什么排」又是个无法回答的问题
+     * （按名字？按时间？都不对 —— 用户期望的就是他自己建的顺序）。
+     *
+     * id 是 `p<毫秒时间戳>`，本身不含换行，换行是安全的���隔符。
+     */
     private val KEY_PROFILE_IDS = stringPreferencesKey("model_profile_ids")
+
+    /** 把换行分隔的 id 串切成列表。 */
+    private fun parseIds(raw: String?): List<String> =
+        raw.orEmpty().split('\n').filter { it.isNotBlank() }
 
     /** 当前生效的配置 id。 */
     private val KEY_PROFILE_ACTIVE = stringPreferencesKey("model_profile_active")
@@ -218,7 +232,7 @@ class SettingsRepository(
      */
     val modelProfiles: Flow<dev.praxis.core.model.settings.ModelProfileSet> =
         dataStore.data.map { prefs ->
-            val ids = prefs[KEY_PROFILE_IDS].orEmpty().toList()
+            val ids = parseIds(prefs[KEY_PROFILE_IDS])
             val names = parseProfileNames(prefs[KEY_PROFILE_NAMES].orEmpty())
             val profiles = ids.map { id ->
                 dev.praxis.core.model.settings.ModelProfile(
@@ -277,7 +291,7 @@ class SettingsRepository(
     ): String {
         val id = "p" + System.currentTimeMillis()
         dataStore.edit { prefs ->
-            prefs[KEY_PROFILE_IDS] = prefs[KEY_PROFILE_IDS].orEmpty() + id
+            prefs[KEY_PROFILE_IDS] = (parseIds(prefs[KEY_PROFILE_IDS]) + id).joinToString("\n")
             prefs[KEY_PROFILE_NAMES] = appendProfileName(
                 prefs[KEY_PROFILE_NAMES].orEmpty(),
                 id,
@@ -293,7 +307,7 @@ class SettingsRepository(
     /** 切换当前配置。id 不存在时不做任何事（不写脏值）。 */
     suspend fun setActiveProfile(id: String) {
         dataStore.edit { prefs ->
-            if (id in prefs[KEY_PROFILE_IDS].orEmpty()) prefs[KEY_PROFILE_ACTIVE] = id
+            if (id in parseIds(prefs[KEY_PROFILE_IDS])) prefs[KEY_PROFILE_ACTIVE] = id
         }
     }
 
@@ -301,7 +315,7 @@ class SettingsRepository(
     suspend fun renameProfile(id: String, name: String) {
         if (name.isBlank()) return
         dataStore.edit { prefs ->
-            if (id !in prefs[KEY_PROFILE_IDS].orEmpty()) return@edit
+            if (id !in parseIds(prefs[KEY_PROFILE_IDS])) return@edit
             prefs[KEY_PROFILE_NAMES] = appendProfileName(
                 prefs[KEY_PROFILE_NAMES].orEmpty(),
                 id,
@@ -326,10 +340,10 @@ class SettingsRepository(
      */
     suspend fun deleteProfile(id: String) {
         dataStore.edit { prefs ->
-            val ids = prefs[KEY_PROFILE_IDS].orEmpty()
+            val ids = parseIds(prefs[KEY_PROFILE_IDS])
             if (ids.size <= 1 || id !in ids) return@edit
             val remaining = ids - id
-            prefs[KEY_PROFILE_IDS] = remaining
+            prefs[KEY_PROFILE_IDS] = remaining.joinToString("\n")
             prefs[KEY_PROFILE_NAMES] = removeProfileName(prefs[KEY_PROFILE_NAMES].orEmpty(), id)
             if (prefs[KEY_PROFILE_ACTIVE] == id) {
                 prefs[KEY_PROFILE_ACTIVE] = remaining.first()
@@ -388,7 +402,7 @@ class SettingsRepository(
      */
     private suspend fun putModelPref(key: Preferences.Key<String>, value: String) {
         dataStore.edit { prefs ->
-            val known = prefs[KEY_PROFILE_IDS].orEmpty()
+            val known = parseIds(prefs[KEY_PROFILE_IDS])
             val id = prefs[KEY_PROFILE_ACTIVE]?.takeIf { it in known }
             prefs[if (id == null) key else stringPreferencesKey("p:" + id + ":" + key.name)] = value
         }
@@ -396,7 +410,7 @@ class SettingsRepository(
 
     private suspend fun putModelPrefInt(legacyName: String, value: Int) {
         dataStore.edit { prefs ->
-            val known = prefs[KEY_PROFILE_IDS].orEmpty()
+            val known = parseIds(prefs[KEY_PROFILE_IDS])
             val id = prefs[KEY_PROFILE_ACTIVE]?.takeIf { it in known }
             prefs[intPreferencesKey(keyFor(id, legacyName))] = value
         }
@@ -404,7 +418,7 @@ class SettingsRepository(
 
     private suspend fun putModelPrefDouble(legacyName: String, value: Double) {
         dataStore.edit { prefs ->
-            val known = prefs[KEY_PROFILE_IDS].orEmpty()
+            val known = parseIds(prefs[KEY_PROFILE_IDS])
             val id = prefs[KEY_PROFILE_ACTIVE]?.takeIf { it in known }
             prefs[doublePreferencesKey(keyFor(id, legacyName))] = value
         }
@@ -412,7 +426,7 @@ class SettingsRepository(
 
     private suspend fun putModelPrefFloat(legacyName: String, value: Float) {
         dataStore.edit { prefs ->
-            val known = prefs[KEY_PROFILE_IDS].orEmpty()
+            val known = parseIds(prefs[KEY_PROFILE_IDS])
             val id = prefs[KEY_PROFILE_ACTIVE]?.takeIf { it in known }
             prefs[floatPreferencesKey(keyFor(id, legacyName))] = value
         }
@@ -559,7 +573,7 @@ class SettingsRepository(
      */
     private suspend fun profileScopedApiKeyName(): String {
         val prefs = dataStore.data.first()
-        val known = prefs[KEY_PROFILE_IDS].orEmpty()
+        val known = parseIds(prefs[KEY_PROFILE_IDS])
         val id = prefs[KEY_PROFILE_ACTIVE]?.takeIf { it in known }
         return keyFor(id, KEY_API_KEY.name)
     }
