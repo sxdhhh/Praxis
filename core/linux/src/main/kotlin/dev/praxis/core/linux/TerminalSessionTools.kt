@@ -63,6 +63,23 @@ private const val DESC_SESSION_ID =
  */
 class CreateTerminalSessionTool(
     private val port: TerminalSessionPort,
+    /**
+     * 会话名登记回调（可选）。
+     *
+     * ## 为什么需要它（2026-11-05）
+     *
+     * `ProotTerminalSessionPort.live` 是**内存 map**，进程一死就空。
+     * AI 建的会话只活在那个进程里 —— 用户下次打开终端页时 port 里
+     * 根本没有它，终端页自然显示不出来。
+     *
+     * 这里把名字报出去，由上层持久化；终端页打开时按名重建即可
+     * （`create(name)` 是幂等的，重建成同一个名字就是同一个会话）。
+     *
+     * 为什么是回调而不是直接依赖一个存储接口：`:core:linux` 不该知道
+     * DataStore 的存在（同 `TerminalSnapshotPort` 的分层纪律）。
+     * 默认 `null` 让存量调用点与测试不受影响。
+     */
+    private val onSessionCreated: (suspend (name: String) -> Unit)? = null,
 ) : Tool {
     override val spec: ToolSpec = ToolSpec(
         name = "create_terminal_session",
@@ -86,6 +103,10 @@ class CreateTerminalSessionTool(
         val requested = args.stringOrNull(PARAM_SESSION_NAME)?.trim()?.takeIf { it.isNotEmpty() }
             ?: "main"
         val session = port.create(requested)
+        // 登记名字，供终端页在下次启动时重建这个会话。
+        // 失败静默：登记失败只是「终端页少一个 tab」，
+        // 不该让工具调用本身报错。
+        onSessionCreated?.let { cb -> runCatching { cb(session.name) } }
         return ToolResult(
             content = buildString {
                 appendLine("会话已就绪。")
