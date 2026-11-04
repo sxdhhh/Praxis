@@ -1035,33 +1035,102 @@ class TerminalViewModel(
 // 单测（另一个文件）引用不到。
 internal class Utf8StreamDecoder {
 
-    private val decoder = Charsets.UTF_8.newDecoder()
-        .onMalformedInput(java.nio.charset.CodingErrorAction.REPLACE)
-        .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPLACE)
-
-    /** 输出缓冲。一次 PTY 读通常几百字节到几 KB，8K 字符足够。 */
-    private val out = java.nio.CharBuffer.allocate(8192)
+    /**
+     * 上一块末尾没解完的字节（0~3 个）。
+     *
+     * ## 为什么必须自己存（2026-11-05，第一版就错在这）
+     *
+     * 我原以为 `CharsetDecoder.decode(in, out, endOfInput = false)` 会把
+     * 不完整的尾部**留在解码器内部**，下次自动接上。实际不是：
+     * `CharsetDecoder` **没有跨调用的内部状态** —— 遇到不完整序列时
+     * 它返回 UNDERFLOW，并把那几个字节**留在传入的 input buffer 里**。
+     *
+     * 而我每次 `ByteBuffer.wrap(bytes)` 新建 buffer，上一块的残留
+     * 直接随旧 buffer 被丢弃 —— 于是「跨块字符」还是解不出来，
+     * 只是把 `�` 从两处变成一处。三条跨块单测就是这么红掉的。
+     *
+     * 所以这里自己留一份 leftover，每次拼在新字节前面。
+     */
+    private var leftover: ByteArray = ByteArray(0)
 
     /**
      * 解码一块字节。
      *
      * 返回空串是**正常**的：这一块整个都是某个字符的前缀，
-     * 已经留在解码器里等下一块。调用方应跳过空串（省一次 ANSI 扫描）。
+     * 已经存进 [leftover] 等下一块。调用方应跳过空串（省一次 ANSI 扫描）。
+     *
+     * ## 实现为什么是「先算边界再解码」而不是用 CharsetDecoder
+     *
+     * 第一版用了 `CharsetDecoder.decode(in, out, endOfInput = false)`，
+     * 以为它会把不完整尾部留在内部状态里。**它不是** —— `CharsetDecoder`
+     * 没有跨调用的内部状态，遇到不完整序列时把那几个字节留在传入的
+     * input buffer 里。而每次 `ByteBuffer.wrap(bytes)` 都是新 buffer，
+     * 上一块的残留随旧 buffer 丢弃，跨块字符还是解不出来。
+     *
+     * 三条跨块单测就是这么红掉的（CI #152）。
+     *
+     * 改成两步，逻辑简单到可以逐条验证：
+     *   1. [safeLength] 算出「最后一个完整字符之后」的偏移；
+     *   2. 只对 `[0, safeLength)` 做 `String(..., UTF_8)`，
+     *      剩下的存进 [leftover] 等下一块。
+     *
+     * 这样「不完整」这件事由我们自己定义，不依赖任何库的隐式行为。
      */
     fun decode(bytes: ByteArray): String {
-        if (bytes.isEmpty()) return ""
-        val input = java.nio.ByteBuffer.wrap(bytes)
-        val sb = StringBuilder(bytes.size)
-        // 循环是必须的：输出缓冲可能装不下一次输入（虽然 8K 很难触发），
-        // 而 `decode` 遇到 OVERFLOW 会返回已写部分并停下 ——
-        // 不循环就会**静默丢掉**装不下的那些字符。
-        while (true) {
-            out.clear()
-            val result = decoder.decode(input, out, false)
-            out.flip()
-            sb.append(out)
-            if (result != java.nio.charset.CoderResult.OVERFLOW) break
+        if (bytes.isEmpty() && leftover.isEmpty()) return ""
+        // 拼上上一块的残留。
+        val merged = if (leftover.isEmpty()) {
+            bytes
+        } else {
+            ByteArray(leftover.size + bytes.size).also {
+                System.arraycopy(leftover, 0, it, 0, leftover.size)
+                System.arraycopy(bytes, 0, it, leftover.size, bytes.size)
+            }
         }
-        return sb.toString()
+        val cut = safeLength(merged)
+        leftover = if (cut >= merged.size) ByteArray(0) else merged.copyOfRange(cut, merged.size)
+        return if (cut == 0) "" else String(merged, 0, cut, Charsets.UTF_8)
+    }
+
+    /**
+     * 找出「最后一个完整 UTF-8 字符之后」的偏移。
+     *
+     * ## 算法
+     *
+     * UTF-8 的续字节形如 `10xxxxxx`（`(b and 0xC0) == 0x80`）。
+     * 从末尾往前找第一个**非续字节** —— 那就是最后一个字符的起始字节。
+     * 看它声明了几个字节（首字节的高位决定），再看缓冲区里够不够：
+     *
+     *   0xxxxxxx -> 1 字节
+     *   110xxxxx -> 2 字节
+     *   1110xxxx -> 3 字节
+     *   11110xxx -> 4 字节
+     *
+     * 够 -> 整个字符完整，返回 size；不够 -> 退到该字符之前。
+     *
+     * 最多回看 4 字节（UTF-8 最长 4 字节）。连着 4 个续字节说明数据异常，
+     * 返回 0（不 flush，等更多字节）—— 那种情况下 flush 出去也只会是
+     * 一串替换字符。
+     */
+    private fun safeLength(buf: ByteArray): Int {
+        val n = buf.size
+        if (n == 0) return 0
+        var back = 1
+        while (back <= 4 && back <= n) {
+            val b = buf[n - back].toInt() and 0xFF
+            if ((b and 0xC0) != 0x80) {
+                val need = when {
+                    (b and 0x80) == 0x00 -> 1
+                    (b and 0xE0) == 0xC0 -> 2
+                    (b and 0xF0) == 0xE0 -> 3
+                    (b and 0xF8) == 0xF0 -> 4
+                    // 非法起始字节：当单字节处理，让解码器去替换。
+                    else -> 1
+                }
+                return if (back >= need) n else n - back
+            }
+            back++
+        }
+        return 0
     }
 }
