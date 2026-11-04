@@ -36,6 +36,26 @@ class OpenAiStreamAssembler(
     /** 按 index 累积的工具调用。 */
     private val toolBuckets = sortedMapOf<Int, ToolBucket>()
 
+    private companion object {
+
+        /**
+         * 思考增量可能出现的字段名，按优先级排列。
+         *
+         * ## 为什么要列三个
+         *
+         * OpenAI 兼容只是一个宽泛约定，「思考」这块没有统一字段：
+         *
+         * ```
+         * DeepSeek / 多数国产     reasoning_content   <- 最常见
+         * 通用 / 部分网关          reasoning
+         * 少数自建网关            thinking
+         * ```
+         *
+         * 先试最常见的，命中即止 —— 见 `feed` 里的 `firstNotNullOfOrNull`。
+         */
+        private val REASONING_KEYS = listOf("reasoning_content", "reasoning", "thinking")
+    }
+
     private var finishReason: String? = null
     private val textBuffer = StringBuilder()
 
@@ -63,6 +83,22 @@ class OpenAiStreamAssembler(
                         textBuffer.append(text)
                         events += AiStreamEvent.Delta(text)
                     }
+
+                // ## 思考增量（2026-11-04）
+                //
+                // 旧实现只认 `content`，于是模型返回的 `reasoning_content`
+                // 被**静默丢弃** —— 用户打开「思考」后看不到任何东西，
+                // 结论就是「开了跟没开一样」。
+                //
+                // 各家字段名不同，这里按优先级依次尝试。用 `firstNotNullOfOrNull`
+                // 而不是三次独立判断：同一个分片里不该同时出现两种，
+                // 全试一遍会把同一段思考重复发两次。
+                val reasoning = REASONING_KEYS.firstNotNullOfOrNull { key ->
+                    delta[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotEmpty() }
+                }
+                if (reasoning != null) {
+                    events += AiStreamEvent.ReasoningDelta(reasoning)
+                }
 
                 delta["tool_calls"]?.jsonArray?.forEach { tc ->
                     events += accumulateToolCall(tc.jsonObject)

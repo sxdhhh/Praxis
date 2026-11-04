@@ -1,9 +1,17 @@
 package dev.praxis.feature.chat.widget
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,19 +22,26 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import dev.praxis.ui.widgets.ChatDisplayStyle
 import dev.praxis.ui.widgets.MarkdownText
 import dev.praxis.ui.widgets.StreamingText
+import dev.praxis.ui.theme.PraxisMotion
 import dev.praxis.ui.theme.PraxisRadius
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
@@ -103,6 +118,8 @@ fun ChatMessageItem(
      * 默认 true：所有存量调用点（预览、测试）观感不变。
      */
     showLabel: Boolean = true,
+    /** 这条回答的思考过程（仅助手）。见 [MessageBubble] 的同名参数。 */
+    reasoning: String? = null,
 ) {
     when (style) {
         ChatDisplayStyle.Bubble -> MessageBubble(
@@ -113,6 +130,7 @@ fun ChatMessageItem(
             onRetry = onRetry,
             onLongPress = onLongPress,
             images = images,
+            reasoning = reasoning,
         )
         ChatDisplayStyle.Cursor -> CursorMessage(
             kind = kind,
@@ -123,6 +141,7 @@ fun ChatMessageItem(
             onLongPress = onLongPress,
             images = images,
             showLabel = showLabel,
+            reasoning = reasoning,
         )
     }
 }
@@ -161,6 +180,13 @@ fun MessageBubble(
     onRetry: (() -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
     images: List<dev.praxis.core.ai.ChatImage> = emptyList(),
+    /**
+     * 这条回答的**思考过程**（上游 `reasoning_content` 一类字段）。
+     *
+     * null / 空串表示这次没有思考内容（模型不支持，或用户没开）。
+     * 渲染成可折叠块，默认收起 —— 见 [ReasoningBlock]。
+     */
+    reasoning: String? = null,
 ) {
     val isUser = kind == BubbleKind.User
     val isError = kind == BubbleKind.Error
@@ -278,6 +304,21 @@ else -> {
                         // 流式时必须同步：文本每帧都在变，异步会让呈现落后于
                         // 数据源，观感是「文字一跳一跳」。而流式走的本来就是
                         // `StreamingMarkdownState` 的增量路径，代价已经很低。
+                        // ## 思考过程（2026-11-04）
+                        //
+                        // 上游把推理增量发在 `delta.reasoning_content` 一类字段里，
+                        // 与正文是两个独立的流。旧实现压根没解析它，所以
+                        // 「思考」开关打开后界面上毫无变化 —— 用户反馈原话是
+                        // 「开了跟没开一样一点用都没有」。
+                        //
+                        // 现在单独渲染成一块可折叠区域，放在正文**上方**：
+                        //  - 想看推理的人点开；
+                        //  - 只想要结论的人默认看不到它，不占屏；
+                        //  - 顺序上是「先想后答」，符合阅读直觉。
+                        if (!reasoning.isNullOrBlank()) {
+                            ReasoningBlock(reasoning = reasoning, contentColor = content)
+                            Spacer(Modifier.height(8.dp))
+                        }
                         MarkdownText(
                             text = text,
                             color = content,
@@ -290,6 +331,108 @@ else -> {
         }
     }
 }
+
+/**
+ * 可折叠的「思考过程」块。
+ *
+ * ## 为什么默认收起
+ *
+ * 推理内容动辄几百上千字（DeepSeek 的 `reasoning_content` 尤其长）。
+ * 默认展开会把真正的回答挤到屏幕外 —— 用户每问一句都要先滚过一大段
+ * 内心独白，那是负担而不是功能。
+ *
+ * 收起时给一行摘要（「思考过程 · 1.2k 字」）让人知道**它确实思考了**，
+ * 想看细节再点开。
+ *
+ * ## 为什么用 `AnimatedVisibility` 而不是裸 if
+ *
+ * 与 `ToolCallCard` 同一取舍：`expanded` 一变高度瞬间跳变，观感很硬。
+ * 用 `expandVertically/shrinkVertically` + fade，时长取 [PraxisMotion]
+ * 的统一档位，全应用手感一致。
+ *
+ * ## 为什么底色用 `contentColor.copy(alpha = 0.06f)`
+ *
+ * 不写死颜色：这条块要同时活在浅色/深色与莫奈取色下，
+ * 而它嵌在气泡里 —— 用气泡自身前景色的极低透明度铺一层，
+ * 任何主题下都是「比周围略深一点的同一色系」，不会撞色。
+ */
+@Composable
+private fun ReasoningBlock(reasoning: String, contentColor: Color) {
+    var expanded by remember { mutableStateOf(false) }
+    val arrowRotation by animateFloatAsState(
+        targetValue = if (expanded) 90f else 0f,
+        animationSpec = tween(
+            durationMillis = PraxisMotion.Expansion.Expand,
+            easing = PraxisMotion.Curves.Standard,
+        ),
+        label = "reasoning-arrow",
+    )
+    val muted = contentColor.copy(alpha = 0.72f)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(PraxisRadius.SmallShape)
+            .background(contentColor.copy(alpha = 0.06f))
+            .clickable { expanded = !expanded }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "▸",
+                style = MiuixTheme.textStyles.footnote1,
+                color = muted,
+                modifier = Modifier.graphicsLayer { rotationZ = arrowRotation },
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = if (expanded) {
+                    "思考过程"
+                } else {
+                    "思考过程 · " + formatReasoningSize(reasoning.length)
+                },
+                style = MiuixTheme.textStyles.footnote1,
+                color = muted,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn(
+                animationSpec = tween(
+                    durationMillis = PraxisMotion.Expansion.FadeIn,
+                    easing = PraxisMotion.Curves.Standard,
+                ),
+            ) + expandVertically(
+                animationSpec = tween(
+                    durationMillis = PraxisMotion.Expansion.Expand,
+                    easing = PraxisMotion.Curves.Standard,
+                ),
+            ),
+            exit = fadeOut(
+                animationSpec = tween(
+                    durationMillis = PraxisMotion.Expansion.FadeOut,
+                    easing = PraxisMotion.Curves.Standard,
+                ),
+            ) + shrinkVertically(
+                animationSpec = tween(
+                    durationMillis = PraxisMotion.Expansion.Shrink,
+                    easing = PraxisMotion.Curves.Standard,
+                ),
+            ),
+        ) {
+            Text(
+                text = reasoning,
+                style = MiuixTheme.textStyles.footnote1,
+                color = contentColor.copy(alpha = 0.85f),
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    }
+}
+
+/** 思考字数格式化：千位以上折成 `1.2k`，与工具卡的字数规则保持一致。 */
+private fun formatReasoningSize(chars: Int): String =
+    if (chars >= 10_000) String.format("%.1fk 字", chars / 1000f) else "$chars 字"
 
 // ─────────────────────────────────────────────────────────────
 // Cursor 风格（Operit 默认形态）
@@ -329,6 +472,8 @@ private fun CursorMessage(
     images: List<dev.praxis.core.ai.ChatImage> = emptyList(),
     /** 是否画 `提问` / `回复` 标签。见 [ChatMessageItem.showLabel]。 */
     showLabel: Boolean = true,
+    /** 这条回答的思考过程（仅助手）。 */
+    reasoning: String? = null,
 ) {
     when (kind) {
         BubbleKind.User -> Surface(
@@ -371,6 +516,15 @@ private fun CursorMessage(
         ) {
             if (showLabel) {
                 MessageLabel(text = "回复", color = MiuixTheme.colorScheme.onSurface)
+            }
+            // 思考过程（Cursor 风格同样要画）。默认收起，点开才看 —— 理由见
+            // [ReasoningBlock] 的 KDoc。放在正文之前：先想后答。
+            if (!reasoning.isNullOrBlank()) {
+                ReasoningBlock(
+                    reasoning = reasoning,
+                    contentColor = MiuixTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(8.dp))
             }
             MarkdownText(
                 text = text,
