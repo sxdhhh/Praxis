@@ -702,6 +702,44 @@ internal fun ChatSettingsBar(
  * `Card` 贴右下角。**卡片尺寸恒定、只改透明度** —— 若对卡片做 scale，
  * Popup 每帧重新测量并重新定位，观感就是持续抖动。
  */
+/**
+ * 模型选择器里的一个分组（= 一个模型配置）。
+ *
+ * ## 为什么需要分组（2026-11-05）
+ *
+ * 用户要求：「主界面模型选择接入全部配置，就类似于 Operit 的那种」。
+ *
+ * 多配置之后，每个配置有**自己的**模型池。只列当前配置的模型，
+ * 用户想切到另一家的模型就得先去设置页切配置 —— 而这件事的本质
+ * 就是「换个模型」，不该跳出对话页。
+ *
+ * 分组渲染的形态：
+ *
+ * ```
+ *   workbuddy              <- 配置名（不可点，只是标题）
+ *     ✓ deepseek-v4-flash
+ *       deepseek-v4-pro
+ *   server
+ *       glm-5.2
+ * ```
+ *
+ * ## 为什么组名单独一行而不是做成可展开的父项
+ *
+ * 可展开父项要多两级状态（哪组展开、记住上次展开），而这里总共
+ * 也就两三个配置、每个几到十几个模型 —— 全部铺开反而更快找到目标。
+ * 需要滚动时 Card 已经带了 `heightIn(max = 420.dp)`。
+ */
+data class ModelGroup(
+    /** 配置显示名。 */
+    val profileName: String,
+    /** 该配置的模型池。 */
+    val models: List<String>,
+    /** 该配置是否是当前生效的那个（决定高亮与勾选）。 */
+    val isActive: Boolean,
+) {
+    val isEmpty: Boolean get() = models.isEmpty()
+}
+
 @Composable
 fun ModelPill(
     modelName: String,
@@ -710,6 +748,15 @@ fun ModelPill(
     onClickModel: (Int) -> Unit,
     onManageModels: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 按配置分组的完整模型列表（多配置）。
+     *
+     * 为空时退回旧的单组渲染（只用 [models] / [activeIndex]）——
+     * 预览与单测不必构造分组数据。
+     */
+    groups: List<ModelGroup> = emptyList(),
+    /** 点某个配置里的某个模型（配置名, 池内下标）。 */
+    onClickGroupedModel: ((profileName: String, modelIndex: Int) -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -805,7 +852,56 @@ fun ModelPill(
                                 .verticalScroll(rememberScrollState())
                                 .padding(vertical = 4.dp),
                         ) {
-                            if (models.isEmpty()) {
+                            // ## 两种渲染：按配置分组 / 单组
+                            //
+                            // 有分组数据就画分组（多配置），否则退回原来的
+                            // 平铺列表 —— 这样预览、单测、以及「只有一个配置」
+                            // 的早期状态都不必构造分组数据。
+                            if (groups.isNotEmpty()) {
+                                groups.forEach { group ->
+                                    // 组标题：配置名 + 该组是否生效。
+                                    // 不可点 —— 它是标题不是选项。
+                                    Text(
+                                        text = group.profileName,
+                                        style = MiuixTheme.textStyles.footnote2,
+                                        color = if (group.isActive) {
+                                            MiuixTheme.colorScheme.primary
+                                        } else {
+                                            MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                        },
+                                        modifier = Modifier.padding(
+                                            start = 12.dp,
+                                            end = 12.dp,
+                                            top = 8.dp,
+                                            bottom = 2.dp,
+                                        ),
+                                    )
+                                    if (group.isEmpty) {
+                                        Text(
+                                            text = "这个配置还没填模型",
+                                            style = MiuixTheme.textStyles.footnote2,
+                                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                            modifier = Modifier.padding(
+                                                horizontal = 12.dp,
+                                                vertical = 4.dp,
+                                            ),
+                                        )
+                                    } else {
+                                        group.models.forEachIndexed { index, name ->
+                                            ChoiceRow(
+                                                label = name,
+                                                // 只有生效配置里选中的那个才打勾。
+                                                selected = group.isActive && index == activeIndex,
+                                                onClick = {
+                                                    onClickGroupedModel?.invoke(group.profileName, index)
+                                                        ?: onClickModel(index)
+                                                    expanded = false
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            } else if (models.isEmpty()) {
                                 Text(
                                     text = "还没有模型，先去设置里填一个",
                                     style = MiuixTheme.textStyles.footnote2,

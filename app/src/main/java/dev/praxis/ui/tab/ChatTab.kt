@@ -211,6 +211,17 @@ fun ChatTab(
     // 是纯 UI 动作 —— 页面离开时取消即可，不需要跨配置变更存活。
     val settingsScope = rememberCoroutineScope()
 
+    // 多配置：模型胶囊要按配置分组列出所有模型。
+    //
+    // 与 `modelSettings` 分开收：那条是「当前配置的参数」，
+    // 这条是「所有配置的清单」。合成一条会迫使上游把整个
+    // `ModelProfileSet` 塞进 `ModelSettings` 里 —— 语义不对，
+    // 而 `ModelSettings` 是要发给 provider 的对象。
+    val modelProfiles by settingsRepository.modelProfiles
+        .collectAsStateWithLifecycle(
+            initialValue = dev.praxis.core.model.settings.ModelProfileSet(),
+        )
+
     // 记忆 / 插件（底栏分区）
     val autoMemoryEnabled by settingsRepository.autoMemoryEnabled
         .collectAsStateWithLifecycle(initialValue = true)
@@ -724,6 +735,40 @@ fun ChatTab(
             // 只写盘：`modelSettings` 是全局 DataStore 流，写完会回流到
             // 这里重新组合，不需要额外改本地状态。
             settingsScope.launch { settingsRepository.setModelIndex(index) }
+        },
+        // ── 按配置分组的模型列表（多配置）──────────────
+        //
+        // ## 为什么把「所有配置的模型」都摊给对话页
+        //
+        // 用户切模型的真实意图往往是「换一家/换一个」，而不是
+        // 「先回设置页切配置、再回来选模型」。两跳的操作在对话中途
+        // 特别打断心流。
+        //
+        // ## 为什么要过滤空配置
+        //
+        // 一个还没填模型的配置如果也列出来，用户点开菜单会看到一片
+        // 空白组标题 —— 那看起来像 bug。留「这个配置还没填模型」的
+        // 提示比整组消失更清楚（用户知道那家配过、只是没填完）。
+        modelGroups = modelProfiles.profiles.map { profile ->
+            dev.praxis.feature.chat.ModelGroup(
+                profileName = profile.name,
+                models = profile.settings.modelList,
+                isActive = profile.id == modelProfiles.active?.id,
+            )
+        },
+        onSelectGroupedModel = { profileName, modelIndex ->
+            // 两件事一起做：切到那个配置，再把它的模型下标指过去。
+            //
+            // 顺序不能反：`setModelIndex` 写的是**当前配置**的下标，
+            // 先写下标就会写到旧配置上（用户点了 A 家的第 2 个模型，
+            // 结果 B 家的下标被改了）。
+            val target = modelProfiles.profiles.firstOrNull { it.name == profileName }
+            if (target != null) {
+                settingsScope.launch {
+                    settingsRepository.setActiveProfile(target.id)
+                    settingsRepository.setModelIndex(modelIndex)
+                }
+            }
         },
         // ── 已选图片可删 ────────────────────────────────
         //
