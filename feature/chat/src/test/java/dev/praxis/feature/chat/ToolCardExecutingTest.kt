@@ -176,9 +176,12 @@ class ToolCardExecutingTest {
         assertEquals("不该多插一张卡", 1, tools.size)
         assertEquals("应该是同一张卡被填上", runningId, tools[0].id)
         assertNotNull("跑完后应有结果", tools[0].tool?.result)
+        // `ToolCallInfo.result` 是 **String?**（工具返回体的原文），
+        // 不是 `ToolResult` 对象 —— 我第一版写成了 `.result?.content`，
+        // CI #166 报 `Unresolved reference 'content' on receiver of type 'String'`。
         assertTrue(
             "结果内容应可见",
-            tools[0].tool?.result?.content?.contains("工具跑完了") == true,
+            tools[0].tool?.result?.contains("工具跑完了") == true,
         )
     }
 
