@@ -228,6 +228,24 @@ class ChatViewModel(
     private val pendingContent = mutableMapOf<Long, String>()
 
     /**
+     * 「重新生成」时被临时移走的原回答；成功即丢弃，失败要还回去。
+     *
+     * ## 为什么需要它（2026-11-04，对齐 Operit `regenerateSingleAiMessage`）
+     *
+     * 旧 `retry()` **一上来就把原气泡从 `bubbles` 里删掉**，再放一个空的进去。
+     * 于是只要这一轮流失败（网络断、网关挂住、模型不支持图片……），
+     * 用户看到的就是「我点重新生成，它把我的回答删了，然后什么都不生成」。
+     *
+     * Operit 的做法相反：原消息**一直在**，新版本准备好才作为变体加入
+     * （`onVariantPreviewStarted` -> `onVariantReady`）；失败时原消息不动，
+     * 只额外报一次错。
+     *
+     * 这里取它的语义：移走的原气泡先寄存在这个字段里，
+     * 成功路径清掉，失败路径还回去。
+     */
+    private var pendingRetryRestore: ChatBubble? = null
+
+    /**
      * 注册气泡对应的数据库行号，并把注册前暂存的正文补写进去。
      *
      * 所有 `assistantRowIds[x] = rowId` 都应走这里 —— 直接赋值会让
@@ -1335,6 +1353,10 @@ class ChatViewModel(
         val newIndex = if (existingGroupId == null) 1 else baseIndex + 1
         val newCount = (target?.variantCount ?: 1) + if (existingGroupId == null) 0 else 1
 
+        // 先寄存原回答：万一这一轮流失败，[onStreamFailure] 要把它还回去。
+        // 不寄存的后果就是用户那句「重新生成把我的消息删了还不生成」。
+        pendingRetryRestore = target
+
         _state.update { st ->
             val bubbles = st.bubbles
             // 移除目标那条：新版本要「顶替」它的位置与它并存为变体，
@@ -1925,6 +1947,8 @@ class ChatViewModel(
                         }
                     }
                 _state.update { it.copy(isStreaming = false, stage = ChatStage.Idle) }
+                // 这一轮成功了：新回答已经就位，寄存的原气泡不再需要。
+                pendingRetryRestore = null
                 // 这一轮成功了：在途记录作废，否则下一轮失败会把它
                 // 误当成「本轮失败的那条」回滚进队列（重复消息）。
                 inFlightQueueMessage = null
@@ -1980,9 +2004,28 @@ class ChatViewModel(
         // 也不在队列（drain 弹出了），不还回去就等于用户排的队凭空少一条。
         val restore = inFlightQueueMessage
         inFlightQueueMessage = null
+        // ## 失败要把「重新生成」移走的原回答还回去（2026-11-04）
+        //
+        // 不还的后果最刺眼：用户点重新生成 -> 这一轮失败 -> 原回答已删、
+        // 新回答也没有，只剩一条错误气泡。用户的原话是
+        // 「点重新生成直接把消息删了然后就不生成了」。
+        //
+        // Operit 的 `regenerateSingleAiMessage` 不会这样：它全程保留原消息，
+        // 只有新版本就绪时才 `onVariantReady` 追加为变体；失败只报错、不动原文。
+        // 这里按同样的语义补上 —— 只是实现上是「事后还回去」而不是「全程不动」，
+        // 因为 Praxis 的内存模型（一组只留一条气泡）要求新版本先占位。
+        //
+        // 同时丢掉这次失败产生的那条空/半截气泡：留着只会在原回答旁多一块空白。
+        val retryTarget = pendingRetryRestore
+        pendingRetryRestore = null
         _state.update {
+            val bubbles = if (retryTarget != null) {
+                it.bubbles.filterNot { b -> b.id == assistantId } + retryTarget + errorBubble
+            } else {
+                it.bubbles + errorBubble
+            }
             it.copy(
-                bubbles = it.bubbles + errorBubble,
+                bubbles = bubbles,
                 isStreaming = false,
                 error = error,
                 stage = ChatStage.Idle,
