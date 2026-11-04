@@ -101,8 +101,18 @@ class ExternalSessionSyncTest {
         // 初始那个 Local tab 仍在，外部会话追加在后面。
         assertTrue("main 应出现", "main" in vm.titles())
         assertEquals(2, vm.titles().size)
-        // 且真的按名开过会话（复用同一条通道，不是新起一个）。
-        assertEquals(listOf("main"), port.opened)
+        //
+        // ## 为什么断言「包含」而不是「等于 listOf(\"main\")」（2026-11-05）
+        //
+        // 我第一版写的是 `assertEquals(listOf(\"main\"), port.opened)`，
+        // CI #164 红了。原因是**构造 ViewModel 时就会建初始 tab**：
+        // `init` 里的 `addTab()` 也走 `startPtySession` -> `port.open(\"Local\")`。
+        //
+        // 所以 `opened` 是 `[\"Local\", \"main\"]`。要验的是
+        // 「外部会话被按名打开过」，不是「只有它被打开过」。
+        assertTrue("main 应按名打开过", "main" in port.opened)
+        // 且顺序在后：外部会话是追加进去的，不影响已有 tab。
+        assertEquals("main", port.opened.last())
     }
 
     /**
