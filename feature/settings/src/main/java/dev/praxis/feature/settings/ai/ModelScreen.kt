@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Storage
@@ -189,6 +190,24 @@ fun ModelScreen(
      * 放在顶层还能给默认值，让 @Preview / 单测不必构造完整对象。
      */
     advanced: ModelAdvancedSettings = ModelAdvancedSettings(),
+    /**
+     * 所有模型配置（含当前生效的那个）。
+     *
+     * ## 为什么由调用方传进来而不是页内读仓库
+     *
+     * 与 [settings] / [advanced] 同一条纪律：这一页是纯 UI，
+     * 只渲染给它的数据。读仓库会让 @Preview 与单测都得起 DataStore。
+     */
+    profiles: dev.praxis.core.model.settings.ModelProfileSet =
+        dev.praxis.core.model.settings.ModelProfileSet(),
+    /** 切到另一个配置。 */
+    onSelectProfile: (String) -> Unit = {},
+    /** 新建一个配置（弹窗输入名字）。 */
+    onNewProfile: () -> Unit = {},
+    /** 重命名当前配置。 */
+    onRenameProfile: () -> Unit = {},
+    /** 删除当前配置。 */
+    onDeleteProfile: () -> Unit = {},
     modifier: Modifier = Modifier,
     /**
      * 清除已保存的密钥。
@@ -388,6 +407,63 @@ fun ModelScreen(
     SettingsList(
         modifier = modifier.fillMaxSize(),
     ) {
+        // ── 选择模型配置 ─────────────────────────────────────────────
+        //
+        // ## 为什么放在最顶
+        //
+        // 这一页所有参数都**属于某一个配置**。用户切了配置再改参数，
+        // 改的是新配置 —— 所以「我在改哪个配置」必须先看到。
+        // 放在最底部会让「改了半天发现改错了配置」成为常态。
+        //
+        // ## 为什么用 OverlaySpinnerPreference 而不是自绘
+        //
+        // 它就是这个项目里「下拉选择」的标准控件（服务商、思考强度、
+        // 主题都用它），自带形变动画与根层渲染。自绘一个只会多一套
+        // 不一致的手感。
+        item {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Layers,
+                title = "模型配置",
+                subtitle = "每套配置有独立的地址、密钥与模型池，切换即生效",
+            )
+        }
+        item {
+            Card(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                Column {
+                    if (profiles.profiles.isNotEmpty()) {
+                        ProfileSpinner(
+                            profiles = profiles,
+                            onSelect = onSelectProfile,
+                        )
+                    }
+                    // 三个操作排一行：与侧边栏多选操作条同一套布局纪律
+                    // （中性操作靠左、危险操作用 error 色）。
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        TextButton(
+                            text = "新建",
+                            onClick = onNewProfile,
+                        )
+                        TextButton(
+                            text = "重命名",
+                            onClick = onRenameProfile,
+                        )
+                        TextButton(
+                            text = "删除",
+                            onClick = onDeleteProfile,
+                        )
+                    }
+                }
+            }
+        }
         // 首个卡片自己带 top padding（下面 .padding(top = 12.dp)），
         // 这里不再补一个 Spacer —— 两道加起来是 24dp，与其余页面的 12dp 不一致。
         // ── 服务商 ──────────────────────────────────────────────────
@@ -1202,6 +1278,42 @@ fun ModelScreen(
  * `renderInRootScaffold = true`：画到根 Scaffold 的 overlay 层，
  * 否则会被 `SettingsList` 的 LazyColumn clip 裁掉。
  */
+
+/**
+ * 「选择模型配置」下拉。
+ *
+ * ## 为什么单独抽一个组件
+ *
+ * `ProviderSpinner` 的下拉项是固定的枚举，而这里是**用户数据**：
+ * 数量可变、名字可变、还可能为空。三件事都要单独处理：
+ *
+ *  - 空列表：不画下拉（只留「新建」按钮），否则会渲染出一个空选择器；
+ *  - 名字重复：靠 id 定位而不是名字，否则选中项会跳；
+ *  - 当前 id 不在列表里：兜底到第一个（与 `ModelProfileSet.active` 同口径）。
+ */
+@Composable
+private fun ProfileSpinner(
+    profiles: dev.praxis.core.model.settings.ModelProfileSet,
+    onSelect: (String) -> Unit,
+) {
+    val items = remember(profiles.profiles) {
+        profiles.profiles.map { DropdownItem(title = it.name) }
+    }
+    // 用 id 定位而不是名字：两个配置可以同名，用名字会选错。
+    val activeId = profiles.active?.id.orEmpty()
+    val selectedIndex = remember(activeId, profiles.profiles) {
+        profiles.profiles.indexOfFirst { it.id == activeId }.coerceAtLeast(0)
+    }
+    OverlaySpinnerPreference(
+        items = items,
+        selectedIndex = selectedIndex,
+        title = "当前配置",
+        renderInRootScaffold = true,
+        onSelectedIndexChange = { index ->
+            profiles.profiles.getOrNull(index)?.let { onSelect(it.id) }
+        },
+    )
+}
 @Composable
 private fun ProviderSpinner(
     current: ApiProvider,
