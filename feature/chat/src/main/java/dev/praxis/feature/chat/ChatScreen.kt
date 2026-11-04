@@ -302,6 +302,15 @@ fun ChatScreen(
     activeModelIndex: Int = 0,
     /** 选第 index 个模型；null 表示不支持就地切换。 */
     onSelectModelIndex: ((Int) -> Unit)? = null,
+    /**
+     * 按配置分组的完整模型列表（多配置）。
+     *
+     * 为空时模型胶囊退回「只列当前配置的模型」（[models]）——
+     * 单配置用户与预览/单测的行为完全不变。
+     */
+    modelGroups: List<ModelGroup> = emptyList(),
+    /** 点某个配置里的某个模型（配置名, 池内下标）。 */
+    onSelectGroupedModel: ((profileName: String, modelIndex: Int) -> Unit)? = null,
     /** 是否自动保存记忆（记忆分区的开关）。 */
     autoMemoryEnabled: Boolean = true,
     onToggleAutoMemory: ((Boolean) -> Unit)? = null,
