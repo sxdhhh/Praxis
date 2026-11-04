@@ -642,6 +642,14 @@ class ChatViewModel(
                     id = bubbleId,
                     role = role,
                     text = row.content,
+                    // ## 思考过程一起还原（v9，2026-11-05）
+                    //
+                    // 不传的话，重启后所有历史回答的折叠块都不见了 ——
+                    // 用户的原话是「思考完后不能消失」。
+                    //
+                    // 它只有 assistant 行才有值（库侧可空），
+                    // 其它角色传进来也是 null，这里不必额外判角色。
+                    reasoning = row.reasoning,
                     // 带上库里的写入时间：跳转链路以时间戳为键（见
                     // `ChatBubble.timestamp` 的 KDoc）。
                     timestamp = row.createdAt,
@@ -942,10 +950,25 @@ class ChatViewModel(
      */
     private fun sealReasoning(assistantId: Long, text: String) {
         val trimmed = text.trim()
+        val value = trimmed.takeIf { s -> s.isNotEmpty() }
         updateBubble(assistantId) {
-            it.copy(reasoning = trimmed.takeIf { s -> s.isNotEmpty() })
+            it.copy(reasoning = value)
         }
         _state.update { it.copy(streamingReasoning = null) }
+        // ## 落库（v9）
+        //
+        // 用户的原话：「思考完后不能消失」。只写内存的话，重启就没了 ——
+        // 那是「重进丢内容」的翻版，只是丢的是推理而不是正文。
+        //
+        // 只写一次（不是每个 delta）：思考在 UI 上是一个整体，
+        // 中途的半截没有单独价值，而每秒几十次写库会把 SQLite 打满。
+        //
+        // 行号可能还没注册（异步落盘竞态）—— 那种情况下正文也写不进去，
+        // 属于同一个已由 `pendingContent` 缓解的问题，这里不重复兜底。
+        val rowId = assistantRowIds[assistantId]
+        if (rowId != null) {
+            launchPersist { updateMessageReasoning(rowId, value) }
+        }
     }
 
     /**
@@ -2081,6 +2104,42 @@ class ChatViewModel(
                                 // （模型切到工具模式前会结束这句话），之后再来的
                                 // delta 属于**下一段**输出，不能接在这段后面。
                                 sealStreamText(assistantId, buffer.toString())
+                                // ## 参数收齐：确保每张卡都已经存在且显示「执行中」（2026-11-05）
+                                //
+                                // 真机反馈：「工具执行中的状态我没看到啊」。
+                                //
+                                // 原因：很多网关**一次性**返回完整 tool_calls，
+                                // 根本不发 `tool_calls` 的增量分片 —— 于是
+                                // `ToolCallDelta` 一次都没触发，提前建卡那条路
+                                // 没走到；而卡片只在 `runToolCalls` 跑完才建，
+                                // 一建出来就已经带着结果，用户永远看不到「执行中」。
+                                //
+                                // 所以在**开始执行之前**补建：参数刚到、工具还没跑，
+                                // 这一刻的卡片正是「执行中」。老网关没这个状态，
+                                // 有 `result = null` 就能画出来。
+                                event.calls.forEachIndexed { index, call ->
+                                    if (pendingToolCardIds[index] != null) return@forEachIndexed
+                                    val cardId = nextId++
+                                    pendingToolCardIds[index] = cardId
+                                    _state.update { current ->
+                                        current.copy(
+                                            bubbles = current.bubbles + ChatBubble(
+                                                id = cardId,
+                                                role = BubbleRole.Tool,
+                                                text = "",
+                                                timestamp = nextTimestamp(),
+                                                // result 仍为 null -> 卡片显示「执行中」。
+                                                // 参数长度用最终 JSON 长度（此刻已经完整）。
+                                                tool = ToolCallInfo(
+                                                    name = call.name,
+                                                    argumentsJson = call.argumentsJson,
+                                                    argumentsChars = call.argumentsJson.length,
+                                                    result = null,
+                                                ),
+                                            ),
+                                        )
+                                    }
+                                }
                                 // 工具调用必须先写进 history 再执行 —— 模型的下一轮
                                 // 需要看到「我发起了什么」，否则它会重复发起同一个调用。
                                 history += ChatMessage(

@@ -94,4 +94,32 @@ class ProotPtySessionAdapter(
 
     override fun screen(sessionId: String, maxLines: Int): String? =
         delegate.screen(sessionId, maxLines)
+
+    /**
+     * 把 delegate 的会话表按**名字**透出去，供终端页补 tab。
+     *
+     * ## 为什么用名字而不是 id
+     *
+     * 终端页的 tab 是按「会话名」组织并持久化的（`Tab.title`，
+     * `open(name, ...)` 也是幂等的按名复用）。两者对齐的键就是名字；
+     * 透 id 反而要在 UI 侧再查一次名字。
+     *
+     * ## 过滤掉已关闭的
+     *
+     * `closed = true` 的会话进程已经没了，给它建 tab 只会点开一个
+     * 打不出提示符的空壳。这与 `open()` 里的 `info.closed` 判断一致。
+     *
+     * ## 为什么 runCatching
+     *
+     * `sessions()` 走的是 delegate 的内部表，正常不会抛；
+     * 但这里是在**组合/恢复路径**上被调用（UI 侧），
+     * 一个异常不该让终端页整体挂掉 —— 退化成「不同步」即可，
+     * 那正是这个功能没做之前的状态。
+     */
+    override fun sessionNames(): List<String> = runCatching {
+        delegate.sessions()
+            .filterNot { it.closed }
+            .map { it.name }
+            .filter { it.isNotBlank() }
+    }.getOrDefault(emptyList())
 }

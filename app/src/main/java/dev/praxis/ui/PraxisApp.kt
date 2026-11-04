@@ -706,7 +706,18 @@ fun PraxisApp(
                         )
                     }
                 },
-                terminalTab = {
+                terminalTab = { terminalVisible ->
+                    // ## 切到终端页时同步一次「外部会话」（2026-11-05）
+                    //
+                    // AI 通过 `create_terminal_session` 之类的工具建的会话，
+                    // 底层 PTY 早就存在（与终端页共用同一个 port 单例），
+                    // 但终端页的 tab 是 UI 自建的 —— 不问 port 就永远看不到它。
+                    //
+                    // 用 `terminalVisible` 而不是 `LaunchedEffect(Unit)`：Pager
+                    // 预组合相邻页，`Unit` 会在还没切过去时就跑掉。
+                    LaunchedEffect(terminalVisible) {
+                        if (terminalVisible) terminalViewModel.syncExternalSessions()
+                    }
                     TerminalScreen(
                         state = terminalState,
                         onSubmit = terminalViewModel::submit,

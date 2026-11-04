@@ -90,6 +90,37 @@ interface PtySessionPort {
      * 而不是让用户以为自己在容器里。
      */
     val lastError: String? get() = null
+
+    /**
+     * 底层当前**已存在**的会话名（用于和 AI 共用同一份会话表）。
+     *
+     * ## 它修的是什么（2026-11-05）
+     *
+     * 真机反馈：「终端页面还是看不到智能体创建的终端会话」。
+     *
+     * 根因是**两套会话表**：
+     *
+     * ```
+     * AI 侧   TerminalSessionPort.create("main")   -> 真的开了个 PTY
+     * UI 侧   TabStore 里的 tab 列表（DataStore）   -> 终端页只画这些
+     * ```
+     *
+     * 两者共用同一个 `ProotTerminalSessionPort` 单例（见
+     * `ProotPtySessionAdapter` 的 KDoc），PTY 确实只有一个；
+     * 但**终端页的 tab 是 UI 自建的**，`init` 里只 `addTab()` 一个，
+     * 之后从快照恢复 —— 从不问「现在有哪些会话」。
+     * 于是 AI 建出来的会话在进程里活着，界面上却没有入口。
+     *
+     * 有了这个方法，`TerminalViewModel` 就能把「port 里有、tab 里没有」
+     * 的会话补成 tab。
+     *
+     * ## 为什么默认实现返回空列表
+     *
+     * 与其它可选能力同一纪律：给一个安全默认值，存量实现与测试替身
+     * 不用改就能编译。返回空表示「这个实现不暴露会话表」，
+     * 调用方据此跳过同步（而不是以为「一个会话都没有」去删 tab）。
+     */
+    fun sessionNames(): List<String> = emptyList()
 }
 
 /**
@@ -110,4 +141,7 @@ object NoPtySessionPort : PtySessionPort {
     override fun close(sessionId: String): Boolean = false
 
     override fun screen(sessionId: String, maxLines: Int): String? = null
+
+    // 空实现没有会话表：返回空列表，调用方会跳过同步。
+    override fun sessionNames(): List<String> = emptyList()
 }

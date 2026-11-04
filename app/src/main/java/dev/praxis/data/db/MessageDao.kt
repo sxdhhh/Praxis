@@ -65,6 +65,21 @@ interface MessageDao {
     @Query("UPDATE messages SET content = :content WHERE id = :id")
     suspend fun updateContent(id: Long, content: String)
 
+    /**
+     * 更新思考过程（v9 新增列）。
+     *
+     * ## 为什么是独立一条而不是并进 [updateContent]
+     *
+     * 调用时机不同：正文每来一个 delta 就写一次（高频），
+     * 而思考**只在流结束时写一次**（`sealReasoning`）。
+     * 合并成一条会让高频路径多写一列 —— 而那一列在中途根本没有值。
+     *
+     * 只更新一列的另一个理由同 [updateContent]：整行 UPDATE 会连带
+     * 覆盖其它字段。
+     */
+    @Query("UPDATE messages SET reasoning = :reasoning WHERE id = :id")
+    suspend fun updateReasoning(id: Long, reasoning: String?)
+
     @Update
     suspend fun update(message: MessageEntity)
 

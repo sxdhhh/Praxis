@@ -153,7 +153,20 @@ fun MainShellPage(
      */
     sidebar: @Composable (Animatable<Float, AnimationVector1D>) -> Unit,
     chatTab: @Composable () -> Unit,
-    terminalTab: @Composable () -> Unit,
+    /**
+     * 终端页。参数是「它现在是不是可见页」。
+     *
+     * ## 为什么需要这个布尔（2026-11-05）
+     *
+     * Pager 设了 `beyondViewportPageCount = 1`（预组合相邻页，避免切过去白一帧）。
+     * 所以终端页在用户还停在「对话」时就已经组合了 —— 页面里写个
+     * `LaunchedEffect(Unit)` 会在**还没切过去**的时候触发，
+     * 之后真正切过去又不会重跑。
+     *
+     * 「智能体建的终端会话要出现在终端页」需要一个**切过去时**的同步点，
+     * 这个布尔就是那个信号。
+     */
+    terminalTab: @Composable (Boolean) -> Unit,
     memoryTab: @Composable () -> Unit,
     settingsTab: @Composable () -> Unit,
     modifier: Modifier = Modifier,
@@ -363,7 +376,9 @@ fun MainShellPage(
                     ) { page ->
                         when (MainTab.of(page)) {
                             MainTab.Chat -> chatTab()
-                            MainTab.Terminal -> terminalTab()
+                            // 传「本页是否可见」：终端页要在这个布尔翻成 true 时
+                            // 同步一次外部会话（AI 建的会话）。
+                            MainTab.Terminal -> terminalTab(currentPage == page)
                             MainTab.Memory -> memoryTab()
                             MainTab.Settings -> settingsTab()
                         }

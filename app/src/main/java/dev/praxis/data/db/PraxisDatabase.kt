@@ -35,7 +35,7 @@ import dev.praxis.core.data.character.PromptTagEntity
         CharacterCardEntity::class,
         PromptTagEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.CharacterDatabase {
@@ -307,6 +307,30 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
                     "CREATE INDEX IF NOT EXISTS `index_memories_spaceId_lastUsedAt` " +
                         "ON `memories` (`spaceId`, `lastUsedAt`)",
                 )
+            }
+        }
+
+        /**
+         * v9：messages 新增 `reasoning`（模型思考过程）。
+         *
+         * ## 为什么这次可以用最简单的 ADD COLUMN
+         *
+         * 新列可空、默认 NULL，而 NULL 就是老数据的**正确**语义 ——
+         * 老消息确实没有思考记录。所以：
+         *
+         *  - 不需要重建表（v8 那次 DROP+CREATE 是因为要删数据，性质不同）；
+         *  - 不需要回填；
+         *  - 不需要新索引（不会按 reasoning 查询或排序）。
+         *
+         * ## NULL 而不是空串
+         *
+         * 与 v7 的 variantGroupId 同一个理由：「没有思考」只该有一种表示。
+         * 用空串的话 UI 得同时判 `isNullOrEmpty`，忘判就会画出一个空的
+         * 折叠块，看起来像坏了。
+         */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `messages` ADD COLUMN `reasoning` TEXT DEFAULT NULL")
             }
         }
     }
