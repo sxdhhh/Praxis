@@ -246,6 +246,37 @@ class ChatViewModel(
     private var pendingRetryRestore: ChatBubble? = null
 
     /**
+     * 参数流式期间已提前建出的「工具卡」气泡：调用序号 -> 气泡 id。
+     *
+     * ## 为什么工具卡要提前建（2026-11-04）
+     *
+     * 旧流程是「参数全部收齐 -> 工具跑完 -> 才建卡片」。而模型写参数
+     * 这件事本身可能耗几十秒（`write_file` 的 JSON 能到几十 KB，逐字吐）。
+     * 这段时间里正文区**一片空白**，只有阶段行一行小字在变 ——
+     * 用户的观感就是「卡住了」，即使模型一直在产出。
+     *
+     * 现在只要 `ToolCallDelta` 带来了工具名（说明调用头已经识别出来），
+     * 就先把卡片画进对话流，用字数显示进度。参数收齐、工具跑完后
+     * **复用同一个气泡**填结果 —— 不是再插一张，否则同一次调用会出现两张卡。
+     */
+    private val pendingToolCardIds = mutableMapOf<Int, Long>()
+
+    /**
+     * 本轮流的思考缓冲。
+     *
+     * ## 为什么要有这个字段（而不是只用局部变量）
+     *
+     * 思考内容在 `startStream` 的协程里累积（局部 `StringBuilder`），
+     * 但**失败路径**是另一个函数 `onStreamFailure` —— 它拿不到那个局部量，
+     * 而失败时恰恰最需要把已经收到的思考留下来（用户靠它判断
+     * 「模型想到哪一步崩的」）。
+     *
+     * 所以挂一个字段做传递。生命周期严格限定在单次流内：
+     * `startStream` 入口重置，收尾后不再读。
+     */
+    private var liveReasoningBuffer: StringBuilder? = null
+
+    /**
      * 注册气泡对应的数据库行号，并把注册前暂存的正文补写进去。
      *
      * 所有 `assistantRowIds[x] = rowId` 都应走这里 —— 直接赋值会让
@@ -901,6 +932,48 @@ class ChatViewModel(
             return
         }
         contentWriter.submit(rowId, content)
+    }
+
+    /**
+     * 思考收尾：把流式槽写进气泡，并清空槽。
+     *
+     * 空串等同于「本轮没有思考」，不写字段（保持 `null`）——
+     * 写空串会让 UI 画出一个空的折叠块，看起来像坏了。
+     */
+    private fun sealReasoning(assistantId: Long, text: String) {
+        val trimmed = text.trim()
+        updateBubble(assistantId) {
+            it.copy(reasoning = trimmed.takeIf { s -> s.isNotEmpty() })
+        }
+        _state.update { it.copy(streamingReasoning = null) }
+    }
+
+    /**
+     * 丢掉还没等到执行结果的「占位工具卡」。
+     *
+     * ## 什么时候会有剩下的
+     *
+     * 卡片在 `ToolCallDelta` 就建出来了，但只有走到 `ToolCalls` ->
+     * `runToolCalls` 才会被填上结果。中间任何一条岔路都会把它留下：
+     *
+     *   - 参数生成到一半流断了（网络断、网关 5xx、readTimeout 兜底）
+     *   - 用户点了停止
+     *   - 网关只发 delta 不发 `tool_calls`，`Done` 先到
+     *   - 工具执行层未装配，`runToolCalls` 提前 return
+     *
+     * 不清理的话，那张卡会永远停在「接收参数 · 3.4k 字」——
+     * 用户看到的是一个永不结束的工具，比压根没有卡片更让人困惑。
+     *
+     * 直接删掉而不是标成失败：这些卡没有参数、没有结果，
+     * 留着不带任何信息；真正的失败原因由错误气泡承担。
+     */
+    private fun dropPendingToolCards() {
+        if (pendingToolCardIds.isEmpty()) return
+        val ids = pendingToolCardIds.values.toSet()
+        pendingToolCardIds.clear()
+        _state.update { current ->
+            current.copy(bubbles = current.bubbles.filterNot { it.id in ids })
+        }
     }
 
     /**
@@ -1816,8 +1889,23 @@ class ChatViewModel(
         val continueHint = pendingContinueHint
         pendingContinueHint = null
 
+        // 防御：上一轮若异常退出（进程被杀、协程被取消而来不及收尾），
+        // 这里可能还留着它那一轮的占位卡 id。不清会让新的一轮
+        // 误把结果填到旧气泡上。
+        pendingToolCardIds.clear()
+        // 同理重置思考字段与流式槽：不清的话新的一轮会接着上一轮的思考往后写。
+        liveReasoningBuffer = null
+        _state.update { it.copy(streamingReasoning = null) }
+
         streamingJob = viewModelScope.launch {
             val buffer = StringBuilder()
+            // 思考过程单独一个缓冲：它不进 `buffer`（正文），也不进 history。
+            // 见 `ReasoningDelta` 的说明。
+            val reasoningBuffer = StringBuilder()
+            // 失败路径（`onStreamFailure`）也要用到它，而那是另一个函数，
+            // 拿不到这里的局部变量 —— 挂到字段上传递。
+            // 只在本次流期间有效：`startStream` 入口会重置。
+            liveReasoningBuffer = reasoningBuffer
             try {
                 // ① 现取运行配置（用户可能刚在设置页改过）。
                 val config = readRuntimeConfig()
@@ -1881,6 +1969,23 @@ class ChatViewModel(
                                 persistContent(assistantId, buffer.toString())
                             }
 
+                            is AiStreamEvent.ReasoningDelta -> {
+                                // ## 思考增量（2026-11-04）
+                                //
+                                // 旧实现在 provider 层就把 `reasoning_content` 丢了，
+                                // 所以「思考」这个开关打开后界面上毫无变化。
+                                // 现在接到了，但要和正文严格分开：
+                                //
+                                //  - 不 append 进 `buffer`：思考不是回答，
+                                //    混进去会被当成正文落库、回传、写进长期记忆；
+                                //  - 只写独立的 state 槽：每秒几十片，写 `bubbles`
+                                //    会让整个列表重组。
+                                reasoningBuffer.append(event.text)
+                                _state.update {
+                                    it.copy(streamingReasoning = reasoningBuffer.toString())
+                                }
+                            }
+
                             is AiStreamEvent.ToolCallDelta -> {
                                 // ## 只更新进度，不碰正文（2026-10-29）
                                 //
@@ -1902,6 +2007,62 @@ class ChatViewModel(
                                             callIndex = event.callIndex,
                                         ),
                                     )
+                                }
+
+                                // ## 顺手把工具卡提前画出来（2026-11-04）
+                                //
+                                // 走到这里说明调用**头**已经识别出来了（工具名非空），
+                                // 只是参数还在逐字生成。旧代码要等参数收齐、工具跑完
+                                // 才建卡片，那几十秒里正文区是空白的。
+                                //
+                                // 现在立刻建一张「接收参数」状态的卡片，之后每个 delta
+                                // 只更新它的字数。工具跑完后 `runToolCalls` 复用这张卡
+                                // 填结果，不会多出一张。
+                                //
+                                // 只在**首次**为这个 callIndex 建卡：同一次调用会来几十个
+                                // delta，每次都建会把对话流刷满。
+                                if (event.toolName.isNotBlank() &&
+                                    pendingToolCardIds[event.callIndex] == null
+                                ) {
+                                    val cardId = nextId++
+                                    pendingToolCardIds[event.callIndex] = cardId
+                                    _state.update { current ->
+                                        current.copy(
+                                            bubbles = current.bubbles + ChatBubble(
+                                                id = cardId,
+                                                role = BubbleRole.Tool,
+                                                text = "",
+                                                timestamp = nextTimestamp(),
+                                                // `result = null` + 非零字数 = 「模型正在写参数」。
+                                                tool = ToolCallInfo(
+                                                    name = event.toolName,
+                                                    argumentsJson = "",
+                                                    argumentsChars = event.argumentsChars,
+                                                    result = null,
+                                                ),
+                                            ),
+                                        )
+                                    }
+                                } else {
+                                    // 已有卡片：只更字数（不动列表结构，避免整页重组）。
+                                    val cardId = pendingToolCardIds[event.callIndex]
+                                    if (cardId != null) {
+                                        _state.update { current ->
+                                            current.copy(
+                                                bubbles = current.bubbles.map { b ->
+                                                    if (b.id == cardId && b.tool != null) {
+                                                        b.copy(
+                                                            tool = b.tool.copy(
+                                                                argumentsChars = event.argumentsChars,
+                                                            ),
+                                                        )
+                                                    } else {
+                                                        b
+                                                    }
+                                                },
+                                            )
+                                        }
+                                    }
                                 }
                             }
 
@@ -1931,6 +2092,10 @@ class ChatViewModel(
                                 // 或参数分片后直接断流 —— draft 必须在这里清掉，
                                 // 否则会永远停在「正在生成 xxx」。
                                 _state.update { it.copy(toolDraft = null) }
+                                // 同一类兜底：正常路径下 `runToolCalls` 已经把
+                                // 占位卡消费掉了；这里还有剩的，说明网关只发了
+                                // delta 没发 `tool_calls`，那些卡永远等不到结果。
+                                dropPendingToolCards()
                                 // 定稿并清槽：Done 之后不再有 delta，UI 该以
                                 // `bubbles[i].text` 为准（这也是落库的值）。
                                 // 用 `buffer` 而不是 `null`：最后一段 delta 之后
@@ -1938,6 +2103,15 @@ class ChatViewModel(
                                 sealStreamText(assistantId, buffer.toString())
                                 // 收尾强制写入：流可能没有触发最后一段 Delta，节流也可能暂存着。
                                 flushContent(assistantId, buffer.toString())
+                                // ## 思考收尾（2026-11-04）
+                                //
+                                // 把流式槽里的思考写进气泡，并把槽清空。
+                                // 写进气泡（而不是留在槽里）是为了：答案定稿后思考块
+                                // 还能折叠回看；槽只服务「正在写」这段时间。
+                                //
+                                // 思考**不进 history**：它是过程不是回答，回传给上游
+                                // 会污染上下文（且多数网关会拒收这个字段）。
+                                sealReasoning(assistantId, reasoningBuffer.toString())
                                 history += ChatMessage(
                                     role = ChatRole.Assistant,
                                     text = buffer.toString(),
@@ -2000,6 +2174,11 @@ class ChatViewModel(
         sealStreamText(assistantId, partial)
         // 同时落盘：失败时用户看到的那半截，重启后也应该还在。
         flushContent(assistantId, partial)
+        // 失败时半路夭折的占位工具卡要清掉，否则会永远停在「接收参数」。
+        dropPendingToolCards()
+        // 失败也同样把思考定稿到气泡上：用户可能正是靠它判断「模型想到哪一步崩的」。
+        // 流式槽必须清空，否则下一轮开始时会接着上一轮的思考显示。
+        sealReasoning(assistantId, liveReasoningBuffer?.toString().orEmpty())
         // 从队列取出的那条要放回队首：它既不在输入框（send 清空了）
         // 也不在队列（drain 弹出了），不还回去就等于用户排的队凭空少一条。
         val restore = inFlightQueueMessage
@@ -2076,8 +2255,13 @@ class ChatViewModel(
             askHandler = null, // 弹框征询在本轮不做，ASK 会降级为拒绝。
         )
 
-        // 结果按调用顺序逐条落库 + 渲染
-        executions.forEach { exec ->
+        // 结果按调用顺序逐条落库 + 渲染。
+        //
+        // 用 `forEachIndexed`：下标要和 `pendingToolCardIds` 的 key（即
+        // `ToolCallDelta.callIndex`）对上，才能把结果填回**流式期间已经建好**
+        // 的那张卡。用 `forEach` 拿不到下标，就只能再插一张 —— 同一次调用
+        // 会出现两张卡（一张「接收参数」停在原地，一张结果）。
+        executions.forEachIndexed { callIndex, exec ->
             history += ChatMessage(
                 role = ChatRole.Tool,
                 toolResult = ToolResult(
@@ -2089,25 +2273,51 @@ class ChatViewModel(
                     name = exec.invocation.name,
                 ),
             )
+            // 流式期间为这次调用建过卡片就**就地填结果**，否则才新建。
+            //
+            // 为什么不一律新建：卡片提前出现（见 ToolCallDelta 分支）之后，
+            // 再插一张就成了同一次调用的两张卡 —— 上面那张永远停在
+            // 「接收参数 · 3.4k 字」，下面才是真结果。
+            //
+            // 什么时候会没有卡片：网关一次性返回完整 tool_calls（不发 delta），
+            // 或 `toolName` 一直是空字符串。那时按老路新建一张，不能丢结果。
+            val existingCardId = pendingToolCardIds.remove(callIndex)
             _state.update { current ->
-                current.copy(
-                    bubbles = current.bubbles + ChatBubble(
-                        id = nextId++,
-                        role = BubbleRole.Tool,
-                        text = buildToolSummary(exec),
-                        timestamp = nextTimestamp(),
-                        // 带上结构化信息：ToolCallCard 需要参数/结果/耗时才画得出
-                        // 可折叠卡片。只给 text 的话 UI 只能当纯文本渲染，
-                        // 用户看不到「模型调了什么参数」。
-                        tool = ToolCallInfo(
-                            name = exec.invocation.name,
-                            argumentsJson = exec.invocation.argumentsJson,
-                            result = exec.result.content,
-                            isError = exec.result.isError,
-                            elapsedMs = exec.elapsedMs,
-                        ),
-                    ),
+                val info = ToolCallInfo(
+                    name = exec.invocation.name,
+                    argumentsJson = exec.invocation.argumentsJson,
+                    // 参数已收齐，字数定格成真实长度（模型可能省略了空白，
+                    // 与流式累计的字数会有小差异，以最终 JSON 为准）。
+                    argumentsChars = exec.invocation.argumentsJson.length,
+                    result = exec.result.content,
+                    isError = exec.result.isError,
+                    elapsedMs = exec.elapsedMs,
                 )
+                val existing = existingCardId?.let { id -> current.bubbles.firstOrNull { it.id == id } }
+                if (existing != null) {
+                    current.copy(
+                        bubbles = current.bubbles.map { b ->
+                            if (b.id == existing.id) {
+                                b.copy(text = buildToolSummary(exec), tool = info, streaming = false)
+                            } else {
+                                b
+                            }
+                        },
+                    )
+                } else {
+                    current.copy(
+                        bubbles = current.bubbles + ChatBubble(
+                            id = nextId++,
+                            role = BubbleRole.Tool,
+                            text = buildToolSummary(exec),
+                            timestamp = nextTimestamp(),
+                            // 带上结构化信息：ToolCallCard 需要参数/结果/耗时才画得出
+                            // 可折叠卡片。只给 text 的话 UI 只能当纯文本渲染，
+                            // 用户看不到「模型调了什么参数」。
+                            tool = info,
+                        ),
+                    )
+                }
             }
             // 工具执行结果同样要落盘，否则重启后模型看不到自己做过什么。
             launchPersist {

@@ -215,6 +215,31 @@ sealed interface AiStreamEvent {
     /** 模型发起的工具调用已完整收齐（参数 JSON 可解析）。 */
     data class ToolCalls(val calls: List<ToolCall>) : AiStreamEvent
 
+    /**
+     * 模型的思考 / 推理增量。
+     *
+     * ## 为什么要单独一个事件，而不是并进 [Delta]（2026-11-04）
+     *
+     * 思考与正文在语义上是两样东西：
+     *
+     *  - 思考**不进对话历史**：它是过程不是回答，回传给上游会污染上下文；
+     *  - 思考**不进长期记忆**：`rememberIfWorth` 只该认正文；
+     *  - 界面上它要能折叠，并且一眼看出「这是推理、不是结论」。
+     *
+     * 混进 [Delta] 的话上面三件事都得靠解析文本来区分，而文本里没有边界。
+     *
+     * ## 字段来源（provider 层负责归一）
+     *
+     * ```
+     * DeepSeek / 多数国产     delta.reasoning_content
+     * 通用 / OpenAI 兼容       delta.reasoning
+     * 部分网关                delta.thinking
+     * ```
+     *
+     * 纯展示事件，**不参与**协议回传 —— 丢弃它是安全的。
+     */
+    data class ReasoningDelta(val text: String) : AiStreamEvent
+
     /** 正常结束。[finishReason] 为 provider 给的原始值。 */
     data class Done(val finishReason: String?) : AiStreamEvent
 }

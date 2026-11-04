@@ -53,11 +53,26 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * @param name 工具名（与模型看到的原文一致）
  * @param argumentsJson 原始 JSON 参数，**不截断**
- * @param result 返回体；null 表示还在执行
+ * @param argumentsChars 模型已写出的参数字符数（参数未收齐时卡片提前建出，见下）
+ * @param result 返回体；null 表示还没跑完
  * @param isError 是否失败
  * @param elapsedMs 耗时毫秒；未完成时为 null
  * @param summary 折叠时显示的一行摘要（通常是结果首行）
  * @param onLongPress 长按（弹消息菜单）；null 时不响应长按
+ *
+ * ## 卡片会「提前出现」（2026-11-04）
+ *
+ * 旧流程要等参数**全部收齐**、工具**跑完**才建卡片，于是模型逐字吐
+ * 几十 KB JSON 的那段时间里，用户只看得到阶段行的一行小字，
+ * 正文区一片空白 —— 观感就是「卡住了」。
+ *
+ * 现在识别到工具调用头就先把卡片画出来，用 [argumentsChars] 显示进度：
+ *
+ * ```
+ * ▸ write_file  接收参数 · 3.4k 字     <- 模型在写参数，字数在涨
+ * ▸ write_file  执行中                  <- 参数齐了，工具在跑
+ * ▸ write_file  1.2s                    <- 完成
+ * ```
  */
 @Composable
 fun ToolCallCard(
@@ -65,6 +80,7 @@ fun ToolCallCard(
     argumentsJson: String,
     result: String?,
     isError: Boolean,
+    argumentsChars: Int = 0,
     elapsedMs: Long? = null,
     summary: String? = null,
     modifier: Modifier = Modifier,
@@ -78,8 +94,13 @@ fun ToolCallCard(
         running -> MiuixTheme.colorScheme.primary
         else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
     }
+    // 「模型还在写参数」与「工具正在跑」是两段不同的等待：
+    // 前者字数在涨（说明没卡死），后者没有可涨的东西。
+    // 混成一句「执行中」会让长 JSON 生成的那几十秒看起来像挂了。
+    val receivingArgs = running && argumentsChars > 0
     val statusText = when {
         isError -> "失败"
+        receivingArgs -> "接收参数 · " + formatChars(argumentsChars)
         running -> "执行中"
         else -> elapsedMs?.let { formatElapsed(it) } ?: "完成"
     }
@@ -310,3 +331,15 @@ private fun CodeBlock(text: String, isError: Boolean = false) {
 /** 耗时格式化：小于 1 秒显示毫秒，否则显示一位小数的秒。 */
 private fun formatElapsed(ms: Long): String =
     if (ms < 1000) "${ms}ms" else String.format("%.1fs", ms / 1000.0)
+
+/**
+ * 字数格式化：千位以上折成 `1.2k`。
+ *
+ * 与 `ToolCallDraft.label` 的规则保持一致 —— 同一件事（模型写了多少参数）
+ * 在阶段行和卡片上必须显示成同一个样子，否则用户会以为两个数字说的不是一回事。
+ *
+ * 为什么千位才折：工具参数常是几 KB 的 JSON，`3421 字` 会把状态文字挤宽，
+ * 而这一行右边还有工具名要放。
+ */
+private fun formatChars(chars: Int): String =
+    if (chars >= 10_000) String.format("%.1fk 字", chars / 1000f) else "$chars 字"

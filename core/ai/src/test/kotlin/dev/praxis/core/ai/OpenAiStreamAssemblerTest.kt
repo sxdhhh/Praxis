@@ -29,6 +29,53 @@ class OpenAiStreamAssemblerTest {
         assertTrue(a.feed(delta("")).isEmpty())
     }
 
+    /**
+     * 思考增量必须被识别成 [AiStreamEvent.ReasoningDelta]，而不是被丢掉。
+     *
+     * ## 这条测的是真机反馈的那个 bug（2026-11-04）
+     *
+     * 用户原话：「ai 的思考开了跟没开一样一点用都没有」。
+     * 根因就是这里 —— 旧实现只认 `delta.content`，
+     * `delta.reasoning_content` 直接没人读。
+     */
+    @Test
+    fun `reasoning content is emitted as ReasoningDelta`() {
+        val a = OpenAiStreamAssembler()
+        val e1 = a.feed(reasoningChunk("reasoning_content", "先看"))
+        val e2 = a.feed(reasoningChunk("reasoning_content", "再算"))
+
+        assertEquals(listOf(AiStreamEvent.ReasoningDelta("先看")), e1)
+        assertEquals(listOf(AiStreamEvent.ReasoningDelta("再算")), e2)
+    }
+
+    /** 三种字段名都要认（各家网关不统一）。 */
+    @Test
+    fun `all known reasoning field names are accepted`() {
+        for (key in listOf("reasoning_content", "reasoning", "thinking")) {
+            val a = OpenAiStreamAssembler()
+            assertEquals(
+                listOf(AiStreamEvent.ReasoningDelta("x")),
+                a.feed(reasoningChunk(key, "x")),
+                "字段名 $key 没被识别",
+            )
+        }
+    }
+
+    /**
+     * 思考**不能**混进正文。
+     *
+     * 混进去的后果是三重的：被当成回答落库、被回传给上游、
+     * 被写进长期记忆。这条断言把它钉住。
+     */
+    @Test
+    fun `reasoning does not leak into accumulated text`() {
+        val a = OpenAiStreamAssembler()
+        a.feed(reasoningChunk("reasoning_content", "内心独白"))
+        a.feed(delta("正式回答"))
+
+        assertEquals("正式回答", a.accumulatedText())
+    }
+
     @Test
     fun `tool call fragments are accumulated and emitted only at finish`() {
         val a = OpenAiStreamAssembler()
@@ -147,4 +194,8 @@ class OpenAiStreamAssemblerTest {
 
     private fun toolChunk(toolCall: String) =
         """{"choices":[{"delta":{"tool_calls":[$toolCall]},"finish_reason":null}]}"""
+
+    /** 构造一个「思考增量」分片。字段名可换，用来覆盖各家不同的命名。 */
+    private fun reasoningChunk(key: String, text: String) =
+        """{"choices":[{"delta":{"$key":"$text"},"finish_reason":null}]}"""
 }

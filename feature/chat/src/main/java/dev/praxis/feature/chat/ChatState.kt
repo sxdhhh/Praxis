@@ -77,6 +77,25 @@ data class ChatBubble(
     val tool: ToolCallInfo? = null,
 
     /**
+     * 这条回答对应的**思考过程**（仅 [BubbleRole.Assistant] 可能有值）。
+     *
+     * ## 为什么与 [text] 分开存（2026-11-04）
+     *
+     * 上游把推理增量发在 `delta.reasoning_content` 一类字段里，
+     * 与正文是两个独立的流。语义上必须分开：
+     *
+     *  - 思考**不进对话历史**（回传给上游会污染上下文）；
+     *  - 思考**不进长期记忆**（`rememberIfWorth` 只认正文）；
+     *  - 界面上要能折叠，且一眼看出「这是推理不是结论」。
+     *
+     * 旧实现压根没解析这个字段，于是用户打开「思考」后
+     * 看不到任何东西 —— 反馈原话是「开了跟没开一样一点用都没有」。
+     *
+     * null / 空串表示这次回答没有思考内容（模型不支持，或用户没开）。
+     */
+    val reasoning: String? = null,
+
+    /**
      * 这条消息附带的图片（仅 [BubbleRole.User] 可能非空）。
      *
      * ## 为什么要存进气泡而不是只留在 history
@@ -181,11 +200,35 @@ data class ToolCallDraft(
             return name + " · " + size + " 字"
         }
 }
-/** 一次工具调用的 UI 投影。 */
+/**
+ * 一次工具调用的 UI 投影。
+ *
+ * ## 三个「未完成」的表示（2026-11-04）
+ *
+ * 一张工具卡会经历**两段**等待，字段分开表达，UI 才能分别提示：
+ *
+ * | 阶段 | `result` | `argumentsChars` | 卡片应显示 |
+ * |---|---|---|---|
+ * | 模型正在写参数 | null | > 0（递增） | `接收参数 · 1.2k 字` |
+ * | 参数齐了、工具在跑 | null | 定格 | `执行中` |
+ * | 完成 | 正文 | 定格 | `1.2s` / `完成` |
+ *
+ * 为什么把「写参数」和「跑工具」分开：前者可能几十 KB、耗时很久
+ * （模型在逐字生成 JSON），用户看到字数在涨就知道**它在动**；
+ * 后者是本地执行，没有字数可涨，只能显示「执行中」。
+ */
 data class ToolCallInfo(
     val name: String,
     /** 原始 JSON 参数。**不截断**：截断后无法复制出去复现。 */
     val argumentsJson: String,
+    /**
+     * 模型已写出的参数总字符数。
+     *
+     * 只在卡片**提前建出来**时有用（见 `ChatViewModel` 的 ToolCallDelta 分支）：
+     * 那时 `argumentsJson` 还是空的（半截 JSON 不可用），只能靠字数告诉
+     * 用户「模型正在写、已经写了多少」。参数收齐后此值定格。
+     */
+    val argumentsChars: Int = 0,
     /** 工具返回体。执行中为 null。 */
     val result: String? = null,
     /** 是否失败。 */
@@ -326,6 +369,22 @@ data class ChatState(
      * 用一个非空默认值就要额外维护「是否有效」，反而多一个状态位。
      */
     val toolDraft: ToolCallDraft? = null,
+
+    /**
+     * 本轮正在流式写入的**思考过程**（`reasoning_content` 一类）。
+     *
+     * ## 为什么单独一个槽，而不是直接写进气泡
+     *
+     * 与 `toolDraft` / `streamingText` 同理：思考增量可以每秒几十片，
+     * 每片都改 `bubbles` 会让整个列表的引用变化，连带把定位器预览、
+     * 未读计数等下游全部重算 —— 那是「越长越卡」的机制。
+     *
+     * 单独一个 String 槽只让读它的那个组件重组。
+     *
+     * 流结束时由 `sealReasoning` 写进气泡的 [ChatBubble.reasoning] 并清空。
+     * null 表示本轮没有思考内容。
+     */
+    val streamingReasoning: String? = null,
 
 
     /**

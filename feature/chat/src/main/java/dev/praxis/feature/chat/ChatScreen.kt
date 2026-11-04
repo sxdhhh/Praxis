@@ -844,6 +844,10 @@ fun ChatScreen(
                                 argumentsJson = tool.argumentsJson,
                                 result = tool.result,
                                 isError = tool.isError,
+                                // 参数还在流式生成时，卡片就已经存在了（见
+                                // ChatViewModel 的 ToolCallDelta 分支）。那时
+                                // argumentsJson 还是空的，只能靠字数显示进度。
+                                argumentsChars = tool.argumentsChars,
                                 elapsedMs = tool.elapsedMs,
                                 // ## 摘要在外面 remember 一次，而不是每帧现算
                                 //
@@ -922,6 +926,20 @@ fun ChatScreen(
                                 // 图片透传：气泡里要能回看用户发过的图
                                 // （见 `ChatBubble.images` 的 KDoc）。
                                 images = bubble.images,
+                                // ## 思考过程（2026-11-04）
+                                //
+                                // 两个来源，按「谁更新」选：
+                                //  - 正在流式写：`state.streamingReasoning`（每片更新，
+                                //    写在独立槽里，不触发整个列表重组）；
+                                //  - 已定稿：`bubble.reasoning`（流结束时写入）。
+                                //
+                                // 只在「这条气泡就是当前在流的那条」时取槽，
+                                // 否则历史气泡会显示成本轮正在生成的思考。
+                                reasoning = if (bubble.streaming) {
+                                    state.streamingReasoning
+                                } else {
+                                    bubble.reasoning
+                                },
                                 // ## 一轮只开一个「回复」头（2026-10-29）
                                 //
                                 // 数据上「一次回复」是**多条** Assistant 气泡：
