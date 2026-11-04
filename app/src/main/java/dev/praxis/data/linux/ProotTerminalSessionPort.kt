@@ -1218,9 +1218,29 @@ private class ScreenTap {
 
 
     fun offer(line: String) {
+        // ## 控制标记不进屏幕（2026-11-05 修）
+        //
+        // `CR_MARKER` / `DEAD_MARKER` / `SENTINEL` 是**协议内部标记**：
+        // 前者告诉下游「这一行要回车重写」，后者让 `execute` 知道命令跑完了。
+        // 它们只该进 [pending]（消费队列），不该进 [lines]（屏幕快照）。
+        //
+        // 旧实现两者都进 —— 但那时解码是逐字节 `b.toChar()`，
+        // marker 里的 `\u0000` 在渲染阶段被当成空白吃掉，所以看不出来。
+        // 改成按字节累积 + UTF-8 解码之后，`\u0000` 不再是「空白」，
+        // 屏幕上就冒出满地的 `PRAXIS_CR`。
+        //
+        // 这属于「修好一个 bug 暴露了另一个被掩盖的 bug」的典型。
+        // `SENTINEL` 在 `ProotTerminalSessionPort` 的 companion 里，
+        // 而 `ScreenTap` 是**顶层** private class（不在该类内部），
+        // 所以必须写限定名。
+        val isMarker = line == CR_MARKER ||
+            line == DEAD_MARKER ||
+            line.startsWith(ProotTerminalSessionPort.SENTINEL)
         synchronized(lock) {
-            lines.addLast(line)
-            while (lines.size > MAX_LINES) lines.removeFirst()
+            if (!isMarker) {
+                lines.addLast(line)
+                while (lines.size > MAX_LINES) lines.removeFirst()
+            }
             pending.addLast(line)
             // 见 pending 的 KDoc：无消费者时会无限涨。
             while (pending.size > MAX_LINES * 2) pending.removeFirst()
