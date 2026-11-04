@@ -73,6 +73,8 @@ class SettingsBackedTitleGenerator(
                 // 但分支必须列出来 —— 这是穷尽式 `when`（sealed interface），
                 // 少一个分支直接编译失败。
                 is AiStreamEvent.ToolCallDelta -> Unit
+                // 思考增量同样忽略：标题描述的是**回答的主题**，推理不算内容。
+                is AiStreamEvent.ReasoningDelta -> Unit
                 is AiStreamEvent.Done -> Unit
             }
         }

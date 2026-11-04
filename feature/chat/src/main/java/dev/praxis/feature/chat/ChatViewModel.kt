@@ -1870,6 +1870,10 @@ class ChatViewModel(
                 is AiStreamEvent.ToolCalls -> Unit
                 // 工具参数进度：摘要场景不需要，忽略（穷尽 when 必须列出）。
                 is AiStreamEvent.ToolCallDelta -> Unit
+                // 思考增量同样忽略：摘要是对**正文**的压缩，推理不算内容。
+                // （这是 `when` 的第二处 —— 主流的 `startStream` 里还有一处，
+                // 两处都必须列出，漏一处就是 NO_ELSE_IN_WHEN 编译错误。）
+                is AiStreamEvent.ReasoningDelta -> Unit
                 is AiStreamEvent.Done -> Unit
             }
         }
