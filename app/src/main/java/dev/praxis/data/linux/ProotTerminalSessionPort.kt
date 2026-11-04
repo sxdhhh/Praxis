@@ -1220,8 +1220,8 @@ private class ScreenTap {
     fun offer(line: String) {
         // ## 控制标记不进屏幕（2026-11-05 修）
         //
-        // `CR_MARKER` / `DEAD_MARKER` / `SENTINEL` 是**协议内部标记**：
-        // 前者告诉下游「这一行要回车重写」，后者让 `execute` 知道命令跑完了。
+        // `CR_MARKER` / `DEAD_MARKER` 是**协议内部标记**：
+        // 前者告诉下游「这一行要回车重写」，后者让 execute 知道会话死了。
         // 它们只该进 [pending]（消费队列），不该进 [lines]（屏幕快照）。
         //
         // 旧实现两者都进 —— 但那时解码是逐字节 `b.toChar()`，
@@ -1230,12 +1230,25 @@ private class ScreenTap {
         // 屏幕上就冒出满地的 `PRAXIS_CR`。
         //
         // 这属于「修好一个 bug 暴露了另一个被掩盖的 bug」的典型。
-        // `SENTINEL` 在 `ProotTerminalSessionPort` 的 companion 里，
-        // 而 `ScreenTap` 是**顶层** private class（不在该类内部），
-        // 所以必须写限定名。
-        val isMarker = line == CR_MARKER ||
-            line == DEAD_MARKER ||
-            line.startsWith(ProotTerminalSessionPort.SENTINEL)
+        //
+        // ## 为什么不直接比 `line == CR_MARKER`（2026-11-05）
+        //
+        // `CR_MARKER` / `DEAD_MARKER` 是 `ProotTerminalSessionPort` 的
+        // 类内私有成员，而 `ScreenTap` 是**顶层** private class ——
+        // 它看不到那两个常量（CI #162 就是这么红的）。
+        //
+        // 与其把常量搬到文件级（那只是让作用域凑合上），不如让
+        // `ScreenTap` 守住一条**它自己能判断**的规则：
+        //
+        //   终端输出里永远不会含 NUL（0x00）。
+        //
+        // 这不是权宜之计 —— 它正是那两个常量**故意**用 `\u0000` 包裹的
+        // 原因（见它们的 KDoc：「NUL 包裹的固定标记在真实输出里不会出现」）。
+        // 所以 ScreenTap 依赖的是那条**设计契约**，而不是某个具体字符串。
+        //
+        // `SENTINEL`（`__PRAXIS_DONE__`）不含 NUL，因此不在过滤范围内 ——
+        // 它走的是真实命令输出，行为与修改前完全一致。
+        val isMarker = line.indexOf('\u0000') >= 0
         synchronized(lock) {
             if (!isMarker) {
                 lines.addLast(line)
