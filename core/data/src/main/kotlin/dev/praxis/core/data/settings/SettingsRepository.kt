@@ -63,30 +63,35 @@ class SettingsRepository(
         )
     }
 
-    /** 模型配置（不含密钥）。 */
+    /**
+     * 模型配置（不含密钥）——**当前生效的那个 profile**。
+     *
+     * ## 多配置之后这里读什么（2026-11-05）
+     *
+     * 先取 `model_profile_active` 拿到当前 id，再按该 id 读带前缀的 key；
+     * 没有 profile（老用户首次升级）时 [readModelSettings] 传 null，
+     * 读的是原来那批扁平 key —— 行为与多配置之前**逐字一致**。
+     *
+     * 所以升级路径是平滑的：
+     *
+     * ```
+     *   老用户：没有 model_profile_ids  -> profileId = null -> 读旧 key
+     *   新用户：createProfile 之后        -> profileId = p<ts> -> 读新 key
+     * ```
+     *
+     * ## 为什么不做一次性迁移
+     *
+     * 「启动时把旧 key 抄成 p:default:xxx」看似干净，但它是**写操作**：
+     * 抄一半崩了会得到两份不一致的配置。而按需读旧 key 是纯读，
+     * 不存在中间态 —— 用户第一次在设置页点「新建」时自然就走新结构了。
+     */
     val modelSettings: Flow<ModelSettings> = dataStore.data.map { prefs ->
-        val defaults = ModelSettings()
-        ModelSettings(
-            baseUrl = prefs[KEY_BASE_URL] ?: defaults.baseUrl,
-            model = prefs[KEY_MODEL] ?: defaults.model,
-            // 当前使用池里第几个。越界不在这里修：`activeModel` 会兜底
-            // 回落 0（见 ModelSettings）。这里原样还原是为了让设置页能看到
-            // 「用户上次到底选的是第几个」，而不是每次读都被悄悄改成 0。
-            modelIndex = prefs[KEY_MODEL_INDEX] ?: defaults.modelIndex,
-            temperature = prefs[KEY_TEMPERATURE] ?: defaults.temperature,
-            // 按名还原 + 兜底 Custom：降级安装/枚举改名时不抛异常。
-            provider = ApiProvider.fromNameOrDefault(prefs[KEY_MODEL_PROVIDER]),
-            // 上下文上限：默认 0（未知）。填错只会让进度条比例失真，
-            // 不会影响请求本身，所以不做上下界校验。
-            contextLimit = prefs[KEY_CONTEXT_LIMIT] ?: 0,
-            // 压缩阈值：夹在 0.1..0.95。
-            // 低于 0.1 会「每轮都压缩」（每次都多一次模型调用）；
-            // 高于 0.95 会「压缩请求自己先超限」。
-            compactThreshold = (prefs[KEY_COMPACT_THRESHOLD] ?: 0.75f).coerceIn(0.1f, 0.95f),
-            thinkingEffort = dev.praxis.core.model.settings.ThinkingEffort.entries
-                .firstOrNull { it.name == prefs[KEY_THINKING_EFFORT] }
-                ?: dev.praxis.core.model.settings.ThinkingEffort.None,
-        )
+        val activeId = prefs[KEY_PROFILE_ACTIVE]
+        // 只有 activeId 真的在一个已知 profile 里才用前缀读；
+        // 否则（老用户 / 刚删完）退回旧 key。
+        val known = prefs[KEY_PROFILE_IDS].orEmpty()
+        val profileId = activeId?.takeIf { it in known }
+        readModelSettings(prefs, profileId)
     }
 
     /**
@@ -149,9 +154,273 @@ class SettingsRepository(
     suspend fun setMaxConcurrentRequests(limit: Int) =
         put(KEY_MAX_CONCURRENT, limit.coerceAtLeast(0))
 
-    suspend fun setBaseUrl(url: String) = put(KEY_BASE_URL, url.trim())
 
-    suspend fun setModel(model: String) = put(KEY_MODEL, model.trim())
+    // ─────────────────────────────────────────────────────────────
+    // 多模型配置（2026-11-05）
+    // ─────────────────────────────────────────────────────────────
+    //
+    // ## 存储结构
+    //
+    // ```
+    //   model_profile_ids    StringSet   所有配置 id
+    //   model_profile_active String      当前生效的 id
+    //   model_profile_names  String      每配置显示名（`id\u0001name` 逐行）
+    //   p:<id>:base_url      等          该配置的全部参数（key 加前缀）
+    // ```
+    //
+    // ## 为什么用前缀 key 而不是「每配置一个 JSON」
+    //
+    // JSON 方案要在 `modelSettings` 的 Flow 里反序列化整个对象，而
+    // `SettingsBackedProvider` 每轮请求都读它 —— 多一次解析。
+    // 前缀 key 让「读一个字段」仍然是一次 map 查找，与单配置时完全一样。
+    //
+    // 代价是 key 数量翻倍，但 DataStore Preferences 本来就是扁平的，
+    // 这不增加任何结构复杂度。
+    //
+    // ## 旧配置怎么办
+    //
+    // 首次读到「没有任何 profile」时，把旧的扁平 key 收拢成一个名为
+    // 「默认配置」的 profile（见 `ensureDefaultProfile`）。用户升级后
+    // 看到的是自己原来的配置，不是一张白纸。
+
+    /** 所有配置 id（有序：新建的排在后面）。 */
+    private val KEY_PROFILE_IDS = stringPreferencesKey("model_profile_ids")
+
+    /** 当前生效的配置 id。 */
+    private val KEY_PROFILE_ACTIVE = stringPreferencesKey("model_profile_active")
+
+    /**
+     * 配置 id -> 显示名。
+     *
+     * 编码成 `id\u0001name` 逐行拼接而不是 StringSet：
+     * StringSet 无序，而配置列表要**保持用户建的顺序**。
+     * `\u0001` 是 ASCII 控制符，不可能出现在用户输入的名字里。
+     */
+    private val KEY_PROFILE_NAMES = stringPreferencesKey("model_profile_names")
+
+    /**
+     * 某配置的某个字段的 key。
+     *
+     * [profileId] 为 null/空 时返回 [legacy] —— 这就是**旧配置兼容**的全部：
+     * 没有 profileId 的调用方行为完全不变（读写的还是原来那批 key）。
+     */
+    private fun keyFor(profileId: String?, legacy: String): String =
+        if (profileId.isNullOrBlank()) legacy else "p:" + profileId + ":" + legacy
+
+    private fun profileKey(profileId: String?, suffix: String): Preferences.Key<String> =
+        stringPreferencesKey(keyFor(profileId, suffix))
+
+    /**
+     * 当前所有配置（含参数，不含密钥）。
+     *
+     * 每次发射都读全部配置 —— 配置数量是个位数，代价可忽略；
+     * 而「只读当前那条」会让下拉列表拿不到别的配置名。
+     */
+    val modelProfiles: Flow<dev.praxis.core.model.settings.ModelProfileSet> =
+        dataStore.data.map { prefs ->
+            val ids = prefs[KEY_PROFILE_IDS].orEmpty().toList()
+            val names = parseProfileNames(prefs[KEY_PROFILE_NAMES].orEmpty())
+            val profiles = ids.map { id ->
+                dev.praxis.core.model.settings.ModelProfile(
+                    id = id,
+                    name = names[id] ?: id,
+                    settings = readModelSettings(prefs, id),
+                )
+            }
+            dev.praxis.core.model.settings.ModelProfileSet(
+                profiles = profiles,
+                activeId = prefs[KEY_PROFILE_ACTIVE].orEmpty(),
+            )
+        }
+
+    /**
+     * 从 Preferences 里读一套模型参数。
+     *
+     * [profileId] 为 null 时读旧 key —— 与多配置之前的行为逐字一致。
+     */
+    private fun readModelSettings(
+        prefs: Preferences,
+        profileId: String?,
+    ): ModelSettings {
+        val defaults = ModelSettings()
+        return ModelSettings(
+            baseUrl = prefs[profileKey(profileId, "model_base_url")] ?: defaults.baseUrl,
+            model = prefs[profileKey(profileId, "model_id")] ?: defaults.model,
+            modelIndex = prefs[intPreferencesKey(keyFor(profileId, "model_index"))]
+                ?: defaults.modelIndex,
+            temperature = prefs[doublePreferencesKey(keyFor(profileId, "model_temperature"))]
+                ?: defaults.temperature,
+            provider = ApiProvider.fromNameOrDefault(
+                prefs[profileKey(profileId, "model_provider")],
+            ),
+            contextLimit = prefs[intPreferencesKey(keyFor(profileId, "context_limit"))] ?: 0,
+            compactThreshold = (
+                prefs[floatPreferencesKey(keyFor(profileId, "compact_threshold"))] ?: 0.75f
+                ).coerceIn(0.1f, 0.95f),
+            thinkingEffort = dev.praxis.core.model.settings.ThinkingEffort.entries
+                .firstOrNull { it.name == prefs[profileKey(profileId, "thinking_effort")] }
+                ?: dev.praxis.core.model.settings.ThinkingEffort.None,
+        )
+    }
+
+    /**
+     * 新建一个配置，返回它的 id。
+     *
+     * ## 为什么不校验重名
+     *
+     * 两个配置叫「公司」是用户自己的事 —— 拦住他只会让他改名而不是想清楚。
+     * 界面上靠「当前选中」区分，不靠名字唯一。
+     */
+    suspend fun createProfile(
+        name: String,
+        settings: ModelSettings = ModelSettings(),
+    ): String {
+        val id = "p" + System.currentTimeMillis()
+        dataStore.edit { prefs ->
+            prefs[KEY_PROFILE_IDS] = prefs[KEY_PROFILE_IDS].orEmpty() + id
+            prefs[KEY_PROFILE_NAMES] = appendProfileName(
+                prefs[KEY_PROFILE_NAMES].orEmpty(),
+                id,
+                name.ifBlank { "新配置" },
+            )
+            writeModelSettings(prefs, id, settings)
+            // 第一个配置自动成为当前 —— 否则用户建完发现「没生效」。
+            if (prefs[KEY_PROFILE_ACTIVE].isNullOrBlank()) prefs[KEY_PROFILE_ACTIVE] = id
+        }
+        return id
+    }
+
+    /** 切换当前配置。id 不存在时不做任何事（不写脏值）。 */
+    suspend fun setActiveProfile(id: String) {
+        dataStore.edit { prefs ->
+            if (id in prefs[KEY_PROFILE_IDS].orEmpty()) prefs[KEY_PROFILE_ACTIVE] = id
+        }
+    }
+
+    /** 重命名。id 不变，只改显示名。 */
+    suspend fun renameProfile(id: String, name: String) {
+        if (name.isBlank()) return
+        dataStore.edit { prefs ->
+            if (id !in prefs[KEY_PROFILE_IDS].orEmpty()) return@edit
+            prefs[KEY_PROFILE_NAMES] = appendProfileName(
+                prefs[KEY_PROFILE_NAMES].orEmpty(),
+                id,
+                name.trim(),
+            )
+        }
+    }
+
+    /**
+     * 删除一个配置。
+     *
+     * ## 三条规则
+     *
+     * 1. **最后一个不许删**：删完就一个配置都没有了，界面会空掉，
+     *    而「新建」按钮在空列表下也还在 —— 但用户会先懵一下。
+     *    留一个空配置比留一个空列表好。
+     * 2. **删的是当前配置时，自动切到剩下的第一个**，否则 `activeId`
+     *    指向一个不存在的 id，所有读取都会回落到旧 key（= 空配置）。
+     * 3. **不删 key 本体**：DataStore 没有「批量删前缀」的 API，
+     *    逐个删要枚举所有已知 key，漏一个就留脏数据。而这些 key 不再
+     *    被任何 id 引用，等价于死数据 —— 占几十字节，不值得为它冒删错的风险。
+     */
+    suspend fun deleteProfile(id: String) {
+        dataStore.edit { prefs ->
+            val ids = prefs[KEY_PROFILE_IDS].orEmpty()
+            if (ids.size <= 1 || id !in ids) return@edit
+            val remaining = ids - id
+            prefs[KEY_PROFILE_IDS] = remaining
+            prefs[KEY_PROFILE_NAMES] = removeProfileName(prefs[KEY_PROFILE_NAMES].orEmpty(), id)
+            if (prefs[KEY_PROFILE_ACTIVE] == id) {
+                prefs[KEY_PROFILE_ACTIVE] = remaining.first()
+            }
+        }
+    }
+
+    /** 写一套完整参数到某配置（新建时用）。 */
+    private fun writeModelSettings(
+        prefs: androidx.datastore.preferences.core.MutablePreferences,
+        profileId: String,
+        settings: ModelSettings,
+    ) {
+        prefs[profileKey(profileId, "model_base_url")] = settings.baseUrl
+        prefs[profileKey(profileId, "model_id")] = settings.model
+        prefs[intPreferencesKey(keyFor(profileId, "model_index"))] = settings.modelIndex
+        prefs[doublePreferencesKey(keyFor(profileId, "model_temperature"))] = settings.temperature
+        prefs[profileKey(profileId, "model_provider")] = settings.provider.name
+        prefs[intPreferencesKey(keyFor(profileId, "context_limit"))] = settings.contextLimit
+        prefs[floatPreferencesKey(keyFor(profileId, "compact_threshold"))] = settings.compactThreshold
+        prefs[profileKey(profileId, "thinking_effort")] = settings.thinkingEffort.name
+    }
+
+    private fun parseProfileNames(raw: String): Map<String, String> =
+        raw.split('\n')
+            .filter { it.isNotBlank() }
+            .mapNotNull { line ->
+                val idx = line.indexOf('\u0001')
+                if (idx <= 0) null else line.substring(0, idx) to line.substring(idx + 1)
+            }
+            .toMap()
+
+    private fun appendProfileName(raw: String, id: String, name: String): String {
+        val kept = raw.split('\n')
+            .filter { it.isNotBlank() }
+            .filterNot { it.startsWith(id + "\u0001") }
+        return (kept + (id + "\u0001" + name)).joinToString("\n")
+    }
+
+    private fun removeProfileName(raw: String, id: String): String =
+        raw.split('\n')
+            .filter { it.isNotBlank() }
+            .filterNot { it.startsWith(id + "\u0001") }
+            .joinToString("\n")
+
+    /**
+     * 把某个模型参数写进**当前 profile**（没有 profile 时写旧 key）。
+     *
+     * ## 为什么所有 setter 都走它
+     *
+     * 多配置之后，「设置页改了不生效」是这个功能最容易出的 bug：
+     * 界面显示的是当前 profile 的值，而写入写到了旧扁平 key ——
+     * 用户改完切走再回来，发现改动消失了。
+     *
+     * 统一走这一个入口，就不存在「某个 setter 忘了带前缀」的可能。
+     */
+    private suspend fun putModelPref(key: Preferences.Key<String>, value: String) {
+        dataStore.edit { prefs ->
+            val known = prefs[KEY_PROFILE_IDS].orEmpty()
+            val id = prefs[KEY_PROFILE_ACTIVE]?.takeIf { it in known }
+            prefs[if (id == null) key else stringPreferencesKey("p:" + id + ":" + key.name)] = value
+        }
+    }
+
+    private suspend fun putModelPrefInt(legacyName: String, value: Int) {
+        dataStore.edit { prefs ->
+            val known = prefs[KEY_PROFILE_IDS].orEmpty()
+            val id = prefs[KEY_PROFILE_ACTIVE]?.takeIf { it in known }
+            prefs[intPreferencesKey(keyFor(id, legacyName))] = value
+        }
+    }
+
+    private suspend fun putModelPrefDouble(legacyName: String, value: Double) {
+        dataStore.edit { prefs ->
+            val known = prefs[KEY_PROFILE_IDS].orEmpty()
+            val id = prefs[KEY_PROFILE_ACTIVE]?.takeIf { it in known }
+            prefs[doublePreferencesKey(keyFor(id, legacyName))] = value
+        }
+    }
+
+    private suspend fun putModelPrefFloat(legacyName: String, value: Float) {
+        dataStore.edit { prefs ->
+            val known = prefs[KEY_PROFILE_IDS].orEmpty()
+            val id = prefs[KEY_PROFILE_ACTIVE]?.takeIf { it in known }
+            prefs[floatPreferencesKey(keyFor(id, legacyName))] = value
+        }
+    }
+
+    suspend fun setBaseUrl(url: String) = putModelPref(KEY_BASE_URL, url.trim())
+
+    suspend fun setModel(model: String) = putModelPref(KEY_MODEL, model.trim())
 
     /**
      * 当前使用模型池里的第几个（0 起）。
@@ -161,23 +430,27 @@ class SettingsRepository(
      * 更难解释。上界不在这里夹：这里不知道池子有几项（那要去解析 model），
      * 由 [dev.praxis.core.model.settings.ModelSettings.activeModel] 兜底。
      */
-    suspend fun setModelIndex(index: Int) = put(KEY_MODEL_INDEX, index.coerceAtLeast(0))
+    suspend fun setModelIndex(index: Int) =
+        putModelPrefInt("model_index", index.coerceAtLeast(0))
 
-    suspend fun setTemperature(value: Double) = put(KEY_TEMPERATURE, value)
+    suspend fun setTemperature(value: Double) =
+        putModelPrefDouble("model_temperature", value)
 
     /** 选中的服务商预设（只用于回填 UI 与判断是否需要 key）。 */
-    suspend fun setModelProvider(provider: ApiProvider) = put(KEY_MODEL_PROVIDER, provider.name)
+    suspend fun setModelProvider(provider: ApiProvider) =
+        putModelPref(KEY_MODEL_PROVIDER, provider.name)
 
     /** 模型上下文上限（token）。0 = 未知（进度条不画比例）。 */
-    suspend fun setContextLimit(tokens: Int) = put(KEY_CONTEXT_LIMIT, tokens.coerceAtLeast(0))
+    suspend fun setContextLimit(tokens: Int) =
+        putModelPrefInt("context_limit", tokens.coerceAtLeast(0))
 
     /** 压缩阈值（0.1..0.95）。 */
     suspend fun setCompactThreshold(ratio: Float) =
-        put(KEY_COMPACT_THRESHOLD, ratio.coerceIn(0.1f, 0.95f))
+        putModelPrefFloat("compact_threshold", ratio.coerceIn(0.1f, 0.95f))
 
     /** 思考强度。 */
     suspend fun setThinkingEffort(effort: dev.praxis.core.model.settings.ThinkingEffort) =
-        put(KEY_THINKING_EFFORT, effort.name)
+        putModelPref(KEY_THINKING_EFFORT, effort.name)
 
     /**
      * 用户自定义系统提示词。
@@ -257,13 +530,38 @@ class SettingsRepository(
      */
     suspend fun setApiKey(key: String) {
         val trimmed = key.trim()
+        // ## 密钥必须按配置存（2026-11-05）
+        //
+        // 多配置之后，每个配置是**不同的服务商**，key 当然不同。
+        // 存在同一个 `model_api_key` 里会出这种后果：
+        //
+        //   配置 A（公司中转站）填了 keyA
+        //   切到配置 B（本地网关）-> 用的还是 keyA -> 401
+        //
+        // 而用户看到的是「我刚填过 key，怎么又不对了」。
+        val targetKey = profileScopedApiKeyName()
         if (trimmed.isEmpty()) {
-            put(KEY_API_KEY, "")
+            dataStore.edit { prefs -> prefs[stringPreferencesKey(targetKey)] = "" }
             return
         }
 
         val encrypted = cipher?.encrypt(trimmed)
-        put(KEY_API_KEY, encrypted ?: trimmed)
+        dataStore.edit { prefs ->
+            prefs[stringPreferencesKey(targetKey)] = encrypted ?: trimmed
+        }
+    }
+
+    /**
+     * 当前配置对应的 apiKey 存储名。
+     *
+     * 没有 profile（老用户）时返回旧名 `model_api_key` ——
+     * 行为与多配置之前完全一致，存量 key 不需要迁移。
+     */
+    private suspend fun profileScopedApiKeyName(): String {
+        val prefs = dataStore.data.first()
+        val known = prefs[KEY_PROFILE_IDS].orEmpty()
+        val id = prefs[KEY_PROFILE_ACTIVE]?.takeIf { it in known }
+        return keyFor(id, KEY_API_KEY.name)
     }
 
     /**
@@ -273,7 +571,9 @@ class SettingsRepository(
      * 并在下一次 [setApiKey] 时自动升级为密文（无需显式迁移脚本）。
      */
     suspend fun apiKey(): String {
-        val raw = dataStore.data.map { it[KEY_API_KEY] ?: "" }.first()
+        // 读当前配置那一份（没有 profile 时就是旧名，兼容存量）。
+        val name = profileScopedApiKeyName()
+        val raw = dataStore.data.map { it[stringPreferencesKey(name)] ?: "" }.first()
         if (raw.isEmpty()) return ""
 
         val c = cipher ?: return raw
