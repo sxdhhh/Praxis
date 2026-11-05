@@ -343,7 +343,15 @@ class ChatWiringGuardTest {
      */
     @Test
     fun chatInputBar_separatesSendAndEnqueue() {
+        // ## 必须先剥掉注释再断言
+        //
+        // 旧写法本身就写在注释里解释「为什么改掉」，而 `contains()` 会连注释
+        // 一起匹配 —— 第一版护栏因此误报（源码其实是正确的）。
+        // 断言要针对**代码**，不是针对「文件里出现过的任何文本」。
         val screen = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatScreen.kt")
+            .lineSequence()
+            .filterNot { it.trimStart().startsWith("//") || it.trimStart().startsWith("*") }
+            .joinToString("\n")
         assertTrue(
             "onSend 又被 onSendOrEnqueue 覆盖了",
             !screen.contains("onSend = onSendOrEnqueue ?: onSend"),
