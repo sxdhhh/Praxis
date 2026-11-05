@@ -106,4 +106,69 @@ class PendingQueueTest {
         assertTrue(long.preview.endsWith("…"))
         assertEquals(40, long.preview.length)
     }
+    // ── 编辑 / 重排（2026-11-06）──────────────────────────────────
+
+    /**
+     * 编辑成空串时**保留原正文**。
+     *
+     * 「编辑成空」与「删除」是两个意图。编辑弹窗清空后点确定，
+     * 用户以为只是没改到内容；若这里顺手删掉条目，那条排队就凭空消失了。
+     */
+    @Test
+    fun `编辑成空不删条目`() {
+        val queue = PendingQueue(items = listOf(QueuedMessage(1L, "原文")))
+        val next = PendingQueueOps.updateText(queue, 1L, "   ")
+        assertEquals("原文", next.items.single().text)
+    }
+
+    @Test
+    fun `编辑替换正文且不动其他条`() {
+        val queue = PendingQueue(
+            items = listOf(QueuedMessage(1L, "a"), QueuedMessage(2L, "b")),
+        )
+        val next = PendingQueueOps.updateText(queue, 2L, "改了")
+        assertEquals("a", next.items[0].text)
+        assertEquals("改了", next.items[1].text)
+    }
+
+    @Test
+    fun `重排按给定顺序`() {
+        val queue = PendingQueue(
+            items = listOf(QueuedMessage(1L, "a"), QueuedMessage(2L, "b"), QueuedMessage(3L, "c")),
+        )
+        val next = PendingQueueOps.reorder(queue, listOf(3L, 1L, 2L))
+        assertEquals(listOf(3L, 1L, 2L), next.items.map { it.id })
+    }
+
+    /**
+     * 重排时缺失的条目必须**追加在末尾**而不是丢掉。
+     *
+     * 拖拽期间若有新消息入队，UI 传来的 id 列表可能少一条。
+     * 直接按传入列表重建会静默丢掉那条 —— 用户排的消息就没了。
+     */
+    @Test
+    fun `重排不丢未列出的条目`() {
+        val queue = PendingQueue(
+            items = listOf(QueuedMessage(1L, "a"), QueuedMessage(2L, "b"), QueuedMessage(3L, "c")),
+        )
+        val next = PendingQueueOps.reorder(queue, listOf(3L, 1L))
+        assertEquals(listOf(3L, 1L, 2L), next.items.map { it.id })
+    }
+
+    @Test
+    fun `空重排返回原实例`() {
+        val queue = PendingQueue(items = listOf(QueuedMessage(1L, "a")))
+        assertSame(queue, PendingQueueOps.reorder(queue, emptyList()))
+    }
+
+    /** 类型由 images 派生，两者不可能不一致。 */
+    @Test
+    fun `带图的条目类型为 WithImages`() {
+        val item = QueuedMessage(
+            id = 1L,
+            text = "x",
+            images = listOf(dev.praxis.core.ai.ChatImage(mimeType = "image/png", base64 = "AA==")),
+        )
+        assertEquals(QueueItemKind.WithImages, item.kind)
+    }
 }

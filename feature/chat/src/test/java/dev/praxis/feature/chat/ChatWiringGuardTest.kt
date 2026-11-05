@@ -274,6 +274,45 @@ class ChatWiringGuardTest {
         )
     }
 
+    /**
+     * 队列面板的三个批量动作必须真的接到 ViewModel。
+     *
+     * ## 它防的是什么
+     *
+     * `ChatScreen` 的两个 Composable 都有 `onQueueXxx` 参数且默认 null。
+     * 只加参数、忘了在 `ChatTab` 传，编译**不会报错**，界面按钮照常渲染
+     * （面板按「回调非空」决定是否画），表现是「点了没反应」。
+     *
+     * 这正是我犯过两次的同类错误（`modelGroups` 内外层漏传），所以用源码级断言钉住。
+     */
+    @Test
+    fun chatTab_wiresQueueBulkActions() {
+        val tab = read("app/src/main/java/dev/praxis/ui/tab/ChatTab.kt")
+        for (name in listOf(
+            "onQueueReorder =",
+            "onQueueSendAll =",
+            "onQueueClearAll =",
+        )) {
+            assertTrue("ChatTab 没有向 ChatScreen 传 $name", tab.contains(name))
+        }
+    }
+
+    /**
+     * 队列面板必须真的把这三个动作画出来，且**动画不能省**。
+     *
+     * 用户明确要求「一定要有动画」：拖拽时其余条目要让位（animateItemPlacement），
+     * 新条目入队要高亮淡出（Animatable）。删掉任何一个都算功能回退。
+     */
+    @Test
+    fun queuePanel_rendersBulkActions() {
+        val panel = read("feature/chat/src/main/java/dev/praxis/feature/chat/queue/PendingQueuePanel.kt")
+        assertTrue("面板没有 onSendAll 形参", panel.contains("onSendAll"))
+        assertTrue("面板没有 onClearAll 形参", panel.contains("onClearAll"))
+        assertTrue("面板没有拖拽排序（onReorder）", panel.contains("onReorder"))
+        assertTrue("拖拽让位没有动画", panel.contains("animateItemPlacement"))
+        assertTrue("入队没有高亮动画", panel.contains("Animatable"))
+    }
+
     /** 端口必须真的提供枚举能力，且适配器按名字透出。 */
     @Test
     fun ptyPort_exposesSessionNames() {
