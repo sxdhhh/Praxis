@@ -48,6 +48,13 @@ data class LinuxEnvUiState(
      * 所以它是**独立维度**而不是 release 的一个取值。
      */
     val distro: LinuxDistro = LinuxDistro.Ubuntu,
+
+    /**
+     * 除当前选中之外、**实际也已安装**的发行版。
+     *
+     * 界面用它说明「还装了别的」，而不是让用户以为设备上只有这一个环境。
+     */
+    val installedOthers: List<LinuxDistro> = emptyList(),
     val release: UbuntuRelease = UbuntuRelease.Noble,
     val mirror: UbuntuMirror = UbuntuMirror.Tsinghua,
     /** 最近一行输出（给用户一个进度感，不放整块终端）。 */
@@ -224,6 +231,21 @@ interface LinuxEnvPort {
     fun isInstalled(env: LinuxEnvironment): Boolean
 
     /**
+     * 扫描**实际已安装**的发行版。
+     *
+     * ## 为什么需要它（2026-11-06 修「环境页永远显示 Ubuntu」）
+     *
+     * 旧实现把 `distro` 的初值硬编码成 `LinuxDistro.Ubuntu`，`refresh()`
+     * 又只用「当前选中项」去问 `isInstalled` —— 于是设备里实际装的是 Kali
+     * 时，界面仍然显示「尚未安装 Ubuntu」，用户以为环境没了。
+     *
+     * 检测必须以**文件系统事实**为依据，而不是以「界面选中了什么」为依据。
+     *
+     * 默认空列表：假端口（单测）不扫描目录，回落到选中项即可。
+     */
+    fun detectInstalledDistros(): List<LinuxDistro> = emptyList()
+
+    /**
      * 下载并解压 rootfs。
      *
      * @param onLine 每收到一行（或一个进度片段）回调，用于 UI 显示最近状态。
@@ -294,6 +316,25 @@ interface LinuxEnvPort {
 
     /** 停止 FTP 服务。幂等。 */
     suspend fun stopFtp() {}
+
+    // ── 配置持久化（2026-11-06）────────────────────────────────────
+
+    /**
+     * 读回上次保存的环境页配置。
+     *
+     * ## 为什么必须持久化
+     *
+     * 旧实现全放在 ViewModel 的 `_state` 里，而 `viewModel(key = "linux-env")`
+     * 只在同一导航层级存活 —— **退出设置页再进来，全部回到默认值**：
+     * 用户改了 FTP 端口、选了 Kali，下次进页面又变回 Ubuntu + 2121。
+     *
+     * 默认空设置：假端口（单测）不读写存储，行为与改动前一致。
+     */
+    suspend fun loadEnvSettings(): dev.praxis.core.linux.LinuxEnvSettings =
+        dev.praxis.core.linux.LinuxEnvSettings()
+
+    /** 保存环境页配置（每次修改都调）。 */
+    suspend fun saveEnvSettings(settings: dev.praxis.core.linux.LinuxEnvSettings) {}
 
     // ── 存储管理（2026-10-23 新增）────────────────────────────────
 
@@ -371,6 +412,19 @@ class LinuxEnvViewModel(
     val state: StateFlow<LinuxEnvUiState> = _state.asStateFlow()
 
     /** 当前交互会话（容器 shell）。 */
+    /**
+     * 用户是否**手动**选过发行版。
+     *
+     * ## 为什么必须有这个标志（2026-11-06）
+     *
+     * `refresh()` 现在会根据文件系统事实校正选中项。若没有这条闸，用户点了
+     * 「Kali」之后每轮 refresh 都会把他弹回探测结果 —— 选择根本存不住。
+     *
+     * 只在 [selectDistro] 里置位。进程重启后回到 false，那时按事实探测
+     * 才是正确的（用户没有在本进程里表达过偏好）。
+     */
+    private var userPickedDistro = false
+
     private var shellSession: LinuxEnvPort.SessionHandle? = null
 
     /** 当前 sshd 会话。 */
@@ -383,7 +437,65 @@ class LinuxEnvViewModel(
 
 
     init {
-        refresh()
+        // ## 先读回持久化配置，再刷新（2026-11-06）
+        //
+        // 顺序不能反：`refresh()` 会按文件系统事实校正选中项，也会写 summary。
+        // 若先 refresh 再读配置，用户上次选的发行版会被探测结果覆盖一次，
+        // 界面出现一帧 Ubuntu 再跳回 Kali —— 而那一帧恰好是他看到的。
+        viewModelScope.launch {
+            val saved = runCatching { port.loadEnvSettings() }.getOrNull()
+            if (saved != null) {
+                applySavedSettings(saved)
+            }
+            refresh()
+        }
+    }
+
+    /**
+     * 把读回的配置铺进状态。
+     *
+     * ## 为什么 `distro` 也要恢复
+     *
+     * 用户上次选了 Kali，这次进来若回到 Ubuntu，`refresh()` 会看到
+     * 「Ubuntu 未安装」—— 而实际装着的是 Kali。恢复发行版后，
+     * 探测与事实才对得上。
+     *
+     * ## 为什么恢复后要置 `userPickedDistro`
+     *
+     * 持久化的选择**等价于**用户手动选过。不置位的话，随后的 `refresh()`
+     * 会按探测结果把它覆盖掉 —— 用户会发现「明明存了却没生效」。
+     */
+    private fun applySavedSettings(saved: dev.praxis.core.linux.LinuxEnvSettings) {
+        val restoredDistro = LinuxDistro.entries
+            .firstOrNull { it.name == saved.distroName }
+        if (restoredDistro != null) userPickedDistro = true
+        _state.update {
+            it.copy(
+                distro = restoredDistro ?: it.distro,
+                ftpConfig = saved.toFtpSettings(password = it.ftpConfig.password),
+            )
+        }
+    }
+
+    /**
+     * 落盘当前配置。
+     *
+     * ## 为什么每次修改都调而不是退出时调一次
+     *
+     * 「退出时保存」依赖一个可靠的退出信号，而在 Android 上切后台、
+     * 划掉、被系统回收都不会给应用那个机会。每改一次就写，
+     * 最多多几次 DataStore 写（很小的键值），换来「输入即保存」的确定性。
+     */
+    private fun persistSettings() {
+        val current = _state.value
+        viewModelScope.launch {
+            runCatching {
+                port.saveEnvSettings(
+                    dev.praxis.core.linux.LinuxEnvSettings.fromFtpSettings(current.ftpConfig)
+                        .copy(distroName = current.distro.name),
+                )
+            }
+        }
     }
 
     /**
@@ -448,6 +560,9 @@ class LinuxEnvViewModel(
     fun selectDistro(distro: LinuxDistro): Boolean {
         if (_state.value.distro == distro) return false
         if (_state.value.busy) return false
+        // 标记「用户手动选过」：否则紧随其后的 refresh 会按文件系统事实
+        // 把选中项弹回去，用户的选择等于没生效。
+        userPickedDistro = true
         _state.update { it.copy(distro = distro, summary = "") }
         refresh()
         return true
@@ -525,9 +640,26 @@ class LinuxEnvViewModel(
     }
 
     fun refresh(keepSummary: Boolean = false) {
+        // ## 先按文件系统事实校正「选中项」（2026-11-06）
+        //
+        // 旧实现直接用 `_state.value.distro` 去问装没装。而它的初值是
+        // 硬编码的 `Ubuntu`，于是设备里实际装的是 Kali 时，界面永远显示
+        // 「尚未安装 Ubuntu」—— 用户以为环境丢了。
+        //
+        // 现在先探测实际装了哪些，在**用户没有手动选过**的前提下采纳探测结果。
+        // `userPickedDistro` 是必需的：没有它，用户点了「Kali」后每轮
+        // refresh 都会把他弹回探测到的第一个发行版 —— 选择根本存不住。
+        val detected = runCatching { port.detectInstalledDistros() }.getOrNull().orEmpty()
+        if (!userPickedDistro && detected.isNotEmpty() && detected.first() != _state.value.distro) {
+            _state.update { it.copy(distro = detected.first()) }
+        }
+
         val env = envFor(_state.value.distro)
         val prootOk = port.isProotAvailable()
         val installed = port.isInstalled(env)
+        // 已装的其他发行版：界面据此说明「还装了别的」，
+        // 而不是让用户以为只有当前这一个。
+        val installedOthers = detected.filter { it != _state.value.distro }
         // 共享 rootfs 的两个独立事实，每次 refresh 都重读：
         //  - origin：底层从哪个镜像解出来（只有重装才变）；
         //  - activeSources：/etc/apt 当前指向谁（换源就变）。
@@ -559,6 +691,7 @@ class LinuxEnvViewModel(
                 running = running,
                 rootfsOrigin = origin,
                 activeSources = activeSources,
+                installedOthers = installedOthers,
                 summary = if (keepSummary && it.summary.isNotBlank()) it.summary else derived,
             )
         }
@@ -1044,6 +1177,8 @@ class LinuxEnvViewModel(
 
     fun updateFtpConfig(cfg: FtpSettings) {
         _state.update { it.copy(ftpConfig = cfg) }
+        // 输入即保存：见 `persistSettings` 的说明。
+        persistSettings()
     }
 
     /**

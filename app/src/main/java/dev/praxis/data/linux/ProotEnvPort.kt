@@ -1427,6 +1427,39 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
         }
     }
 
+    // ── 发行版探测（2026-11-06 修「环境页永远显示 Ubuntu」）──────────
+
+    /**
+     * 扫描实际已安装的发行版。
+     *
+     * ## 判据是文件系统事实，不是界面选中项
+     *
+     * 两个发行版共用同一个 rootfs（见 `rootfsDirOf`），所以「装没装」对它们
+     * 是**同一个事实**。但底层是从哪个镜像解出来的，由 `rootfsOrigin()`
+     * （读 `/etc/os-release` 或标记文件）区分。
+     *
+     * ## 为什么要做交叉校验
+     *
+     * 只凭 `isInstalled` 会得出「Ubuntu 和 Kali 都装了」的错误结论 ——
+     * 因为它们看同一个目录。只有 origin 才能回答「实际是哪一个」。
+     * origin 读不到时才退回「按已安装列出全部」，让用户自己选。
+     */
+    override fun detectInstalledDistros(): List<dev.praxis.core.linux.LinuxDistro> =
+        runCatching {
+            val candidates = dev.praxis.core.linux.LinuxDistro.entries.filter { distro ->
+                isInstalled(defaultEnvironment(distro))
+            }
+            if (candidates.isEmpty()) return@runCatching emptyList()
+            // 用 origin 收窄到「实际是哪一个」。
+            val origin = defaultEnvironment(candidates.first()).rootfsOrigin()
+            if (origin == null) {
+                candidates
+            } else {
+                candidates.filter { it.name.equals(origin, ignoreCase = true) }
+                    .ifEmpty { candidates }
+            }
+        }.getOrDefault(emptyList())
+
     // ── FTP（2026-11-06：进程内服务，不再走容器内 vsftpd）─────────────
     //
     // 为什么不用 `startSession` 起 vsftpd：真机实测那条路走不通。
@@ -1438,6 +1471,76 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
 
     /** 进程内 FTP 服务（懒创建：从未用过 FTP 的用户不占资源）。 */
     private val ftpServer: PraxisFtpServer by lazy { PraxisFtpServer() }
+
+    // ── 配置持久化（2026-11-06）────────────────────────────────────
+
+    /**
+     * 环境页配置的存储实现。
+     *
+     * ## 为什么用可空委托而不是构造注入
+     *
+     * `ProotEnvPort` 由 Koin 以 `single { }` 构造，构造签名改动会影响
+     * 所有调用点（含测试里的直接 new）。用一个后置注入的委托，
+     * 未注入时 `loadEnvSettings` 返回默认值、`saveEnvSettings` 空操作 ——
+     * 与「不落盘模式」的既有语义一致。
+     */
+    var envSettingsStore: dev.praxis.core.data.settings.SettingsRepository? = null
+
+    override suspend fun loadEnvSettings(): dev.praxis.core.linux.LinuxEnvSettings {
+        val store = envSettingsStore ?: return dev.praxis.core.linux.LinuxEnvSettings()
+        val distro = runCatching { store.linuxEnvDistro() }.getOrDefault("")
+        // FTP 运行时配置用一行文本存：`port|user|home|lo|hi|readOnly|max`。
+        // 与队列存档同一取舍（不引 JSON 库，字段全是无分隔符的安全值）。
+        val ftpRaw = runCatching { store.ftpRuntime() }.getOrDefault("")
+        val base = if (distro.isBlank()) {
+            dev.praxis.core.linux.LinuxEnvSettings()
+        } else {
+            dev.praxis.core.linux.LinuxEnvSettings(distroName = distro)
+        }
+        return applyFtpRaw(base, ftpRaw)
+    }
+
+    override suspend fun saveEnvSettings(settings: dev.praxis.core.linux.LinuxEnvSettings) {
+        val store = envSettingsStore ?: return
+        runCatching { store.setLinuxEnvDistro(settings.distroName) }
+        runCatching { store.setFtpRuntime(ftpRawOf(settings)) }
+    }
+
+    private fun ftpRawOf(s: dev.praxis.core.linux.LinuxEnvSettings): String = listOf(
+        s.ftpPort.toString(),
+        s.ftpUser,
+        s.ftpHomeDirectory,
+        s.ftpPassivePortLow.toString(),
+        s.ftpPassivePortHigh.toString(),
+        if (s.ftpReadOnly) "1" else "0",
+        s.ftpMaxConnections.toString(),
+    ).joinToString("|")
+
+    /**
+     * 解析 FTP 运行时配置。
+     *
+     * ## 为什么逐字段 `toIntOrNull` 而不是整份失败
+     *
+     * 单个坏字段（比如端口被写成 `abc`）不该让整份配置读不出来 ——
+     * 其余设置照常生效，只有那一个回落默认值。
+     */
+    private fun applyFtpRaw(
+        base: dev.praxis.core.linux.LinuxEnvSettings,
+        raw: String,
+    ): dev.praxis.core.linux.LinuxEnvSettings {
+        if (raw.isBlank()) return base
+        val parts = raw.split('|')
+        if (parts.size < 7) return base
+        return base.copy(
+            ftpPort = parts[0].toIntOrNull() ?: base.ftpPort,
+            ftpUser = parts[1].ifBlank { base.ftpUser },
+            ftpHomeDirectory = parts[2].ifBlank { base.ftpHomeDirectory },
+            ftpPassivePortLow = parts[3].toIntOrNull() ?: base.ftpPassivePortLow,
+            ftpPassivePortHigh = parts[4].toIntOrNull() ?: base.ftpPassivePortHigh,
+            ftpReadOnly = parts[5] == "1",
+            ftpMaxConnections = parts[6].toIntOrNull() ?: base.ftpMaxConnections,
+        )
+    }
 
     override suspend fun startFtp(settings: dev.praxis.core.linux.FtpSettings): String? =
         ftpServer.start(settings)
