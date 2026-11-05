@@ -36,3 +36,6 @@ app/src/main/assets/rootfs/*.part
 # 构建日志（本地调试产物，不入库）
 build.log
 *.build.log
+
+# JVM 崩溃转储（几十 MB，不该进仓库）
+*.hprof
