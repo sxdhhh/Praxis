@@ -44,9 +44,12 @@ class SystemPromptBuilderTest {
     @Test
     fun `未设置用户提示词时不影响其余分层`() {
         val layers = SystemPromptBuilder.buildLayers(settings = SystemPromptSettings())
-        // 只有内置人格一条。
-        assertEquals(1, layers.size)
+        // 内置人格 + 记忆工作流说明（2026-11-05 起，没有手动记忆时
+        // 会注入一段「先搜记忆 -> 开工 -> 写回记忆」的说明，
+        // 否则模型不知道自己有 search_memory / save_memory）。
+        assertEquals(2, layers.size)
         assertTrue(layers[0].text.contains("Praxis"))
+        assertTrue(layers[1].text.contains("search_memory"))
     }
 
     @Test
@@ -82,7 +85,26 @@ class SystemPromptBuilderTest {
             skills = "   ",
             memory = "",
         )
-        assertEquals(2, layers.size)
+        // 用户规则 + 内置人格 + 记忆工作流说明。
+        // 空白字符串仍会生成**非空**内容 —— 系统提示词里不会出现空 system 消息
+        //（空 system 会被部分网关报 400）。
+        assertEquals(3, layers.size)
         layers.forEach { assertTrue(it.text.isNotBlank()) }
+    }
+
+    /**
+     * 有手动记忆时**不**注入工作流说明（两者互斥）。
+     *
+     * 用户把记忆贴进输入框时，他给的是材料；此时再叠一段「你自己去搜」
+     * 会互相干扰 —— 而且记忆已在上下文里，再搜一遍是浪费。
+     */
+    @Test
+    fun `有手动记忆时不注入工作流说明`() {
+        val layers = SystemPromptBuilder.buildLayers(
+            settings = SystemPromptSettings(),
+            memory = "记忆Z",
+        )
+        assertTrue(layers.any { it.text.contains("记忆Z") })
+        assertTrue(layers.none { it.text.contains("search_memory") })
     }
 }

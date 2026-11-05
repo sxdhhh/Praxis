@@ -1118,8 +1118,10 @@ class ChatViewModel(
     /**
      * 取最近写入的记忆正文（附件面板的「记忆」格用）。
      *
-     * 与 `recallMemoryBlock` 的区别：那个要查询词做相关度检索（发送前自动调用），
-     * 这个只是「我最近记了什么」，用于用户手动把记忆作为上下文带进这一句。
+     * 只做「我最近记了什么」，用于用户手动把记忆作为上下文带进这一句。
+     *
+     * 相关度检索（按 query 捞）不在这里：那条路已交给模型自己调
+     * `search_memory` 工具，见 `app/data/memory/MemoryTools.kt`。
      *
      * 空列表表示没记忆或端口不可用 —— 调用方转为提示，不静默失败。
      */
@@ -1751,7 +1753,28 @@ class ChatViewModel(
      *  3. 字符预算兜底裁剪：极端长文本时才生效（机械丢弃，不是语义压缩）。
      */
     private suspend fun buildPreparedMessages(config: RuntimeConfig): List<ChatMessage> {
-        val memoryBlock = recallMemoryBlock()
+        // ## 记忆不再自动注入（2026-11-05）
+        //
+        // 用户原话：「长期记忆应该让 ai 自己去搜而不是直接放提示词里。
+        // 每轮先搜记忆 -> 开工 -> 写回记忆」。
+        //
+        // 旧做法在这里调 `recallMemoryBlock()`：拿「最后一条用户消息」当 query
+        // 去检索，把结果拼进 system。两个问题：
+        //
+        //  1. **搜得太早**。发送这一刻还不知道这轮要做什么，
+        //     只能拿用户那句话当 query；而真正需要记忆的时刻往往是
+        //     「执行到一半想起某个约定」，那时的 query 已经完全不同。
+        //  2. **搜错了没有补救**。注入进来一旦不相关就白占上下文，
+        //     模型也无法要求「换一批」。
+        //
+        // 现在改由模型调用 `search_memory` / `save_memory` 两个工具
+        // （见 `app/data/memory/MemoryTools.kt`）。检索时机与 query 由它掌握，
+        // 而这正是它擅长的判断。
+        //
+        // 注意：`Memory` 这一层仍保留在 `SystemPromptBuilder` 里 ——
+        // 用户手动把记忆作为**附件**贴进输入框时，那段文本走的是
+        // 「用户提供的材料」，与自动检索不是一回事。
+        val memoryBlock: String? = null
 
         val skills = runCatching { skillsPromptProvider?.invoke() }.getOrNull()
         val layered = SystemPromptBuilder.buildLayers(
@@ -1771,14 +1794,15 @@ class ChatViewModel(
         return ContextAssembler.assemble(withSummary)
     }
 
-    private suspend fun recallMemoryBlock(): String? {
-        val port = memoryPort ?: return null
-        val query = history.lastOrNull { it.role == ChatRole.User }?.text ?: return null
-        if (query.isBlank()) return null
-        val recalled = runCatching { port.recall(query) }.getOrDefault(emptyList())
-        if (recalled.isEmpty()) return null
-        return recalled.joinToString("\n") { "- $it" }
-    }
+    // `recallMemoryBlock()` 已删除（2026-11-05）。
+    //
+    // 它原本在每一轮的 `buildPreparedMessages` 里按「最后一条用户消息」
+    // 去检索记忆并拼进 system。现在记忆改由模型自己调 `search_memory`
+    // 检索（见 `app/data/memory/MemoryTools.kt`），这条自动路径不再被调用。
+    //
+    // 选择删除而不是留着：留一个「存在但没人调用」的检索入口，
+    // 下一个人很容易以为它还在生效，从而在别处重复注入一次记忆。
+    // 用户手动贴记忆（附件面板）走的是 `recentMemories`，那条保留。
 
     /**
      * 把用量写进状态（供输入栏上方的进度条渲染）。

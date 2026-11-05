@@ -106,7 +106,34 @@ data class SystemPromptSettings(
         get() = persona.trim().takeIf { it.isNotEmpty() } ?: BUILTIN_PERSONA
 
     companion object {
-        /** 内置人格。与 user 的提示词冲突时，以用户为准。 */
+        /**
+     * 记忆工作流说明（没有手动记忆时注入）。
+     *
+     * ## 为什么必须写清楚顺序
+     *
+     * 用户的要求是「每轮先搜记忆 -> 开工 -> 写回记忆」。
+     * 这三步模型不会自己想到：
+     *
+     *  - **先搜**：不提醒就会直接开工，然后在中途发现缺少用户偏好；
+     *  - **写回**：不提醒就永远只读不写，记忆库一直是空的；
+     *  - **只在值得时写**：不提醒会把中间结果也写进去，
+     *    记忆被噪音填满，下一轮检索质量反而下降。
+     *
+     * 措辞上刻意把「写」描述成**有门槛**的动作，而不是「记得就写」——
+     * 后者会让模型每轮都写一条，很快就没法用了。
+     */
+    const val MEMORY_WORKFLOW_INSTRUCTION: String =
+        "# 记忆的使用方式\n\n" +
+            "你可以用 search_memory 检索长期记忆、用 save_memory 写入。" +
+            "请按这个顺序工作：\n" +
+            "1. **开工前先 search_memory**：拿当前任务的核心名词当 query。" +
+            "这一步能避免重复劳动（用户以前可能已经交代过做法或已经做过）。\n" +
+            "2. 然后正常执行任务。中途想到别的线索可以再搜一次。\n" +
+            "3. **收尾时判断是否值得写回**：只写「下次还会用到」的事实" +
+            "（用户偏好、环境约定、已做出的决定）。一次性的中间结果不要写。\n\n" +
+            "检索不到不代表出错 —— 说明这条还没被记过，按新任务处理即可。"
+
+    /** 内置人格。与 user 的提示词冲突时，以用户为准。 */
         const val BUILTIN_PERSONA: String =
             "你是 Praxis，运行在 Android 上的 AI 智能体工作台。回答要准确、具体、" +
                 "有可执行性；不确定时明确说不确定，不要编造事实、链接或文件路径。"
@@ -175,11 +202,27 @@ object SystemPromptBuilder {
             )
         }
 
-        // ④ 记忆（事实）。
+        // ④ 记忆。
+        //
+        // ## 两种情况要分开（2026-11-05）
+        //
+        // | 来源 | 传什么 | 语义 |
+        // |---|---|---|
+        // | 用户手动贴（附件面板） | memory 非空 | 「用户给我的材料」 |
+        // | 模型自己检索 | memory 为 null | 走 search_memory 工具 |
+        //
+        // 自动检索已经取消（用户要求「让 ai 自己去搜而不是直接放提示词里」），
+        // 所以 memory 为 null 是**常态**。此时要告诉模型「你可以自己去查」，
+        // 否则它不知道自己有这个能力 —— 工具存在但没人告诉它该何时用。
         if (!memory.isNullOrBlank()) {
             layers += ChatMessage(
                 role = ChatRole.System,
                 text = "以下是关于用户的已知事实，仅在相关时参考：\n" + memory.trim(),
+            )
+        } else {
+            layers += ChatMessage(
+                role = ChatRole.System,
+                text = MEMORY_WORKFLOW_INSTRUCTION,
             )
         }
 
