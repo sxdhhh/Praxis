@@ -1,4 +1,4 @@
-﻿package dev.praxis.di
+package dev.praxis.di
 
 import androidx.room.Room
 import dev.praxis.BuildConfig
@@ -408,19 +408,51 @@ val appModule = module {
             //  3. 含写操作必须声明 hasSideEffects —— 否则失败时会被误判为可安全重试。
             //
             // 装载时**不执行任何东西**：只解析 + 校验 + 注册。
+            // ## 启动期 IO 必须容错（2026-11-06 闪退审查）
+            //
+            // 这里是 Koin 的单例体：**任何异常都会炸掉整个 DI 图**，
+            // App 直接闪退，而用户看到的只是「打开就退」。
+            //
+            // 自定义工具只是增强功能 —— 目录不可读、文件损坏都不该让 App 起不来。
+            // 所以整段包 `runCatching`，失败就当成「没有自定义工具」。
             run {
-                val toolsDir = java.io.File(androidContext().filesDir, "tools")
-                toolsDir.mkdirs()
-                val source = dev.praxis.data.custom.CustomToolSource(toolsDir)
-                val (defs, skipped) = kotlinx.coroutines.runBlocking { source.list() }
+                val loaded = runCatching {
+                    val toolsDir = java.io.File(androidContext().filesDir, "tools")
+                    toolsDir.mkdirs()
+                    val source = dev.praxis.data.custom.CustomToolSource(toolsDir)
+                    // `runBlocking` 在这里可接受：单例构造是同步的，而读取
+                    // 只在启动时发生一次、目录通常为空（几毫秒）。
+                    // 真正的问题是**异常**，不是耗时 —— 已由外层 runCatching 兜住。
+                    kotlinx.coroutines.runBlocking { source.list() }
+                }.getOrElse { e ->
+                    dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
+                        "custom-tool",
+                        "自定义工具加载失败（忽略）：${e.message ?: e::class.simpleName}",
+                    )
+                    emptyList<dev.praxis.core.tool.custom.CustomToolDefinition>() to
+                        emptyList<String>()
+                }
+                val (defs, skipped) = loaded
                 skipped.forEach {
                     dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
                         "custom-tool",
                         "自定义工具跳过：$it",
                     )
                 }
+                // ## 不能在这里 `get<ToolExecutor>()`（2026-11-06 闪退根因）
+                //
+                // `ToolExecutor` 的构造参数是 `ToolRegistry`，而我们现在**正在**
+                // 构造 `ToolRegistry`。在单例体内部再向 Koin 要 ToolExecutor，
+                // 就形成 `ToolRegistry → ToolExecutor → ToolRegistry` 的环，
+                // Koin 直接抛 `CircularDependencyException` —— **App 启动即崩**。
+                //
+                // 正解：让 runner 延迟取值。`CustomToolRunner` 只在**真正执行**
+                // 自定义工具时才需要 executor，而那一定发生在启动之后。
+                // 传一个 lambda，由它在调用那一刻向 Koin 要。
                 val runner = dev.praxis.core.tool.custom.CustomToolRunner(
-                    executor = get<dev.praxis.core.tool.ToolExecutor>(),
+                    executorProvider = {
+                        org.koin.core.context.GlobalContext.get().get()
+                    },
                 )
                 defs.forEach { def ->
                     val issues = dev.praxis.core.tool.custom.CustomToolValidator.validate(def)

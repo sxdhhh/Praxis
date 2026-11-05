@@ -29,7 +29,20 @@ import kotlinx.coroutines.withTimeoutOrNull
  * 不出来（界面显示的是「调用了自定义工具」）。
  */
 class CustomToolRunner(
-    private val executor: ToolExecutor,
+    /**
+     * 执行器**提供者**，而不是执行器本身。
+     *
+     * ## 为什么是 lambda（2026-11-06，启动闪退根因）
+     *
+     * `ToolExecutor` 的构造参数是 `ToolRegistry`。而本 runner 是在
+     * `ToolRegistry` 自己的 Koin 单例体里创建的 —— 直接要 `ToolExecutor`
+     * 会形成 `ToolRegistry → ToolExecutor → ToolRegistry` 的环，
+     * Koin 抛 `CircularDependencyException`，App 启动即崩。
+     *
+     * 用 lambda 把取值推迟到**真正执行自定义工具**的那一刻：那时
+     * `ToolRegistry` 早已构造完毕，环不存在。
+     */
+    private val executorProvider: () -> ToolExecutor,
     /** 总超时（毫秒）。默认 120 秒，与 PTC runtime 默认值一致。 */
     private val timeoutMs: Long = DEFAULT_TIMEOUT_MS,
 ) {
@@ -66,7 +79,8 @@ class CustomToolRunner(
                     argumentsJson = toJsonObject(bound),
                 )
                 val execution = try {
-                    executor.executeAll(listOf(invocation), context).single()
+                    // 在这里才向 Koin 要 executor（见构造参数的 KDoc）。
+                    executorProvider().executeAll(listOf(invocation), context).single()
                 } catch (cancel: CancellationException) {
                     throw cancel
                 }
