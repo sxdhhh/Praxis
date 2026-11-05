@@ -67,11 +67,11 @@ fun InstallLogPanel(
     // 日志是单一份列表，不需要 resetKey（见 AutoFollowScrollLazy 的 KDoc）。
     val listState = rememberLazyListState()
 
+    // miuix 的 `Card` 只接 modifier 与内容：颜色/圆角/阴影由主题统一决定。
+    // 传 Material3 的 `colors`/`shape`/`elevation` 会编译不过 ——
+    // 那是另一套 Card。与 `LinuxEnvScreen` 里的用法保持一致。
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MiuixTheme.colorScheme.surfaceVariant),
-        shape = PraxisRadius.MediumShape,
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // ── 标题行：整行可点，切换展开 ────────────────────────

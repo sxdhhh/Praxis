@@ -48,7 +48,7 @@ class ReadSpillTool(
 
     override suspend fun execute(argumentsJson: String, context: ToolContext): ToolResult {
         val args = dev.praxis.core.tool.ToolArguments.parse(argumentsJson)
-        val locator = args.string("locator", "")
+        val locator = args.string("locator")
         if (locator.isBlank()) {
             return ToolResult(content = "缺少 locator 参数。", isError = true)
         }

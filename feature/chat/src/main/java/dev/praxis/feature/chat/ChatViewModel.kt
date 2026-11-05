@@ -2775,10 +2775,19 @@ class ChatViewModel(
             )
         }
         // 用量变了，重算一次让进度条立刻反映真实情况。
-        // 配置只取一次：`readRuntimeConfig` 要读 DataStore，取两次是白跑一趟，
+        //
+        // ## 为什么必须起协程
+        //
+        // `readRuntimeConfig()` 与 `buildPreparedMessages()` 都是 suspend：
+        // 前者要读 DataStore，后者要拼提示词并应用压缩。`undoCompaction`
+        // 本身是给 UI 直接调的普通函数，所以这里用 `viewModelScope.launch`。
+        //
+        // 配置只取一次：取两次是白跑一趟（各读一次 DataStore），
         // 而且两次之间用户改设置的话，算出来的消息与配置会对不上。
-        val config = readRuntimeConfig()
-        publishUsage(buildPreparedMessages(config), config)
+        viewModelScope.launch {
+            val config = readRuntimeConfig()
+            publishUsage(buildPreparedMessages(config), config)
+        }
     }
     /**
      * 清空当前对话（`/clear`）。

@@ -318,36 +318,6 @@ data class ChatState(
     val streamingText: Map<Long, String> = emptyMap(),
     val input: String = "",
 
-    /**
-     * `/` 命令候选的过滤词；null 表示「当前不该显示命令面板」。
-     *
-     * ## 为什么是派生属性而不是一个独立字段
-     *
-     * 它完全由 [input] 决定。存成字段就要在每一处改 input 的地方同步维护，
-     * 漏一处就会出现「输入框里已经没有斜杠了，命令面板还挂着」。
-     * 派生属性不存在这种可能。
-     *
-     * ## 取值规则（与 `SlashCommand.parse` 保持严格一致）
-     *
-     * 只在「输入以 `/` 开头且尚未输入到空白之后」时返回非 null：
-     *
-     * | input | slashQuery |
-     * |---|---|
-     * | `"/"` | `""`（显示全部命令） |
-     * | `"/co"` | `"co"` |
-     * | `"/compact"` | `"compact"`（仍显示，便于确认要打的就是它） |
-     * | `"/compact "` | null（已经进入参数阶段，列表该收起） |
-     * | `"hi /co"` | null（不在开头） |
-     */
-    val slashQuery: String?
-        get() {
-            if (!input.startsWith('/')) return null
-            val body = input.substring(1)
-            // 出现空白 = 命令名已打完，进入参数阶段：收起候选。
-            val firstSpace = body.indexOfFirst { it == ' ' || it == '\t' || it == '\n' }
-            if (firstSpace >= 0) return null
-            return body
-        }
 
     /**
      * 已选好、**尚未发送**的图片（多模态输入）。
@@ -642,6 +612,38 @@ data class ChatState(
 
     /** 是否处于「已发出、未收尾」的中间态（决定发送键显示停还是发送）。 */
     val isBusy: Boolean get() = isStreaming || stage != ChatStage.Idle
+
+    /**
+     * `/` 命令候选的过滤词；null 表示「当前不该显示命令面板」。
+     *
+     * ## 为什么是派生属性而不是构造参数
+     *
+     * 它完全由 [input] 决定。做成构造参数就要在每一处改 input 的地方
+     * 同步维护，漏一处就会出现「输入框里已经没有斜杠了，命令面板还挂着」；
+     * 而且 `data class` 的 `copy()` 会把它当成独立字段复制，
+     * 于是改 input 却忘了改它时，两者会永久不一致。
+     *
+     * ## 取值规则（与 `SlashCommand.parse` 保持严格一致）
+     *
+     * 只在「输入以 `/` 开头且尚未输入到空白之后」时返回非 null：
+     *
+     * | input | slashQuery |
+     * |---|---|
+     * | `/` | 空串（显示全部命令） |
+     * | `/co` | `co` |
+     * | `/compact` | `compact`（仍显示，便于确认要打的就是它） |
+     * | `/compact ` | null（已进入参数阶段，列表该收起） |
+     * | `hi /co` | null（不在开头） |
+     */
+    val slashQuery: String?
+        get() {
+            if (!input.startsWith('/')) return null
+            val body = input.substring(1)
+            // 出现空白 = 命令名已打完，进入参数阶段：收起候选。
+            val firstSpace = body.indexOfFirst { it == ' ' || it == '\t' || it == '\n' }
+            if (firstSpace >= 0) return null
+            return body
+        }
 }
 
 /** 一次性事件（不该进状态，否则重组会重复触发）。 */

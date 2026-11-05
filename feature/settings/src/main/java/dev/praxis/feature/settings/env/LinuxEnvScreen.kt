@@ -1,4 +1,4 @@
-package dev.praxis.feature.settings.env
+﻿package dev.praxis.feature.settings.env
 
 import dev.praxis.feature.settings.common.SettingsList
 import androidx.compose.foundation.layout.Arrangement
@@ -552,7 +552,7 @@ modifier: Modifier = Modifier,
                             Text(
                                 text = "连接方式：FTP 客户端连 <本机 IP>，端口 ${ftp.port}，" +
                                     "用户名 ${ftp.user}，登录后只看到自己的家目录。\n" +
-                                    "被动模式要放行 ${ftp.passivePorts}（路由器/防火墙）。",
+                                    "被动模式要放行 ${ftp.passivePortLow}-${ftp.passivePortHigh}（路由器/防火墙）。",
                                 style = MiuixTheme.textStyles.footnote1,
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
