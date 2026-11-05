@@ -51,12 +51,46 @@ data class PendingQueue(
     }
 }
 
+/**
+ * 队列条目的类型。
+ *
+ * ## 为什么要在数据里区分，而不是让 UI 自己猜
+ *
+ * 面板行首要画一个图标区分「纯文本」与「带图片」。若让 UI 按 
+ * `attachments.isEmpty()` 现场判断，将来加入新类型（比如 / 命令）时
+ * 每个渲染点都要改判断；放成枚举后，UI 只按 `kind` 分支，新增类型在
+ * 枚举处就显式要求补分支（Kotlin 的 exhaustive when）。
+ */
+enum class QueueItemKind {
+    /** 纯文本。 */
+    Text,
+
+    /** 带图片附件。 */
+    WithImages,
+}
+
 /** 队列中的一条。 */
 data class QueuedMessage(
     /** 稳定 id（UI 的 LazyColumn key）。用自增 Long，理由同 `ChatBubble.id`。 */
     val id: Long,
     val text: String,
+    /**
+     * 随这条消息一起排队的图片。
+     *
+     * ## 为什么排队时也要带图
+     *
+     * 旧模型只有 `text`，于是「生成中我想排一条带截图的消息」没法表达 ——
+     * 用户只能等生成完再发，而那正是待发队列要解决的场景。
+     *
+     * 图片内容在选中时就已经固定为 base64（见 `ChatImage` 的 KDoc），
+     * 所以排队期间相册文件被删也不影响。
+     */
+    val images: List<dev.praxis.core.ai.ChatImage> = emptyList(),
 ) {
+
+    /** 条目类型。由 [images] 派生，不单独存 —— 两者不可能不一致。 */
+    val kind: QueueItemKind
+        get() = if (images.isEmpty()) QueueItemKind.Text else QueueItemKind.WithImages
     val preview: String
         get() {
             val oneLine = text.replace('\n', ' ').trim()
@@ -84,6 +118,42 @@ object PendingQueueOps {
     /** 移除指定条。 */
     fun remove(queue: PendingQueue, id: Long): PendingQueue =
         queue.copy(items = queue.items.filterNot { it.id == id })
+
+    /**
+     * 就地替换某条的正文（编辑功能）。
+     *
+     * ## 为什么空串时不删条目
+     *
+     * 「编辑成空」与「删除」是两个不同意图。编辑弹窗里清空后点确定，
+     * 用户以为只是没改到内容；若这里顺手删掉条目，那条排队就凭空消失了。
+     * 所以空串时**保留原正文**（等价于放弃这次编辑），删除走 [remove]。
+     */
+    fun updateText(queue: PendingQueue, id: Long, text: String): PendingQueue {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return queue
+        return queue.copy(
+            items = queue.items.map { if (it.id == id) it.copy(text = trimmed) else it },
+        )
+    }
+
+    /**
+     * 按给定 id 顺序重排（拖拽排序用）。
+     *
+     * ## 为什么用「id 顺序」而不是「(from, to) 下标」
+     *
+     * 下标在拖拽过程中会因列表变化而失效；而 id 是稳定的。
+     * 传入「拖完之后应有的完整 id 序列」，把重排变成一次纯映射，
+     * 不需要在 UI 侧做「先删后插」这类易错的增量操作。
+     *
+     * 未知 id 被忽略，缺失的条目按原顺序追加在末尾 —— 保证不丢条目。
+     */
+    fun reorder(queue: PendingQueue, orderedIds: List<Long>): PendingQueue {
+        if (orderedIds.isEmpty()) return queue
+        val byId = queue.items.associateBy { it.id }
+        val ordered = orderedIds.mapNotNull { byId[it] }
+        val rest = queue.items.filterNot { it.id in orderedIds }
+        return queue.copy(items = ordered + rest)
+    }
 
     /** 取出队首并移除（发送成功后调用）。 */
     fun poll(queue: PendingQueue): Pair<QueuedMessage?, PendingQueue> {
