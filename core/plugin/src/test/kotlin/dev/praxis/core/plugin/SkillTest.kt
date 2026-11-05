@@ -198,4 +198,96 @@ body2"""),
         // 空串而不是空段落：调用方据此决定不插 system。
         assertEquals("", registry.composePrompt(emptySet()))
     }
+    // ── 两个调用开关（2026-11-06，照 Harness skills frontmatter）──────
+
+    private fun parseWith(frontmatter: String): Skill {
+        val text = "---\nname: s1\ndescription: 说明\n" + frontmatter + "---\n\n正文"
+        return SkillParser.parse(text, "SKILL.md", "s1").first
+    }
+
+    /** 不写开关 = 两边都能用（绝大多数技能的期望）。 */
+    @Test
+    fun `缺省时模型与用户都可用`() {
+        val skill = parseWith("")
+        assertTrue(skill.modelInvocable)
+        assertTrue(skill.userInvocable)
+    }
+
+    /** `disable-model-invocation: true` 只封模型，用户仍可用 `/名字` 调用。 */
+    @Test
+    fun `禁止模型调用但用户可调用`() {
+        val skill = parseWith("disable-model-invocation: true\n")
+        assertTrue(!skill.modelInvocable)
+        assertTrue(skill.userInvocable)
+    }
+
+    /** `user-invocable: false` 只封用户，模型仍能在清单里看到。 */
+    @Test
+    fun `用户不可调用但模型可用`() {
+        val skill = parseWith("user-invocable: false\n")
+        assertTrue(skill.modelInvocable)
+        assertTrue(!skill.userInvocable)
+    }
+
+    /**
+     * 驼峰键名必须**不生效**（照 Harness：「会被本地解析器拒绝」）。
+     *
+     * 若这里生效了，就会出现两套写法并存 —— 而用户从别处拷来的
+     * 驼峰写法「看起来也能用」，直到某次升级才发现行为不一致。
+     */
+    @Test
+    fun `驼峰键名不生效`() {
+        val skill = parseWith("disableModelInvocation: true\n")
+        assertTrue("驼峰写法不该生效", skill.modelInvocable)
+    }
+
+    @Test
+    fun `yes 与 no 也能识别`() {
+        assertTrue(!parseWith("disable-model-invocation: yes\n").modelInvocable)
+        assertTrue(!parseWith("user-invocable: no\n").userInvocable)
+    }
+
+    /** 无法识别的值回落到默认值，而不是把整份技能拒之门外。 */
+    @Test
+    fun `无法识别的布尔值回落默认`() {
+        val skill = parseWith("disable-model-invocation: 也许\n")
+        assertTrue("默认应为可用", skill.modelInvocable)
+    }
+
+    /**
+     * `disable-model-invocation: true` 的技能**不能**出现在注入给模型的提示词里。
+     *
+     * 这是整个开关唯一真正要保证的效果：用户明确说了「不要让 AI 自己用」，
+     * 那么自动注入就必须排除它。
+     */
+    @Test
+    fun `禁止模型调用的技能不进提示词`() = runTest {
+        val text = "---\nname: hidden\ndescription: 说明\ndisable-model-invocation: true\n---\n\n正文"
+        val registry = SkillRegistry(FakeSource(listOf(SkillFile("hidden", "SKILL.md", text))))
+        registry.reload()
+        assertEquals("", registry.composePrompt(setOf("hidden")))
+        assertTrue(registry.modelVisible(setOf("hidden")).isEmpty())
+    }
+
+    /** `user-invocable: false` 的技能不出现在用户候选列表里。 */
+    @Test
+    fun `用户不可调用的技能不进候选`() = runTest {
+        val text = "---\nname: bg\ndescription: 说明\nuser-invocable: false\n---\n\n正文"
+        val registry = SkillRegistry(FakeSource(listOf(SkillFile("bg", "SKILL.md", text))))
+        registry.reload()
+        assertTrue(registry.userInvocable().isEmpty())
+        assertNull(registry.bodyForUserInvocation("bg"))
+        // 但模型仍看得到（它只是不能被单独触发）。
+        assertTrue(registry.composePrompt(setOf("bg")).contains("bg"))
+    }
+
+    /** 正常技能两边都可用。 */
+    @Test
+    fun `普通技能两边都可用`() = runTest {
+        val registry = SkillRegistry(FakeSource(listOf(SkillFile("a", "SKILL.md", REAL_SKILL))))
+        registry.reload()
+        assertTrue(registry.composePrompt(setOf("search-before-build")).isNotEmpty())
+        assertTrue(registry.userInvocable().isNotEmpty())
+        assertTrue(registry.bodyForUserInvocation("search-before-build") != null)
+    }
 }

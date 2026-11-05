@@ -458,6 +458,18 @@ data class ChatState(
     val exportRequested: Boolean = false,
 
     /**
+     * 待注入的技能正文（`/技能名` 产生）。
+     *
+     * ## 为什么是「一次性」
+     *
+     * 技能正文可能几千字。若每轮都注入，它会一直占据上下文预算，
+     * 而且模型会把它当成**常驻设定**而不是「这次任务的指引」。
+     *
+     * 所以下一轮请求发出后立刻清空 —— 只在用户显式调用的那一轮生效。
+     */
+    val pendingSkillInjection: String? = null,
+
+    /**
      * 待发送队列（Operit 同款：生成中也能继续写，前一轮结束后自动发下一条）。
      *
      * 顺序可调（见 `PendingQueueOps.moveUp/moveDown/moveToTop`）。

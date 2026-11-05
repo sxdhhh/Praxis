@@ -608,6 +608,23 @@ fun ChatTab(
         // `/` 命令：候选列表点选后交给 ViewModel 执行。
         // 命令结果只进 notice，不进模型历史（见 runCommand 的 KDoc）。
         onCommand = viewModel::runCommand,
+        // 候选列表 = 内置命令 + 用户可调用的技能。
+        // 技能与命令共用 `/` 命名空间，所以必须一起列出来 ——
+        // 否则用户不知道某个技能可以用 `/名字` 调用。
+        // `userInvocable()` 已按 frontmatter 的 user-invocable 过滤。
+        // key 用 `skillNames`（本文件已有）：技能列表变了才重算候选。
+        // 不用 `skillRegistry` 本身作 key —— 它是稳定单例，永远不会触发重算。
+        commands = remember(skillNames) {
+            dev.praxis.feature.chat.command.BuiltinCommands.all +
+                skillRegistry.userInvocable().map { skill ->
+                    dev.praxis.feature.chat.command.CommandDefinition(
+                        name = skill.name,
+                        description = skill.description.ifBlank { "技能" },
+                        // 技能是本地注入提示词，不直接向模型提交用户消息。
+                        submitsToModel = false,
+                    )
+                }
+        },
         onQueueExpandedChange = viewModel::setQueueExpanded,
         onMessageAction = viewModel::onMessageAction,
         // 一次性提示（如「继续」不适用）由输入栏 4 秒后清掉。

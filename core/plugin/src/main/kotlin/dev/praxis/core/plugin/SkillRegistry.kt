@@ -87,8 +87,42 @@ class SkillRegistry(
      * 而不是一个空的段落——空 system 会让模型困惑。
      */
     fun composePrompt(enabledNames: Set<String>): String {
-        val selected = cache.skills.filter { it.name in enabledNames }
+        val selected = modelVisible(enabledNames)
         if (selected.isEmpty()) return ""
         return selected.joinToString(separator = "\n\n") { it.toPromptSection() }
     }
+
+    /**
+     * 模型可见的技能（已启用 + 未被 `disable-model-invocation` 禁止）。
+     *
+     * ## 为什么过滤放在注册表而不是调用处
+     *
+     * 调用点不止一个（自动注入、将来的技能工具、预览）。放在调用处意味着
+     * 新增一个调用点就要记得再写一遍过滤 —— 漏掉的那个会把
+     * 「用户明确禁止模型使用」的技能塞给模型，而这**不会报任何错**。
+     *
+     * 收敛到这里后，凡是要给模型看技能的地方都必须经过本方法。
+     */
+    fun modelVisible(enabledNames: Set<String>): List<Skill> =
+        cache.skills.filter { it.name in enabledNames && it.modelInvocable }
+
+    /**
+     * 用户可显式调用的技能（`user-invocable` 未被关闭）。
+     *
+     * `/技能名` 与命令候选列表都用它，保证「列出来的都能调、能调的都在列」。
+     */
+    fun userInvocable(): List<Skill> = cache.skills.filter { it.userInvocable }
+
+    /**
+     * 按名字取一份技能的正文（`/技能名` 用）。
+     *
+     * ## 为什么每次从缓存重读而不是保存副本
+     *
+     * 缓存里的 `body` 是 `reload()` 时读进来的。用户改完正文点「重载」
+     * 后，下一次调用就能拿到新内容 —— 不需要额外的失效机制。
+     *
+     * 返回 null 表示「不存在」或「不允许用户调用」，两种情况都不该注入。
+     */
+    fun bodyForUserInvocation(name: String): Skill? =
+        cache.skills.firstOrNull { it.name == name && it.userInvocable }
 }
