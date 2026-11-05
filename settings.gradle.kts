@@ -49,6 +49,8 @@ include(":core:data")
 // ── 业务层 ─────────────────────────────────────────────
 include(":core:ai")
 include(":core:tool")
+// 目标/计划状态机：长任务的「别忘了自己在做什么」。
+include(":core:goal")
 include(":core:memory")
 include(":core:terminal")
 // Linux 环境层：proot 容器配置 / 国内镜像源 / SSH 与 FRP 参数的**纯逻辑**。

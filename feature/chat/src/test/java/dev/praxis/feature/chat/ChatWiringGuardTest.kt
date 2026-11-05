@@ -621,6 +621,35 @@ class ChatWiringGuardTest {
         assertTrue("装载阶段没有校验", block.contains("CustomToolValidator.validate"))
     }
 
+    /**
+     * 目标状态机必须能表达「暂停」并在提示词里**明确要求停手**。
+     *
+     * ## 这条护栏防的是什么
+     *
+     * 「设备不在线就暂停，避免一直烧 token」是用户的明确要求。
+     * 只改状态而不在提示词里告诉模型，它会继续推进 —— 而状态字段
+     * 看起来「已经暂停了」，没人会发现它还在跑。
+     */
+    @Test
+    fun goal_pausesAndTellsModelToStop() {
+        val goal = read("core/goal/src/main/kotlin/dev/praxis/core/goal/SessionGoal.kt")
+        assertTrue("缺少 Paused 阶段", goal.contains("Paused,"))
+        assertTrue("暂停时没有要求停手", goal.contains("不要继续推进"))
+        // 暂停必须保留目标内容，否则恢复时用户要重述一遍。
+        assertTrue("暂停丢了目标内容", goal.contains("goal.copy(phase = GoalPhase.Paused)"))
+    }
+
+    /** `ask_user_question` 必须存在且超时返回空而不是报错。 */
+    @Test
+    fun askUserQuestion_existsAndToleratesTimeout() {
+        val tool = read("core/tool/src/main/kotlin/dev/praxis/core/tool/builtin/AskUserQuestionTool.kt")
+        assertTrue("工具名不对", tool.contains("name = \"ask_user_question\""))
+        // 超时是「没人回答」，不是「工具坏了」：不能标 isError，
+        // 否则模型会把它当失败去重试，而重试只会再等一轮。
+        assertTrue("超时被当成错误", tool.contains("用户没有回答"))
+        assertTrue("超时不应标为 error", tool.contains("isError = false"))
+    }
+
     /** 端口必须真的提供枚举能力，且适配器按名字透出。 */
     @Test
     fun ptyPort_exposesSessionNames() {
