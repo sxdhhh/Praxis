@@ -1,3 +1,4 @@
+import java.time.Duration
 import java.util.Properties
 plugins {
     id("praxis.android.application")
@@ -387,7 +388,11 @@ dependencies {
 // 4 分钟是宽裕值：全过时这一个任务约 1 分钟。
 // ─────────────────────────────────────────────────────────────
 tasks.withType<Test>().configureEach {
-    timeout.set(java.time.Duration.ofMinutes(4))
+    // 用 import 进来的 `Duration`，**不能写 `java.time.Duration`**：
+    // 在 Gradle 的 .kts 里，`java` 已经是一个扩展（JavaPluginExtension），
+    // 写全限定名会被解析成「扩展 java 的属性 time」——
+    // CI 报的就是 `Unresolved reference 'time'`。
+    timeout.set(Duration.ofMinutes(4))
     testLogging {
         // `started` 是诊断挂起的关键事件；failed/skipped 让失败一目了然。
         events("started", "failed", "skipped")
