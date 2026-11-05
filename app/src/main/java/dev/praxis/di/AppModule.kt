@@ -1,4 +1,4 @@
-package dev.praxis.di
+﻿package dev.praxis.di
 
 import androidx.room.Room
 import dev.praxis.BuildConfig
@@ -414,7 +414,10 @@ val appModule = module {
                 val source = dev.praxis.data.custom.CustomToolSource(toolsDir)
                 val (defs, skipped) = kotlinx.coroutines.runBlocking { source.list() }
                 skipped.forEach {
-                    dev.praxis.ui.design.diagnostics.UiDiagnostics.note("自定义工具跳过：$it")
+                    dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
+                        "custom-tool",
+                        "自定义工具跳过：$it",
+                    )
                 }
                 val runner = dev.praxis.core.tool.custom.CustomToolRunner(
                     executor = get<dev.praxis.core.tool.ToolExecutor>(),
@@ -425,7 +428,7 @@ val appModule = module {
                         // 不合法的定义**不注册**，且把原因记下来（用户能查到为什么没生效）。
                         issues.filter { it.isError }.forEach {
                             dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
-                                "自定义工具 ${def.name} 未装载：${it.message}",
+                                "custom-tool", "自定义工具 ${def.name} 未装载：${it.message}",
                             )
                         }
                         return@forEach

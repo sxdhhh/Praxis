@@ -28,13 +28,34 @@ class RevealEngineTest {
         assertTrue("低积压下每帧 $chars 字，应从容", chars in 3..6)
     }
 
-    /** 高积压：速度提升，但不能一帧吐完。 */
+    /**
+     * 高积压：速度提升，但**必须受单帧绝对上限约束**。
+     *
+     * ## 这条测试抓到过一个真实缺陷
+     *
+     * 最初只有 `v = 90 + backlog^1.25 × 0.9`。backlog = 1000 时算出
+     * 5151 字/秒 —— 32ms 一帧就是 **165 字**，一屏文字一两帧刷完。
+     * 那已经不是「追赶」而是「倾泻」，揭示引擎等于没做。
+     *
+     * 修法是加 `MAX_CHARS_PER_FRAME` 绝对上限，而不是调小系数 ——
+     * 调系数会让低积压时也变慢，那是两件不同的事。
+     */
     @Test
     fun `高积压时加速但不倾泻`() {
         val backlog = 1000
         val chars = RevealEngine.charsThisFrame(backlog = backlog, dt = 0.032f)
         assertTrue("积压 1000 时每帧 $chars 字，应明显快于基础速度", chars > 6)
-        assertTrue("积压 1000 时一帧吐了 $chars 字，不能倾泻", chars < backlog / 10)
+        assertTrue(
+            "积压 1000 时一帧吐了 $chars 字，超过绝对上限",
+            chars <= RevealEngine.MAX_CHARS_PER_FRAME,
+        )
+    }
+
+    /** 积压持续增大时，每帧输出也不应无限增长（上限是硬的）。 */
+    @Test
+    fun `极大积压也只按上限输出`() {
+        val huge = RevealEngine.charsThisFrame(backlog = 100_000, dt = 0.032f)
+        assertEquals(RevealEngine.MAX_CHARS_PER_FRAME, huge)
     }
 
     /**
@@ -46,8 +67,18 @@ class RevealEngineTest {
      */
     @Test
     fun `极小积压也至少出一字`() {
+        // ## 断言要按「下限」写，不能按「一次吐完」写
+        //
+        // 这里刻意用 dt = 0.001（1 毫秒）：按理算出来是 0.09 个字，取整得 0。
+        // 引擎的下限把它抬到 1 —— 这正是要验证的行为：**永远不饿死**。
+        //
+        // 但不能断言「backlog 2 就吐 2」：dt 这么小时引擎只该吐 1，
+        // 剩下的留在下一帧。一次吐 2 意味着单位时间效率被 dt 放大，
+        // 那是错的（会在大 backlog + 小 dt 时突然爆字）。
         assertEquals(1, RevealEngine.charsThisFrame(backlog = 1, dt = 0.001f))
-        assertEquals(2, RevealEngine.charsThisFrame(backlog = 2, dt = 0.001f))
+        assertEquals(1, RevealEngine.charsThisFrame(backlog = 2, dt = 0.001f))
+        // 正常帧间隔下 backlog 2 会一次吐完（90 × 0.032 ≈ 2.9，取整 3，钳到 2）。
+        assertEquals(2, RevealEngine.charsThisFrame(backlog = 2, dt = 0.032f))
     }
 
     @Test

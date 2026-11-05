@@ -54,6 +54,19 @@ object RevealEngine {
      */
     const val MIN_BACKPRESSURE = 0.55f
 
+    /**
+     * 单帧最多揭示的字符数（绝对上限）。
+     *
+     * ## 为什么必须有它（单测抓出来的真实缺陷）
+     *
+     * 只有 `v = 90 + backlog^1.25 × 0.9` 时，backlog = 1000 算出 5151 字/秒，
+     * 32ms 一帧就是 165 字 —— 那已经不是「追赶」而是「倾泻」，
+     * 眼睛完全跟不上，揭示引擎等于没做。
+     *
+     * 60 字/帧 ≈ 1875 字/秒：一帧最多填满一行多，是「能跟读」的速度上限。
+     */
+    const val MAX_CHARS_PER_FRAME = 60
+
     /** 低于此帧率视为卡顿（用于暂停揭示）。 */
     const val LOW_FPS = 30.0
 
@@ -88,9 +101,21 @@ object RevealEngine {
         val safeDt = dt.coerceIn(0.001f, MAX_DT)
         val speed = BASE_SPEED + backlog.toDouble().pow(BACKLOG_EXPONENT) * BACKLOG_FACTOR
         val scaled = speed * backpressure.coerceIn(MIN_BACKPRESSURE, 1f)
+
+        // ## 上界：每帧最多 [MAX_CHARS_PER_FRAME] 字（2026-11-06，单测抓出来的）
+        //
+        // 只有公式时，backlog = 1000 会算出 5151 字/秒 —— 32ms 一帧就是 **165 字**。
+        // 那已经不是「追赶」而是「倾泻」：一屏文字在一两帧内刷完，
+        // 眼睛完全跟不上，揭示引擎等于没做。
+        //
+        // 所以除了「随积压加速」之外还必须有一个**绝对上限**。
+        // 60 字/帧 ≈ 1875 字/秒，一帧内最多填满一行多；再快就不是读得下来的速度了。
+        // 积压再多也只是「持续以最高速追赶」，而不是一次吐完。
+        val capped = (scaled * safeDt).roundToInt().coerceAtMost(MAX_CHARS_PER_FRAME)
+
         // 至少 1 个字符：否则积压很小（1-2 字）时 `speed × dt` 会取整成 0，
         // 文字永远出不来 —— 表现为「回复卡住不动」。
-        return (scaled * safeDt).roundToInt().coerceIn(1, backlog)
+        return capped.coerceIn(1, backlog)
     }
 
     /**

@@ -141,6 +141,17 @@ fun PraxisApp(
     // 这样「记忆页列出的空间」和「对话页实际查询的空间」不会分家。
     val memorySpaces by settingsRepository.memorySpaces.collectAsState(initial = emptyList())
 
+    // 环境页配置的存储：发行版选择 + FTP 非敏感项。
+    //
+    // ## 为什么必须在 Composable 体内、而不能放在上面的属性区
+    //
+    // `LaunchedEffect` 是 @Composable 函数，只能在 Composable 上下文里调。
+    // 放在属性初始化区编译不过（「@Composable invocations can only happen
+    // from the context of a @Composable function」）。
+    //
+    // 注入到 `ProotEnvPort` 而不是构造注入：port 由 Koin 以 single 构造，
+    // 改构造签名会影响所有调用点（含测试里的直接 new）。
+
     // 启动与切空间后，把持久化的空间同步给端口。
     //
     // 不做这一步的后果：重启后记忆页显示「工作」（读的是磁盘），
@@ -170,12 +181,6 @@ fun PraxisApp(
     val workflowEngine: dev.praxis.core.workflow.WorkflowEngine = org.koin.compose.koinInject()
     val skillRegistry: dev.praxis.core.plugin.SkillRegistry = org.koin.compose.koinInject()
 
-    // 环境页配置的存储：发行版选择 + FTP 非敏感项。
-    // 注入到 `ProotEnvPort`，因为 port 需要它来读写（`:feature:settings` 拿不到 Context）。
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        val port = org.koin.compose.getKoin().get<dev.praxis.feature.settings.env.LinuxEnvPort>()
-        (port as? dev.praxis.data.linux.ProotEnvPort)?.envSettingsStore = settingsRepository
-    }
     /**
      * 终端会话快照端口。
      *
@@ -253,6 +258,14 @@ fun PraxisApp(
     val localContext = androidx.compose.ui.platform.LocalContext.current
     val linuxEnvPort = androidx.compose.runtime.remember(localContext) {
         dev.praxis.data.linux.ProotEnvPort(localContext)
+    }
+
+    // 环境页配置的存储：发行版选择 + FTP 非敏感项。
+    //
+    // 注入在**已有**的 `linuxEnvPort` 上（不新建实例）：环境页与 AI 工具共用
+    // 同一个 port，各建一份会出现「设置页改了端口、AI 侧还是旧值」。
+    LaunchedEffect(linuxEnvPort) {
+        linuxEnvPort.envSettingsStore = settingsRepository
     }
 
     val capabilities by capabilityDetector.snapshot.collectAsStateWithLifecycle()

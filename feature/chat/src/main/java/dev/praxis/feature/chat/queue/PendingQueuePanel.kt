@@ -2,7 +2,7 @@ package dev.praxis.feature.chat.queue
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.animateItemPlacement
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.praxis.feature.chat.QueueItemKind
 import dev.praxis.feature.chat.QueuedMessage
 import dev.praxis.ui.theme.PraxisMotion
 import dev.praxis.ui.theme.PraxisRadius
@@ -255,11 +256,16 @@ fun PendingQueuePanel(
                         // 让位动画：拖动某条时，其余条目用位移补间挪到新位置。
                         // 没有它，换位是「瞬间跳过去」，用户看不清谁换了谁。
                         // 注意：被拖那条自己不做位移动画（否则会与手指位置打架）。
+                        // ## 用 `Modifier.animateItem()` 而不是 `animateItemPlacement`
+                        //
+                        // 后者在 Compose Foundation 1.7 起已被移除（本项目 BOM 2026.08）。
+                        // `animateItem()` 是 `LazyItemScope` 的成员，同样只做位置/淡入补间，
+                        // 但它让「新条目出现」「条目消失」也有动画，语义更完整。
                         val placementModifier = if (dragState.draggingId == item.id) {
                             Modifier
                         } else {
-                            Modifier.animateItemPlacement(
-                                animationSpec = tween(
+                            Modifier.animateItem(
+                                placementSpec = tween(
                                     durationMillis = PraxisMotion.Durations.Fast,
                                     easing = PraxisMotion.Curves.Decelerate,
                                 ),

@@ -222,7 +222,9 @@ object SystemPromptBuilder {
         } else {
             layers += ChatMessage(
                 role = ChatRole.System,
-                text = MEMORY_WORKFLOW_INSTRUCTION,
+                // 常量定义在 `SystemPromptSettings` 的 companion 里（它是
+                // 「怎么跟模型说记忆」这件事的一部分，与 persona 放在一起）。
+                text = SystemPromptSettings.MEMORY_WORKFLOW_INSTRUCTION,
             )
         }
 
