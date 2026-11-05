@@ -858,46 +858,98 @@ fun ModelPill(
                             // 平铺列表 —— 这样预览、单测、以及「只有一个配置」
                             // 的早期状态都不必构造分组数据。
                             if (groups.isNotEmpty()) {
+                                // ## 每组可单独展开/收起（2026-11-05）
+                                //
+                                // 用户的要求：「像 operit 那样分组然后可以展开单组和收起单组」。
+                                //
+                                // 上一版是**全部铺开**：配了三四家、每家十几个模型时，
+                                // 菜单一屏塞不下，用户要找一个模型得先滚很久。
+                                //
+                                // 现在每组一个开关：
+                                //  - 默认只展开**当前生效**的那组（用户最可能要选的就是它），
+                                //    其余收起 —— 既能看到「还有哪几家」，又不会被淹没；
+                                //  - 点组标题就地收放，动画走 `FoldableContent`
+                                //    （与摘要块、设置页分区共用同一套时长与曲线）。
+                                //
+                                // 为什么用 **配置名** 作开合状态的 key 而不是组下标：
+                                // 配置可以增删，下标会错位；名字是用户能感知的稳定标识。
+                                // （两个配置同名时它们的开合会联动 —— 可接受：
+                                //  那样它们本来也难分辨。）
+                                val openGroups = remember(groups) {
+                                    mutableStateMapOf<String, Boolean>().apply {
+                                        groups.forEach { g -> put(g.profileName, g.isActive) }
+                                    }
+                                }
                                 groups.forEach { group ->
-                                    // 组标题：配置名 + 该组是否生效。
-                                    // 不可点 —— 它是标题不是选项。
-                                    Text(
-                                        text = group.profileName,
-                                        style = MiuixTheme.textStyles.footnote2,
-                                        color = if (group.isActive) {
-                                            MiuixTheme.colorScheme.primary
-                                        } else {
-                                            MiuixTheme.colorScheme.onSurfaceVariantSummary
-                                        },
-                                        modifier = Modifier.padding(
-                                            start = 12.dp,
-                                            end = 12.dp,
-                                            top = 8.dp,
-                                            bottom = 2.dp,
-                                        ),
-                                    )
-                                    if (group.isEmpty) {
-                                        Text(
-                                            text = "这个配置还没填模型",
-                                            style = MiuixTheme.textStyles.footnote2,
-                                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                            modifier = Modifier.padding(
-                                                horizontal = 12.dp,
-                                                vertical = 4.dp,
+                                    val open = openGroups[group.profileName] ?: group.isActive
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            // 组标题可点：这是「展开/收起单组」的唯一入口。
+                                            .clickable {
+                                                openGroups[group.profileName] = !open
+                                            }
+                                            .padding(
+                                                start = 12.dp,
+                                                end = 12.dp,
+                                                top = 8.dp,
+                                                bottom = 2.dp,
                                             ),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = group.profileName,
+                                            style = MiuixTheme.textStyles.footnote2,
+                                            color = if (group.isActive) {
+                                                MiuixTheme.colorScheme.primary
+                                            } else {
+                                                MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                            },
+                                            modifier = Modifier.weight(1f),
                                         )
-                                    } else {
-                                        group.models.forEachIndexed { index, name ->
-                                            ChoiceRow(
-                                                label = name,
-                                                // 只有生效配置里选中的那个才打勾。
-                                                selected = group.isActive && index == activeIndex,
-                                                onClick = {
-                                                    onClickGroupedModel?.invoke(group.profileName, index)
-                                                        ?: onClickModel(index)
-                                                    expanded = false
-                                                },
+                                        // 收起时顺带显示条数：不然收起的组看起来是空的。
+                                        if (!open && group.models.isNotEmpty()) {
+                                            Text(
+                                                text = group.models.size.toString(),
+                                                style = MiuixTheme.textStyles.footnote2,
+                                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                             )
+                                            Spacer(Modifier.width(4.dp))
+                                        }
+                                        Icon(
+                                            imageVector = if (open) {
+                                                Icons.Default.KeyboardArrowUp
+                                            } else {
+                                                Icons.Default.KeyboardArrowDown
+                                            },
+                                            contentDescription = if (open) "收起" else "展开",
+                                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        )
+                                    }
+                                    FoldableContent(visible = open) {
+                                        if (group.isEmpty) {
+                                            Text(
+                                                text = "这个配置还没填模型",
+                                                style = MiuixTheme.textStyles.footnote2,
+                                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                                modifier = Modifier.padding(
+                                                    horizontal = 12.dp,
+                                                    vertical = 4.dp,
+                                                ),
+                                            )
+                                        } else {
+                                            group.models.forEachIndexed { index, name ->
+                                                ChoiceRow(
+                                                    label = name,
+                                                    // 只有生效配置里选中的那个才打勾。
+                                                    selected = group.isActive && index == activeIndex,
+                                                    onClick = {
+                                                        onClickGroupedModel?.invoke(group.profileName, index)
+                                                            ?: onClickModel(index)
+                                                        expanded = false
+                                                    },
+                                                )
+                                            }
                                         }
                                     }
                                 }
