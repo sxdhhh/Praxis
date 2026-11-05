@@ -89,6 +89,15 @@ class ChatViewModel(
     private val systemPromptProvider: (suspend () -> String)? = null,
 
     /**
+     * 待发队列的存档端口（可空 = 不落盘，单测与预览用）。
+     *
+     * 队列是「生成中先记下想法」用的，而生成一轮可能几十秒 ——
+     * 这期间进程被回收就会**全部丢失且无提示**。
+     * 见 `PendingQueueStore` 与 `SettingsRepository.setPendingQueue`。
+     */
+    private val queueStore: PendingQueueStore? = null,
+
+    /**
      * 用户改写过的内置人格（每轮现取，空串 = 用出厂人格）。
      *
      * 与 [systemPromptProvider] 分开注入：那是「用户的规则」（最高优先级），
@@ -518,6 +527,17 @@ class ChatViewModel(
         if (restored || restoreInFlight) return
         val repo = chatRepository ?: return
         restoreInFlight = true
+
+        // ## 队列恢复独立于消息恢复（2026-11-06）
+        //
+        // 下面读库有两个提前 return（读失败 / 空库），而**队列存档与消息库
+        // 是两份独立的数据**：
+        //  - 空会话（还没发过消息）完全可能有排队内容 —— 用户排了 3 条，
+        //    进程被杀，重启后库里仍是空，但队列该恢复；
+        //  - 读库失败时更不该连带丢掉队列。
+        //
+        // 所以队列恢复放在这里单独起，不挂在下面那条路径上。
+        restoreQueue()
 
         persistScope.launch {
             try {
@@ -2615,11 +2635,68 @@ class ChatViewModel(
                     queueWasBlocked = true,
                 )
             }
+            persistQueue(next)
             return
         }
         send()
     }
 
+    /**
+     * 从存档恢复待发队列。
+     *
+     * ## 与消息恢复分开的原因
+     *
+     * 见 `restoreIfNeeded` 里调用处的说明：队列存档与消息库是两份独立数据，
+     * 空会话也可能有排队内容；把两者绑在一条路径上会让「还没发过消息」
+     * 或「读库失败」这两种情况连带丢掉队列。
+     *
+     * ## 恢复后自动展开面板
+     *
+     * 用户重启后看到的是聊天页。若不展开，队列里有 3 条他也看不见 ——
+     * 而他的预期是「我刚才排的东西应该还在」。展开是唯一不会让人以为丢了的做法。
+     *
+     * ## 为什么刷新 nextQueueId
+     *
+     * `nextQueueId` 是进程内自增的。恢复出来的 id 可能已经大于它，
+     * 直接从 0 继续会让新条目与旧条目**撞 id** —— LazyColumn 的 key 重复，
+     * 表现为「删一条另一条也没了」。
+     */
+    private fun restoreQueue() {
+        val store = queueStore ?: return
+        persistScope.launch {
+            val encoded = runCatching { store.load(sessionId) }.getOrNull() ?: return@launch
+            val restoredQueue = PendingQueueCodec.decode(encoded)
+            if (restoredQueue.isEmpty) return@launch
+            // 只在该会话当前队列为空时铺进去：若用户在恢复完成前已经又排了新消息，
+            // 直接覆盖会把他刚打的字冲掉。
+            if (_state.value.queue.isNotEmpty) return@launch
+            nextQueueId = (restoredQueue.items.maxOfOrNull { it.id } ?: 0L) + 1
+            _state.update {
+                it.copy(queue = restoredQueue, queueExpanded = true)
+            }
+        }
+    }
+    /**
+     * 队列变更后落盘。
+     *
+     * ## 为什么单独一个函数而不是每处 `launchPersist { save(...) }`
+     *
+     * 队列有 8 个变更点（入队/删/上移/下移/置顶/清空/发送/出队）。
+     * 每处手写一次 `launchPersist` 意味着「新增一个操作时很可能漏掉落盘」——
+     * 而漏掉的后果是**该操作的结果在重启后消失**，且不会有任何报错。
+     * 收敛到一个函数，新增操作只要调它就不可能漏。
+     *
+     * ## 为什么在 IO 上跑
+     *
+     * `DataStore.edit` 是文件写。放在主线程会让「点发送」出现一帧卡顿，
+     * 而队列操作恰恰是用户连续点击的高频动作。
+     */
+    private fun persistQueue(queue: PendingQueue) {
+        val store = queueStore ?: return
+        viewModelScope.launch {
+            runCatching { store.save(sessionId, PendingQueueCodec.encode(queue)) }
+        }
+    }
     /** 手动展开 / 收起队列面板。 */
     fun setQueueExpanded(expanded: Boolean) {
         _state.update { it.copy(queueExpanded = expanded) }
@@ -2644,30 +2721,41 @@ class ChatViewModel(
                 suppressNextAutoDequeue = true,
             )
         }
+        persistQueue(_state.value.queue)
         send()
     }
 
     /** 队列上移一位。 */
     fun queueMoveUp(id: Long) {
         val next = PendingQueueOps.moveUp(_state.value.queue, id)
-        if (next !== _state.value.queue) _state.update { it.copy(queue = next) }
+        if (next !== _state.value.queue) {
+            _state.update { it.copy(queue = next) }
+            persistQueue(next)
+        }
     }
 
     /** 队列下移一位。 */
     fun queueMoveDown(id: Long) {
         val next = PendingQueueOps.moveDown(_state.value.queue, id)
-        if (next !== _state.value.queue) _state.update { it.copy(queue = next) }
+        if (next !== _state.value.queue) {
+            _state.update { it.copy(queue = next) }
+            persistQueue(next)
+        }
     }
 
     /** 队列条目置顶。 */
     fun queueMoveToTop(id: Long) {
         val next = PendingQueueOps.moveToTop(_state.value.queue, id)
-        if (next !== _state.value.queue) _state.update { it.copy(queue = next) }
+        if (next !== _state.value.queue) {
+            _state.update { it.copy(queue = next) }
+            persistQueue(next)
+        }
     }
 
     /** 删除队列条目。 */
     fun queueRemove(id: Long) {
         _state.update { it.copy(queue = PendingQueueOps.remove(it.queue, id)) }
+        persistQueue(_state.value.queue)
     }
 
     /** 把队列条目取回输入框（用户想改一下再发）。 */
@@ -2679,6 +2767,7 @@ class ChatViewModel(
                 input = item.text,
             )
         }
+        persistQueue(_state.value.queue)
     }
 
     /**
@@ -2726,6 +2815,9 @@ class ChatViewModel(
         val (head, rest) = PendingQueueOps.poll(_state.value.queue)
         if (head == null) return
         _state.update { it.copy(queue = rest, input = head.text) }
+        // 出队也要落盘：否则「取出后进程被杀」，重启会把已发出的那条又读回来，
+        // 用户看到同一条消息排队两次。
+        persistQueue(rest)
         // 记住「这一条是从队列里取出来的」。
         //
         // ## 为什么必须记
