@@ -551,7 +551,16 @@ class ChatViewModel(
         //  - 读库失败时更不该连带丢掉队列。
         //
         // 所以队列恢复放在这里单独起，不挂在下面那条路径上。
-        restoreQueue()
+        //
+        // ## 异常必须吞掉（2026-11-06，单测抓出来的）
+        //
+        // `restoreQueue()` 内部起协程读存档。若它同步抛异常，会直接冲出
+        // `restoreIfNeeded`，于是下面的 `launch` 根本不执行 ——
+        // 连带 `finally` 里的 `restoreAttempted = true` 也永远不跑，
+        // 结果是**之后每一次 send() 都被「等恢复」拦住**。
+        //
+        // 用 runCatching 包住：队列恢复失败绝不能影响消息恢复这条主链路。
+        runCatching { restoreQueue() }
 
         persistScope.launch {
             try {
