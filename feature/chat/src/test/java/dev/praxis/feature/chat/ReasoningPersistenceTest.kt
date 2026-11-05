@@ -97,6 +97,19 @@ class ReasoningPersistenceTest {
         Dispatchers.resetMain()
     }
 
+    /**
+     * 构造被测 ViewModel。
+     *
+     * ## 必须注入 `persistDispatcher`（2026-11-06）
+     *
+     * 它的默认值是 `Dispatchers.IO` —— 真实线程池。而 `restoreIfNeeded` 的
+     * 「队列恢复 + 消息恢复 + 补偿发送」都在 `persistScope` 里跑（即那个
+     * dispatcher），`advanceUntilIdle()` **只推进 test dispatcher**，
+     * 等不到真实线程上的活。
+     *
+     * 后果：`send()` 被「等恢复」拦下，补偿发送迟迟不到，断言拿到空状态。
+     * 换了 dispatcher 之后整条链路都可确定性推进。
+     */
     private fun vm(
         events: List<AiStreamEvent>,
         persistence: ChatPersistence? = null,
@@ -104,6 +117,7 @@ class ReasoningPersistenceTest {
         provider = ScriptedProvider(events),
         model = "test",
         chatRepository = persistence,
+        persistDispatcher = dispatcher,
     )
 
     private fun ChatViewModel.reasoningOfAssistant(): String? =
