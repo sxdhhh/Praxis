@@ -200,6 +200,13 @@ class SettingsRepository(
     private fun parseIds(raw: String?): List<String> =
         raw.orEmpty().split('\n').filter { it.isNotBlank() }
 
+    /**
+     * 同一毫秒内新建多个配置时的序号（见 [nextProfileId]）。
+     *
+     * 只保证**进程内**不重复 —— 跨进程靠时间戳区分。
+     */
+    private val profileSeq = java.util.concurrent.atomic.AtomicLong(0)
+
     /** 当前生效的配置 id。 */
     private val KEY_PROFILE_ACTIVE = stringPreferencesKey("model_profile_active")
 
@@ -289,20 +296,52 @@ class SettingsRepository(
         name: String,
         settings: ModelSettings = ModelSettings(),
     ): String {
-        val id = "p" + System.currentTimeMillis()
+        // ## id 必须**在写入时**校验唯一性（2026-11-05 修）
+        //
+        // 原实现是 `val id = "p" + System.currentTimeMillis()`，
+        // 在 edit 块**外面**算好。两个问题：
+        //
+        // 1. **同一毫秒内建两个配置会撞 id**。用户连点两下「新建」
+        //    就是这种情形（真机上一毫秒足够处理两次点击）。
+        //    撞了之后两个配置共用 id -> 改一个等于改两个、
+        //    删一个等于删两个，而且 `modelProfiles` 会返回两条同 id 的记录。
+        // 2. 在 edit 外面算，就没法拿「当前已有哪些 id」来避让。
+        //
+        // 修法两层保险：
+        //  - `nextProfileId()` 用「时间戳 + 进程内自增序号」，同毫秒也不再撞；
+        //  - 再与已有 id 比对，撞了就重新取（跨进程重启后序号会归零，
+        //    这一层兜住那种极端情况）。
+        var created = ""
         dataStore.edit { prefs ->
-            prefs[KEY_PROFILE_IDS] = (parseIds(prefs[KEY_PROFILE_IDS]) + id).joinToString("\n")
+            val existing = parseIds(prefs[KEY_PROFILE_IDS]).toSet()
+            var candidate = nextProfileId()
+            while (candidate in existing) candidate = nextProfileId()
+            created = candidate
+            prefs[KEY_PROFILE_IDS] = (parseIds(prefs[KEY_PROFILE_IDS]) + candidate).joinToString("\n")
             prefs[KEY_PROFILE_NAMES] = appendProfileName(
                 prefs[KEY_PROFILE_NAMES].orEmpty(),
-                id,
+                candidate,
                 name.ifBlank { "新配置" },
             )
-            writeModelSettings(prefs, id, settings)
+            writeModelSettings(prefs, candidate, settings)
             // 第一个配置自动成为当前 —— 否则用户建完发现「没生效」。
-            if (prefs[KEY_PROFILE_ACTIVE].isNullOrBlank()) prefs[KEY_PROFILE_ACTIVE] = id
+            if (prefs[KEY_PROFILE_ACTIVE].isNullOrBlank()) prefs[KEY_PROFILE_ACTIVE] = candidate
         }
-        return id
+        return created
     }
+
+    /**
+     * 生成一个配置 id。
+     *
+     * 形状 `p<毫秒时间戳>-<序号>`：
+     *  - 时间戳在前：人眼排错时能看出「大概什么时候建的」，也是天然的有序前缀；
+     *  - 序号在后：同一毫秒内多次创建也不会重复。
+     *
+     * 序号的初值从 0 开始，进程重启会归零 —— 但那没关系：
+     * 重启后时间戳必然已经变了。两者同时相同的概率为零。
+     */
+    private fun nextProfileId(): String =
+        "p" + System.currentTimeMillis() + "-" + profileSeq.getAndIncrement()
 
     /** 切换当前配置。id 不存在时不做任何事（不写脏值）。 */
     suspend fun setActiveProfile(id: String) {
