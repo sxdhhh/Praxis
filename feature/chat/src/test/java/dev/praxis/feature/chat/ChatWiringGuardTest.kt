@@ -384,6 +384,37 @@ class ChatWiringGuardTest {
         assertTrue("命令面板没有淡入淡出", panel.contains("fadeIn"))
     }
 
+    /**
+     * 技能双开关必须真的**生效**在注入路径上。
+     *
+     * ## 这条护栏防的是什么
+     *
+     * 解析出开关但没在 `composePrompt` 里过滤，是最容易犯的错 ——
+     * 用户写了「不要让 AI 自己用」，界面看不出问题，模型却照样拿到它。
+     * 编译不报错、单测（如果只测解析）也不会红。
+     */
+    @Test
+    fun skillSwitches_areEnforcedOnInjection() {
+        val registry = read("core/plugin/src/main/kotlin/dev/praxis/core/plugin/SkillRegistry.kt")
+        assertTrue(
+            "composePrompt 没有走 modelVisible 过滤",
+            registry.contains("val selected = modelVisible(enabledNames)"),
+        )
+        assertTrue("缺少 modelInvocable 过滤", registry.contains("it.modelInvocable"))
+        assertTrue("缺少 userInvocable 过滤", registry.contains("it.userInvocable"))
+    }
+
+    /** `/技能名` 必须接到注册表，且注入是**一次性**的。 */
+    @Test
+    fun skillInvocation_isWiredAndOneShot() {
+        val vm = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatViewModel.kt")
+        val app = read("app/src/main/java/dev/praxis/ui/PraxisApp.kt")
+        assertTrue("ChatTab/PraxisApp 没有接 skillLookup", app.contains("skillLookup ="))
+        assertTrue("ViewModel 没有技能分支", vm.contains("pendingSkillInjection = skill.body"))
+        // 一次性：拼装后必须清空，否则每轮都在烧上下文预算。
+        assertTrue("技能注入后没有清空（会每轮重复注入）", vm.contains("pendingSkillInjection = null"))
+    }
+
     /** 端口必须真的提供枚举能力，且适配器按名字透出。 */
     @Test
     fun ptyPort_exposesSessionNames() {

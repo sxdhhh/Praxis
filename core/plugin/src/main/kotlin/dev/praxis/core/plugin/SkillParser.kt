@@ -52,6 +52,17 @@ object SkillParser {
         val name = meta["name"]?.takeIf { it.isNotBlank() }
         val description = meta["description"]?.trim().orEmpty()
 
+        // ## 两个调用开关（照 Harness `skills` 的 frontmatter）
+        //
+        // 键名必须是**连字符形式**：Harness 明确写「`disableModelInvocation`、
+        // `userInvocable` 会被本地解析器拒绝」。这里同样只认连字符 ——
+        // 写驼峰会被当成未知键忽略，与上游一致，避免两套写法并存。
+        //
+        // 默认：disable=false（模型可用）、user-invocable=true（用户可用），
+        // 即「不写开关 = 两边都能用」，那是绝大多数技能期望的行为。
+        val disableModel = parseBool(meta["disable-model-invocation"], default = false)
+        val userInvocable = parseBool(meta["user-invocable"], default = true)
+
         val warning = when {
             meta.isEmpty() -> "缺少 frontmatter，已用文件名作标识"
             name == null -> "frontmatter 缺少 name，已用文件名作标识"
@@ -64,8 +75,29 @@ object SkillParser {
             description = description,
             body = body.trim(),
             folder = folder,
+            disableModelInvocation = disableModel,
+            userInvocable = userInvocable,
         )
         return skill to warning
+    }
+
+    /**
+     * 解析 YAML 布尔值。
+     *
+     * ## 为什么额外接受 yes/no/1/0/on/off
+     *
+     * `true` / `false` 是标准写法，但手写技能包里这几种变体很常见。
+     * 无法识别的值按 [default] 处理而**不报错**：
+     * 技能是「写得不太规范也该能用」的东西（见类文档的容错策略），
+     * 为一个布尔值把整份技能拒之门外不划算。
+     */
+    private fun parseBool(raw: String?, default: Boolean): Boolean {
+        val value = raw?.trim()?.lowercase() ?: return default
+        return when (value) {
+            "true", "yes", "1", "on" -> true
+            "false", "no", "0", "off" -> false
+            else -> default
+        }
     }
 
     /**

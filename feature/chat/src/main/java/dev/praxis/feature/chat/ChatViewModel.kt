@@ -101,6 +101,16 @@ class ChatViewModel(
     private val queueStore: PendingQueueStore? = null,
 
     /**
+     * 按名字查技能（`/技能名` 用）。null = 未接入技能系统。
+     *
+     * ## 为什么传函数而不是整个 SkillRegistry
+     *
+     * `:feature:chat` 不该依赖 `:core:plugin` 的注册表实现。
+     * 一个 `(String) -> Skill?` 就够用，且单测里可以直接给定返回值。
+     */
+    private val skillLookup: ((String) -> SkillView?)? = null,
+
+    /**
      * 用户改写过的内置人格（每轮现取，空串 = 用出厂人格）。
      *
      * 与 [systemPromptProvider] 分开注入：那是「用户的规则」（最高优先级），
@@ -1810,12 +1820,31 @@ class ChatViewModel(
         val memoryBlock: String? = null
 
         val skills = runCatching { skillsPromptProvider?.invoke() }.getOrNull()
+
+        // ## `/技能名` 的一次性注入（2026-11-06）
+        //
+        // 拼在技能层**之后**：它比常驻技能更具体，属于「这一次要按这个做」。
+        // 模型对越靠后的 system 内容注意力越集中，而这条只需要生效一轮。
+        //
+        // 取完立刻清空（见下面的 `consume`）—— 不清会让整篇技能每轮都在
+        // 上下文里，既烧预算，又让模型把它误当常驻设定。
+        val pendingSkill = _state.value.pendingSkillInjection
+        val skillsWithPending = when {
+            pendingSkill.isNullOrBlank() -> skills
+            skills.isNullOrBlank() -> "# 本次任务指引（用户显式调用）\n\n" + pendingSkill
+            else -> skills + "\n\n# 本次任务指引（用户显式调用）\n\n" + pendingSkill
+        }
+        if (!pendingSkill.isNullOrBlank()) {
+            // 清空必须发生在**本次拼装之后**：本条消息已经带上它了。
+            _state.update { it.copy(pendingSkillInjection = null) }
+        }
+
         val layered = SystemPromptBuilder.buildLayers(
             settings = SystemPromptSettings(
                 custom = config.systemPrompt,
                 persona = config.persona,
             ),
-            skills = skills,
+            skills = skillsWithPending,
             memory = memoryBlock,
             // 摘要由 CompactionApplier 单独插入（它还要负责丢掉被折叠的消息），
             // 这里再传一次会出现两份摘要。
@@ -2802,9 +2831,30 @@ class ChatViewModel(
                 }
                 _state.update { it.copy(exportRequested = true) }
             }
-            // 未注册的命令：明确报错，**不发网络请求**。
-            // 见 `SlashCommand.find` 的 KDoc。
-            else -> noticeCommand("没有 /${definition.name} 这个命令。")
+            // ## 技能调用：`/技能名`
+            //
+            // 技能与内置命令共用同一个命名空间（都是 `/[a-z][a-z0-9_-]*`），
+            // 所以这里先查内置、查不到再看技能。
+            //
+            // 技能正文作为**一次性系统指令**注入：注入后清掉，下一轮不再重复 ——
+            // 否则每轮都把整篇技能塞进上下文，既撑爆预算，
+            // 也让模型以为那是常驻设定。
+            //
+            // 查不到就明确报错，**绝不发网络请求**：
+            // 否则模型会一本正经地回答一个不存在的命令（见 SlashCommand.find）。
+            else -> {
+                val skill = skillLookup?.invoke(definition.name)
+                if (skill == null) {
+                    noticeCommand("没有 /${definition.name} 这个命令。")
+                } else {
+                    _state.update {
+                        it.copy(
+                            pendingSkillInjection = skill.body,
+                            notice = "已加载技能「${skill.name}」",
+                        )
+                    }
+                }
+            }
         }
     }
 

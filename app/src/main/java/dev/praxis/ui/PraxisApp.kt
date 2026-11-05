@@ -376,6 +376,17 @@ fun PraxisApp(
                 skillsPromptProvider = {
                     skillRegistry.composePrompt(skillRegistry.all().map { it.name }.toSet())
                 },
+                // `/技能名`：把 Skill 转成聊天层的最小视图。
+                // 转换在这里做，`:feature:chat` 就不必依赖 `:core:plugin`。
+                skillLookup = { name ->
+                    skillRegistry.bodyForUserInvocation(name)?.let { skill ->
+                        dev.praxis.feature.chat.SkillView(
+                            name = skill.name,
+                            description = skill.description,
+                            body = skill.body,
+                        )
+                    }
+                },
                 // 用户自定义系统提示词 + 角色卡提示词（最高优先级）。现取：改完下一句生效。
                 //
                 // ## 为什么是「合并」而不是「谁覆盖谁」

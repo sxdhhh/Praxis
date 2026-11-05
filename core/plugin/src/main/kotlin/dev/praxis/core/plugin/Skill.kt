@@ -21,7 +21,37 @@ data class Skill(
     val body: String,
     /** 来源目录（排查「这个技能从哪来的」用）。 */
     val folder: String,
+
+    /**
+     * 是否禁止**模型自己**调用（frontmatter 的 `disable-model-invocation`）。
+     *
+     * true 时该技能不进模型可见的技能清单 —— 只有用户显式 `/技能名` 才会加载。
+     * 适用于「有副作用、不能让 AI 自作主张执行」的技能。
+     */
+    val disableModelInvocation: Boolean = false,
+
+    /**
+     * 是否允许**用户**显式调用（frontmatter 的 `user-invocable`，默认 true）。
+     *
+     * false 时 `/技能名` 不生效，且不进候选列表。
+     * 适用于「只想作为背景知识常驻、不希望被单独触发」的技能。
+     */
+    val userInvocable: Boolean = true,
 ) {
+
+    /**
+     * 该技能能否被模型看见（进入自动注入的技能清单）。
+     *
+     * ## 两个开关的组合语义（照 Harness 的四象限）
+     *
+     * | disable-model-invocation | user-invocable | 模型可用 | 用户可用 |
+     * |---|---|---|---|
+     * | false | true | ✅ | ✅ |
+     * | true | true | ❌ | ✅ |
+     * | false | false | ✅ | ❌ |
+     * | true | false | ❌ | ❌（等于停用） |
+     */
+    val modelInvocable: Boolean get() = !disableModelInvocation
     /**
      * 拼进系统提示词的片段。
      *
