@@ -31,6 +31,27 @@ import org.junit.Test
 class SessionShutdownTest {
 
     /**
+     * 单条用例 30 秒闸门（2026-11-05）。
+     *
+     * ## 为什么加在每一个 :app 测试类上
+     *
+     * `:app:testDebugUnitTest` 在 CI 上卡住过 17 分钟不结束
+     * （正常 0.3~1.4 分钟），而 Gradle **默认不给测试任务设超时**，
+     * 也**不打印正在跑哪条用例** —— 于是只看到一个不动的进度条。
+     *
+     * 试过在 app/build.gradle.kts 里配 `Test.timeout` 与
+     * `testLogging.events(started)`：对**被取消**的任务，Gradle 会把
+     * 缓冲的输出一起丢掉，日志里一行都没有。
+     *
+     * 所以改成让**断言层**自己超时 —— 失败信息里直接带类名与方法名，
+     * 不依赖 Gradle 的输出缓冲。
+     *
+     * 30 秒是宽裕值：本文件最快的用例不到 10 毫秒。
+     */
+    @get:org.junit.Rule
+    val praxisTestTimeout: org.junit.rules.Timeout = org.junit.rules.Timeout.seconds(30)
+
+    /**
      * 主动关闭时读线程抛异常 —— 不该报错。
      *
      * 这正是 ⑤ 的修复点。
