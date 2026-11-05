@@ -198,6 +198,38 @@ android {
         jniLibs {
             useLegacyPackaging = true
         }
+        resources {
+            /*
+             * ## 排除重复的 META-INF 元数据（2026-11-06，release 构建暴露）
+             *
+             * FTP 依赖（Apache FtpServer）拖进来三个 jar，每个都带自己的
+             * `META-INF/DEPENDENCIES` / `LICENSE` / `NOTICE`：
+             *
+             *   org.apache.ftpserver:ftpserver-core
+             *   org.apache.ftpserver:ftplet-api
+             *   org.apache.mina:mina-core
+             *
+             * 合并时路径相撞 → `mergeReleaseJavaResource` 直接失败：
+             *
+             *   > 3 files found with path 'META-INF/DEPENDENCIES' from inputs
+             *
+             * ## 为什么是排除而不是 pickFirst
+             *
+             * 这些文件是**依赖清单与许可证文本**，不参与运行。
+             * 三轮车任取一份（pickFirst）会掩盖「其实有三份、内容不同」这件事；
+             * 明确排除则说明「我们不需要它们进 APK」。
+             *
+             * 如果是真正的代码资源（比如某个 `.properties`），就必须用
+             * pickFirst 或按优先级选择 —— 那种情况下盲目排除会让运行时缺配置。
+             */
+            excludes += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+            )
+        }
     }
 
     /**
