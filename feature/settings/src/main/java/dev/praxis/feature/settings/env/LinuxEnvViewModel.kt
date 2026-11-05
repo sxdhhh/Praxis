@@ -4,8 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.praxis.core.linux.FrpConfig
 import dev.praxis.core.linux.FrpScript
-import dev.praxis.core.linux.FtpConfig
-import dev.praxis.core.linux.FtpServerScript
+import dev.praxis.core.linux.FtpSettings
 import dev.praxis.core.linux.LinuxDiskUsage
 import dev.praxis.core.linux.LinuxDistro
 import dev.praxis.core.linux.LinuxEnvironment
@@ -66,7 +65,7 @@ data class LinuxEnvUiState(
      * 生命周期都由本 ViewModel 管（容器停 → 三者一起停）。
      */
     val ftpEnabled: Boolean = false,
-    val ftpConfig: FtpConfig = FtpConfig(),
+    val ftpConfig: FtpSettings = FtpSettings(),
     /**
      * 共享 rootfs **最初**是从哪个发行版解出来的（`"ubuntu"` / `"kali"`）。
      *
@@ -274,6 +273,28 @@ interface LinuxEnvPort {
         onLine: (String) -> Unit,
     ): SessionHandle
 
+    // ── FTP（2026-11-06 改：进程内服务，不再用容器内 vsftpd）────────
+
+    /**
+     * 启动 FTP 服务。
+     *
+     * ## 为什么不再走 [startSession]
+     *
+     * 旧实现是「在容器里起 vsftpd 进程」。真机实测那条路走不通：
+     * dpkg 的 maintainer script 在 Android 上被 SELinux 拒绝执行
+     *（`update-rc.d: Permission denied`，而文件权限是 `rwxr-xr-x`），
+     * 于是 vsftpd 永远停在 unconfigured、二进制根本没落地。
+     *
+     * 现在 FTP 是 App 进程内的纯 JVM 服务，根目录直接指向容器 rootfs。
+     *
+     * @return 失败原因；成功返回 null。
+     */
+    suspend fun startFtp(settings: dev.praxis.core.linux.FtpSettings): String? =
+        "当前构建未接入 FTP 服务。"
+
+    /** 停止 FTP 服务。幂等。 */
+    suspend fun stopFtp() {}
+
     // ── 存储管理（2026-10-23 新增）────────────────────────────────
 
     /**
@@ -359,7 +380,7 @@ class LinuxEnvViewModel(
     private var frpSession: LinuxEnvPort.SessionHandle? = null
 
     /** 当前 vsftpd 会话。 */
-    private var ftpSession: LinuxEnvPort.SessionHandle? = null
+
 
     init {
         refresh()
@@ -1021,7 +1042,7 @@ class LinuxEnvViewModel(
 
     // ── FTP ─────────────────────────────────────────────────────────
 
-    fun updateFtpConfig(cfg: FtpConfig) {
+    fun updateFtpConfig(cfg: FtpSettings) {
         _state.update { it.copy(ftpConfig = cfg) }
     }
 
@@ -1035,41 +1056,57 @@ class LinuxEnvViewModel(
      * 症状是「登录成功但看不到任何文件」，非常难自己排查出来。
      * 所以在打开前就拦住，而不是等用户看到空目录。
      */
+    /**
+     * 开关 FTP。
+     *
+     * ## 2026-11-06 整体切换实现
+     *
+     * 旧实现是「在容器里 apt 装 vsftpd 再起进程」。真机实测那条路走不通：
+     *
+     * ```
+     * /bin/sh: 1: /usr/sbin/dpkg-preconfigure: Permission denied
+     * /var/lib/dpkg/info/procps.postinst: 64: update-rc.d: Permission denied
+     * dpkg: dependency problems prevent configuration of vsftpd
+     * ```
+     *
+     * `update-rc.d` 权限是 `-rwxr-xr-x` 却执行被拒 → 是 **SELinux 禁止从
+     * app 数据目录执行脚本**，不是权限位问题。vsftpd 依赖 procps，两者
+     * 一起停在 unconfigured，二进制根本没落地。
+     *
+     * 现在走 App 进程内的 Apache FtpServer（Operit 同款），根目录直接
+     * 指向容器 rootfs，完全不碰容器内二进制。
+     */
     fun toggleFtp(enabled: Boolean) {
         if (!enabled) {
             stopFtp()
             return
         }
         val cfg = _state.value.ftpConfig
-        if (!cfg.isPortUsable) {
-            publish(cfg.portProblem ?: "端口不可用。")
-            return
-        }
-        if (!cfg.isPassiveRangeValid) {
-            publish(cfg.passiveRangeProblem ?: "被动端口段不可用。")
-            return
-        }
-        if (!cfg.isUserUsable) {
-            publish("用户名不能为空，也不能含空格、斜杠或冒号。")
+        // 校验统一走 `problem`：它按「端口 → 根目录 → 被动段 → 用户名 → 密码」
+        // 的顺序给出**第一条**原因，避免这里散落五个 if 且顺序不一。
+        cfg.problem?.let { reason ->
+            publish(reason)
+            _state.update { it.copy(summary = reason) }
             return
         }
         if (_state.value.busy) return
-        val env = envFor(_state.value.distro)
-        _state.update { it.copy(busy = true, summary = "正在准备 FTP…") }
+        _state.update { it.copy(busy = true, summary = "正在启动 FTP…") }
         viewModelScope.launch {
             try {
-                // ① 装 vsftpd + 建用户 + 写配置（幂等）
-                port.exec(env, FtpServerScript.installScript(cfg)) { l -> publish(l) }
-                // ② 起 vsftpd（前台，生命周期 == 会话生命周期）
-                ftpSession = port.startSession(env, FtpServerScript.runArgs(cfg)) { l ->
-                    publish(l)
-                }
-                val (lo, hi) = FtpServerScript.passiveRange(cfg)
-                _state.update {
-                    it.copy(
-                        ftpEnabled = true,
-                        summary = "FTP 已启动：端口 ${cfg.port}，被动段 $lo-$hi，根目录 ${cfg.homeDir}。",
-                    )
+                val error = port.startFtp(cfg)
+                if (error == null) {
+                    publish("FTP 已启动：端口 ${cfg.port}，根目录 ${cfg.homeDirectory}")
+                    _state.update {
+                        it.copy(
+                            ftpEnabled = true,
+                            summary = "FTP 已启动：端口 ${cfg.port}，" +
+                                "被动段 ${cfg.passivePortLow}-${cfg.passivePortHigh}，" +
+                                "根目录 ${cfg.homeDirectory}。",
+                        )
+                    }
+                } else {
+                    publish(error)
+                    _state.update { it.copy(ftpEnabled = false, summary = error) }
                 }
             } finally {
                 _state.update { it.copy(busy = false) }
@@ -1077,13 +1114,26 @@ class LinuxEnvViewModel(
         }
     }
 
-    /** 设置 FTP 密码（不改开关状态，与 [setSshPassword] 同构）。 */
+    /**
+     * 设置 FTP 密码。
+     *
+     * ## 与旧实现的差别
+     *
+     * 旧的要 `chpasswd` 进容器改系统用户密码。现在用户表在内存里，
+     * 直接改设置即可 —— 但**不会自动重启**：正在运行的服务的用户表
+     * 是启动时快照的。UI 侧负责提示「需要重启生效」。
+     */
     fun setFtpPassword(password: String) {
         if (password.isEmpty()) return
-        val env = envFor(_state.value.distro)
-        val user = _state.value.ftpConfig.user
-        viewModelScope.launch {
-            port.exec(env, FtpServerScript.setPasswordScript(user, password)) { l -> publish(l) }
+        _state.update {
+            it.copy(
+                ftpConfig = it.ftpConfig.copy(password = password),
+                summary = if (it.ftpEnabled) {
+                    "密码已更新，重启 FTP 后生效。"
+                } else {
+                    "密码已更新。"
+                },
+            )
         }
     }
 
@@ -1099,10 +1149,18 @@ class LinuxEnvViewModel(
         toggleFtp(true)
     }
 
+    /**
+     * 停止 FTP。
+     *
+     * 现在没有「会话句柄」可停 —— 服务在 App 进程内，由端口层持有。
+     * 状态置位放在 `stopFtp()` 返回之后：停止本身可能耗时（要关监听 socket），
+     * 先置位会让 UI 短暂显示「已停止」而服务其实还在监听。
+     */
     private fun stopFtp() {
-        ftpSession?.stop()
-        ftpSession = null
-        _state.update { it.copy(ftpEnabled = false) }
+        viewModelScope.launch {
+            port.stopFtp()
+            _state.update { it.copy(ftpEnabled = false, summary = "FTP 已停止。") }
+        }
     }
 
     // ── 辅助 ────────────────────────────────────────────────────────
