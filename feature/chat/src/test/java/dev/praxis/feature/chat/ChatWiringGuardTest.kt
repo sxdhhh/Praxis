@@ -481,6 +481,41 @@ class ChatWiringGuardTest {
         assertTrue("端口层没有实现保存", port.contains("override suspend fun saveEnvSettings"))
     }
 
+    /**
+     * 长工具输出必须**落盘 + 给定位符**，不能静默截断。
+     *
+     * ## 这条护栏防的是什么
+     *
+     * 旧实现超过 `MAX_OUTPUT_CHARS` 就静默丢弃剩余部分。后果不是「省了上下文」，
+     * 而是模型基于半截输出做判断，且用户和模型都不知道少了什么。
+     *
+     * 典型场景：`apt install` 失败，真正的错误在最后几行，而前 16000 字符
+     * 全是包列表 —— 丢掉尾部等于丢掉了唯一的线索。
+     */
+    @Test
+    fun spill_savesInsteadOfTruncating() {
+        val impl = read("app/src/main/java/dev/praxis/data/linux/LinuxToolPortImpl.kt")
+        assertTrue("执行路径没有接溢出存储", impl.contains("SpillPolicy.shouldSpill"))
+        assertTrue("没有落盘调用", impl.contains("spillStore.saveText"))
+    }
+
+    /**
+     * 必须同时提供取回入口。
+     *
+     * 只落盘不提供 `read_spill`，定位符就是一句空话 ——
+     * 模型知道「还有更多内容」却永远看不到。
+     */
+    @Test
+    fun spill_providesRetrievalTool() {
+        val di = read("app/src/main/java/dev/praxis/di/AppModule.kt")
+        val tool = read("app/src/main/java/dev/praxis/data/spill/ReadSpillTool.kt")
+        assertTrue("read_spill 未注册", di.contains("ReadSpillTool"))
+        assertTrue("工具名不是 read_spill", tool.contains("name = \"read_spill\""))
+        // 定位符来自模型，可能被篡改：必须做白名单校验，否则 `../` 能读任意文件。
+        val store = read("app/src/main/java/dev/praxis/data/spill/SpillStore.kt")
+        assertTrue("定位符没有字符集校验", store.contains("isValidLocator"))
+    }
+
     /** 端口必须真的提供枚举能力，且适配器按名字透出。 */
     @Test
     fun ptyPort_exposesSessionNames() {
