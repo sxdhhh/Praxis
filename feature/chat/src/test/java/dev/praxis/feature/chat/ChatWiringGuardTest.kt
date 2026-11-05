@@ -313,6 +313,44 @@ class ChatWiringGuardTest {
         assertTrue("入队没有高亮动画", panel.contains("Animatable"))
     }
 
+    /**
+     * 发送按钮必须是**四态**且带图标/颜色动画。
+     *
+     * ## 这条护栏防的是「悄悄退回旧行为」
+     *
+     * 旧实现生成中把按钮直接变「停止」，用户打完字点它结果是中断生成 ——
+     * 界面上显示的动作与实际做的事不一致。把 `Enqueue` 这一态删掉，
+     * 编译不会报错、测试也不会红（除非有这条断言）。
+     */
+    @Test
+    fun sendAction_hasFourStatesWithAnimation() {
+        val screen = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatScreen.kt")
+        assertTrue("缺少 Enqueue 态", screen.contains("SendActionMode.Enqueue"))
+        assertTrue("缺少 Cancel 态", screen.contains("SendActionMode.Cancel"))
+        assertTrue("缺少 Disabled 态", screen.contains("SendActionMode.Disabled"))
+        // 入队态必须有独立图标（加号），否则用户看不出这次按会排队。
+        assertTrue("入队态没有独立图标", screen.contains("MiuixIcons.Regular.Add"))
+        // 动画：底色补间 + 图标交叉淡入。
+        assertTrue("按钮底色没有补间", screen.contains("animateColorAsState"))
+        assertTrue("图标没有交叉淡入", screen.contains("Crossfade"))
+    }
+
+    /**
+     * `onSend` 与 `onEnqueue` 必须是两条独立通路。
+     *
+     * 旧写法 `onSend = onSendOrEnqueue ?: onSend` 让按钮永远画成「发送」，
+     * 由 ViewModel 内部判 busy 再决定发还是排队 —— 那正是问题的根源。
+     */
+    @Test
+    fun chatInputBar_separatesSendAndEnqueue() {
+        val screen = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatScreen.kt")
+        assertTrue(
+            "onSend 又被 onSendOrEnqueue 覆盖了",
+            !screen.contains("onSend = onSendOrEnqueue ?: onSend"),
+        )
+        assertTrue("ChatInputBar 没有 onEnqueue 形参", screen.contains("onEnqueue: (() -> Unit)? = null"))
+    }
+
     /** 端口必须真的提供枚举能力，且适配器按名字透出。 */
     @Test
     fun ptyPort_exposesSessionNames() {

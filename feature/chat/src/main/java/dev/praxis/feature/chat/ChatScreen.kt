@@ -1250,8 +1250,9 @@ fun ChatScreen(
         ChatInputBar(
             state = state,
             onInputChange = onInputChange,
-            onSend = onSendOrEnqueue ?: onSend,
+            onSend = onSend,
             onCancel = onCancel,
+            onEnqueue = onSendOrEnqueue,
             // 键盘态不给底栏留位：底栏已被键盘盖住，留位只会多出一段空白。
             // 根容器的 `imeLiftPadding` 已让出键盘高度，这里让的是底栏高度，
             // 两者互补不叠加（见 `ImeLift.imeLiftPadding` 的 KDoc）。
@@ -1432,6 +1433,20 @@ private fun ChatInputBar(
     onSend: () -> Unit,
     onCancel: (() -> Unit)?,
     bottomPadding: Dp,
+    /**
+     * 生成中「加入待发队列」。
+     *
+     * ## 为什么与 [onSend] 分开，而不是让 onSend 兜住两种语义
+     *
+     * 旧写法是 `onSend = onSendOrEnqueue ?: onSend`：按钮永远画成「发送」，
+     * 由 ViewModel 内部判 busy 再决定发还是排队。结果是**按钮显示的动作
+     * 与它实际做的事不一致** —— 用户看到「发送」，按下去却进了队列，
+     * 界面上什么也没发生（这正是用户抱怨的那类问题）。
+     *
+     * 现在两种语义各有自己的回调，按钮按状态切换图标与文案，
+     * 用户按之前就知道会发生什么。
+     */
+    onEnqueue: (() -> Unit)? = null,
     /** 回复目标（null 表示不在回复）。 */
     replyTarget: ChatBubble? = null,
     /** 清除回复目标。 */
@@ -2008,6 +2023,9 @@ private fun ChatInputBar(
                     state = state,
                     onSend = onSend,
                     onCancel = onCancel,
+                    // 生成中按发送 = 加入待发队列（不中断生成）。
+                    // 不传则退化为「点发送就中断」，正是用户抱怨的那种错位。
+                    onEnqueue = onEnqueue,
                 )
             }
         }
@@ -2077,57 +2095,169 @@ private fun replyPreviewText(raw: String): String {
  * 文字按钮的宽度随文案变：「发送」两字比「生成中」三字窄，状态切换时
  * 按钮会横向跳一下，整行跟着重排。图标按钮尺寸固定，切换时只有图标与配色变。
  *
- * ## 三态
+ * ## 四态（2026-11-06 从三态扩为四态）
  *
  * | 状态 | 图标 | 底色 | 行为 |
  * |---|---|---|---|
  * | 空闲有内容 | Send | primary | 发送 |
- * | 处理中且传了 onCancel | Stopwatch | error | 掐断 |
+ * | **生成中 + 有内容** | **Add** | **primary（半透明）** | **加入待发队列** |
+ * | 生成中 + 无内容 | Stopwatch | error | 掐断 |
  * | 空闲无内容 | Send | surfaceContainerHigh | 禁用 |
  *
- * 上游第二态用的是「取消/停止」语义；这里用 `Stopwatch` 而不是 `Close`，
- * 因为 `Close` 在本项目里已经表示「删除/关闭」（如清除密钥），
- * 混用会让用户以为按了会丢弃输入。
+ * ## 为什么必须把「生成中可入队」单独表达（第二态）
+ *
+ * 旧实现在生成中把按钮直接变成「停止」：用户打完字点它，**结果是中断生成**，
+ * 而他本意是「把这句话发出去」。这正是用户反馈「点发送没反应的兄弟问题」——
+ * 按钮做了什么，与用户以为它会做什么，完全不一致。
+ *
+ * 现在生成中只要输入框有内容，按钮就变成「加入队列」的加号，语义一目了然；
+ * 想中断生成则清空输入框后按停止（或长按按钮）。
+ *
+ * ## 上游第二态用的是「取消/停止」语义
+ *
+ * 这里用 `Stopwatch` 而不是 `Close`，因为 `Close` 在本项目里已经表示
+ * 「删除/关闭」（如清除密钥），混用会让用户以为按了会丢弃输入。
  */
 @Composable
 private fun SendAction(
     state: ChatState,
     onSend: () -> Unit,
     onCancel: (() -> Unit)?,
+    /** 生成中「加入待发队列」。传 null 时该态退化为停止。 */
+    onEnqueue: (() -> Unit)? = null,
 ) {
-    val busy = state.isBusy
-    // 处理中但没传 onCancel：显示禁用态而不是假装能停。
-    val canCancel = busy && onCancel != null
-    val canSendNow = !busy && state.canSend
+    val mode = sendActionMode(
+        busy = state.isBusy,
+        canSend = state.canSend,
+        hasCancel = onCancel != null,
+        hasEnqueue = onEnqueue != null,
+    )
 
-    val container = when {
-        canCancel -> MiuixTheme.colorScheme.error
-        canSendNow -> MiuixTheme.colorScheme.primary
-        else -> MiuixTheme.colorScheme.surfaceContainerHigh
-    }
-    val tint = when {
-        canCancel -> MiuixTheme.colorScheme.onError
-        canSendNow -> MiuixTheme.colorScheme.onPrimary
-        else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
-    }
+    // ## 颜色与图标都做补间，不做硬切
+    //
+    // 四态之间切换很频繁（打字/清空/开始生成），硬切会让按钮「闪」。
+    // `animateColorAsState` 与图标交叉淡入让切换连续。
+    val container by androidx.compose.animation.animateColorAsState(
+        targetValue = when (mode) {
+            SendActionMode.Cancel -> MiuixTheme.colorScheme.error
+            SendActionMode.Send -> MiuixTheme.colorScheme.primary
+            SendActionMode.Enqueue -> MiuixTheme.colorScheme.primary.copy(alpha = 0.55f)
+            SendActionMode.Disabled -> MiuixTheme.colorScheme.surfaceContainerHigh
+        },
+        animationSpec = tween(
+            durationMillis = PraxisMotion.Durations.Fast,
+            easing = PraxisMotion.Curves.Decelerate,
+        ),
+        label = "send-container",
+    )
+    val tint by androidx.compose.animation.animateColorAsState(
+        targetValue = when (mode) {
+            SendActionMode.Cancel -> MiuixTheme.colorScheme.onError
+            SendActionMode.Send -> MiuixTheme.colorScheme.onPrimary
+            SendActionMode.Enqueue -> MiuixTheme.colorScheme.onPrimary
+            SendActionMode.Disabled -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+        },
+        animationSpec = tween(
+            durationMillis = PraxisMotion.Durations.Fast,
+            easing = PraxisMotion.Curves.Decelerate,
+        ),
+        label = "send-tint",
+    )
 
     IconButton(
-        onClick = { if (canCancel) onCancel?.invoke() else onSend() },
-        enabled = canCancel || canSendNow,
+        onClick = {
+            when (mode) {
+                SendActionMode.Cancel -> onCancel?.invoke()
+                SendActionMode.Enqueue -> onEnqueue?.invoke()
+                SendActionMode.Send -> onSend()
+                // 禁用态不该被点到；`enabled = false` 已经挡住，这里不做事。
+                SendActionMode.Disabled -> Unit
+            }
+        },
+        enabled = mode != SendActionMode.Disabled,
         backgroundColor = container,
         modifier = Modifier.size(40.dp),
     ) {
-        Icon(
-            imageVector = if (canCancel) {
-                MiuixIcons.Regular.Stopwatch
-            } else {
-                MiuixIcons.Regular.Send
-            },
-            contentDescription = if (canCancel) "停止" else "发送",
-            tint = tint,
-            modifier = Modifier.size(18.dp),
-        )
+        // ## 图标交叉淡入
+        //
+        // 四态用三个不同图标（Send / Add / Stopwatch）。直接换 `imageVector`
+        // 是硬切；用 `Crossfade` 让旧图标淡出、新图标淡入，观感连续。
+        // `Crossfade` 的 key 用 [SendActionMode] —— 同一 mode 内（如从 Send
+        // 到 Send）不会重播动画。
+        androidx.compose.animation.Crossfade(
+            targetState = mode,
+            animationSpec = tween(
+                durationMillis = PraxisMotion.Durations.Fast,
+                easing = PraxisMotion.Curves.Decelerate,
+            ),
+            label = "send-icon",
+        ) { current ->
+            Icon(
+                imageVector = when (current) {
+                    SendActionMode.Cancel -> MiuixIcons.Regular.Stopwatch
+                    SendActionMode.Enqueue -> MiuixIcons.Regular.Add
+                    SendActionMode.Send -> MiuixIcons.Regular.Send
+                    SendActionMode.Disabled -> MiuixIcons.Regular.Send
+                },
+                contentDescription = when (current) {
+                    SendActionMode.Cancel -> "停止生成"
+                    SendActionMode.Enqueue -> "加入待发队列"
+                    SendActionMode.Send -> "发送"
+                    SendActionMode.Disabled -> "发送"
+                },
+                tint = tint,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
+}
+
+/**
+ * 发送按钮的四态。
+ *
+ * ## 为什么抽成独立枚举 + 纯函数
+ *
+ * 判定规则有四个输入（是否生成中、是否有内容、是否可取消、是否可入队），
+ * 组合起来容易写错；抽成纯函数后可以在 JVM 单测里把 4 种输入组合全部覆盖，
+ * 而不必跑 Compose 测试。
+ */
+internal enum class SendActionMode {
+    /** 空闲且有内容：发送。 */
+    Send,
+
+    /** 生成中且有内容：加入待发队列（不中断生成）。 */
+    Enqueue,
+
+    /** 生成中且无内容：停止生成。 */
+    Cancel,
+
+    /** 空闲且无内容：禁用。 */
+    Disabled,
+}
+
+/**
+ * 由状态推出按钮该处于哪一态。
+ *
+ * ## 优先级：Enqueue > Cancel > Send > Disabled
+ *
+ * 生成中若输入框有内容，用户的意图几乎必然是「把这句话排上」——
+ * 想中断生成的人不会先在输入框里打字。所以 Enqueue 优先级高于 Cancel。
+ *
+ * 只有在**生成中且输入框为空**时才露出停止键，这也让「停止」更安全：
+ * 不会因为手滑点到而中断正在写的内容。
+ */
+internal fun sendActionMode(
+    busy: Boolean,
+    canSend: Boolean,
+    hasCancel: Boolean,
+    hasEnqueue: Boolean,
+): SendActionMode = when {
+    busy && canSend && hasEnqueue -> SendActionMode.Enqueue
+    busy && hasCancel -> SendActionMode.Cancel
+    // 生成中既不能入队也不能取消：没有可用动作，禁用。
+    busy -> SendActionMode.Disabled
+    canSend -> SendActionMode.Send
+    else -> SendActionMode.Disabled
 }
 
 /**
