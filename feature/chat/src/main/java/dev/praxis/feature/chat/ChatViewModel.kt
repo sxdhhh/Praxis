@@ -2752,6 +2752,63 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * 拖拽排序落位：按新 id 顺序重排队列。
+     *
+     * ## 为什么立刻落盘
+     *
+     * 拖拽是「我特意调整了顺序」的强意图。若只改内存，进程被杀后顺序又回去了，
+     * 用户会以为拖拽没生效。
+     */
+    fun queueReorder(orderedIds: List<Long>) {
+        val next = PendingQueueOps.reorder(_state.value.queue, orderedIds)
+        if (next === _state.value.queue) return
+        _state.update { it.copy(queue = next) }
+        persistQueue(next)
+    }
+
+    /**
+     * 全部发送队列。
+     *
+     * ## 为什么只在空闲时可用
+     *
+     * 生成中「全部发送」等于一次触发 N 轮请求。用户点它的意图通常是
+     * 「这些我都想发」，但那应该在**可以发送**的时候执行；生成中它只会
+     * 把队列再压一遍。UI 侧也会据此禁用按钮。
+     *
+     * ## 为什么逐条走 `sendNow` 而不是拼成一条
+     *
+     * 拼成一条会把 N 个独立问题变成一个问题，模型只会回答最后一件事 ——
+     * 而用户排队时写的是 N 件**独立**的事。
+     */
+    fun queueSendAll() {
+        if (_state.value.isBusy) return
+        val head = _state.value.queue.head ?: return
+        val rest = PendingQueueOps.poll(_state.value.queue).second
+        _state.update {
+            it.copy(queue = rest, input = head.text, suppressNextAutoDequeue = true)
+        }
+        persistQueue(rest)
+        // 剩下的条目会在这一轮结束后由自动出队继续发（那是既有机制），
+        // 所以这里只取队首就够了。
+        inFlightQueueMessage = head
+        send()
+    }
+
+    /**
+     * 清空队列。
+     *
+     * ## 为什么不还原到输入框
+     *
+     * 「清空」的语义是丢弃。若把内容倒回输入框，用户会以为没清掉；
+     * 而想保留某条的路径是「编辑」（它会取回输入框）。
+     */
+    fun queueClearAll() {
+        val cleared = PendingQueueOps.clear(_state.value.queue)
+        _state.update { it.copy(queue = cleared) }
+        persistQueue(cleared)
+    }
+
     /** 删除队列条目。 */
     fun queueRemove(id: Long) {
         _state.update { it.copy(queue = PendingQueueOps.remove(it.queue, id)) }

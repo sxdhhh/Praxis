@@ -248,6 +248,12 @@ fun ChatScreen(
     onQueueEdit: ((Long) -> Unit)? = null,
     /** 立即发送队列里的某一条（跳过排队顺序）。 */
     onQueueSendNow: ((Long) -> Unit)? = null,
+    /** 拖拽排序落位（传入拖完之后的完整 id 顺序）。 */
+    onQueueReorder: ((List<Long>) -> Unit)? = null,
+    /** 全部发送（UI 只在空闲时提供）。 */
+    onQueueSendAll: (() -> Unit)? = null,
+    /** 清空队列。 */
+    onQueueClearAll: (() -> Unit)? = null,
     /** 展开 / 收起队列面板。 */
     onQueueExpandedChange: ((Boolean) -> Unit)? = null,
     /** 跳转到第 index 条消息（导航浮条 / 定位器回调）。 */
@@ -1261,6 +1267,9 @@ fun ChatScreen(
             onQueueRemove = onQueueRemove,
             onQueueEdit = onQueueEdit,
             onQueueSendNow = onQueueSendNow,
+            onQueueReorder = onQueueReorder,
+            onQueueSendAll = onQueueSendAll,
+            onQueueClearAll = onQueueClearAll,
             onQueueExpandedChange = onQueueExpandedChange,
             onNoticeConsumed = onNoticeConsumed,
             // ── 底部设置条（1:1 对齐 Operit `ClassicChatSettingsBar`）──
@@ -1433,6 +1442,9 @@ private fun ChatInputBar(
     onQueueRemove: ((Long) -> Unit)? = null,
     onQueueEdit: ((Long) -> Unit)? = null,
     onQueueSendNow: ((Long) -> Unit)? = null,
+    onQueueReorder: ((List<Long>) -> Unit)? = null,
+    onQueueSendAll: (() -> Unit)? = null,
+    onQueueClearAll: (() -> Unit)? = null,
     onQueueExpandedChange: ((Boolean) -> Unit)? = null,
     /**
      * 提示已展示完，可以清掉。
@@ -1668,6 +1680,12 @@ private fun ChatInputBar(
                     onMoveUp = onQueueMoveUp,
                     onMoveDown = onQueueMoveDown,
                     onMoveToTop = onQueueMoveToTop,
+                    // 拖拽排序：与上/下/置顶按钮并存（按钮保可访问性，拖拽省手）。
+                    onReorder = onQueueReorder,
+                    // 「全部发送」只在空闲时提供：生成中它只会把队列再压一遍。
+                    onSendAll = if (!state.isBusy) onQueueSendAll else null,
+                    onClearAll = onQueueClearAll,
+                    busy = state.isBusy,
                     modifier = Modifier.padding(bottom = 6.dp),
                 )
             }

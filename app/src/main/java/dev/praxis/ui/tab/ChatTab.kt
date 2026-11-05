@@ -600,6 +600,11 @@ fun ChatTab(
         // 不传的话面板会整个不显示（见 ChatScreen 里的必需项判断）——
         // 这样可以保证「不传回调就没有假按钮」。
         onQueueSendNow = viewModel::queueSendNow,
+        // 拖拽排序 / 全部发送 / 清空：队列面板的三个批量能力。
+        // 全部发送在 UI 侧按 `isBusy` 决定是否提供，这里原样转发。
+        onQueueReorder = viewModel::queueReorder,
+        onQueueSendAll = viewModel::queueSendAll,
+        onQueueClearAll = viewModel::queueClearAll,
         onQueueExpandedChange = viewModel::setQueueExpanded,
         onMessageAction = viewModel::onMessageAction,
         // 一次性提示（如「继续」不适用）由输入栏 4 秒后清掉。
