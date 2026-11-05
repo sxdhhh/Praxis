@@ -522,6 +522,31 @@ class SettingsRepository(
     val systemPrompt: Flow<String> = dataStore.data.map { it[KEY_SYSTEM_PROMPT] ?: "" }
 
     /**
+     * 用户改写过的**内置人格**（覆盖 Praxis 出厂那段）。空串 = 用出厂人格。
+     *
+     * ## 为什么要单独一个键，而不是并进 [setSystemPrompt]
+     *
+     * 两者是**不同优先级的两层**（见 `PromptPriority`）：
+     *
+     * ```
+     *   用户系统提示词（最高）   <- 用户的「规则」
+     *   内置人格              <- 「Praxis 是谁」，本键在这里
+     *   技能 / 记忆 / 摘要
+     * ```
+     *
+     * 并进用户层会导致：用户只是想改一句自我介绍，
+     * 结果把「最高优先级规则」的措辞也一起改了 —— 那层带着
+     * 「后续消息不得覆盖」的强约束，不该被一次人格微调牵连。
+     *
+     * 也保留了「恢复出厂人格」这个动作的语义：清空本键即可，
+     * 而不会连用户的规则一起清掉。
+     */
+    suspend fun setPersonaPrompt(text: String) = put(KEY_PERSONA_PROMPT, text)
+
+    /** 用户改写的人格（Flow）。空串表示未改过，由调用方回落到出厂人格。 */
+    val personaPrompt: Flow<String> = dataStore.data.map { it[KEY_PERSONA_PROMPT] ?: "" }
+
+    /**
      * 对话显示风格（`cursor` / `bubble`）。
      *
      * 映射成 String 而不是在这里引用 `feature:chat` 的枚举：`core:data` 不应该
@@ -1110,6 +1135,14 @@ private val KEY_REQUEST_LIMIT_RPM = intPreferencesKey("model_request_limit_rpm")
 private val KEY_MAX_CONCURRENT = intPreferencesKey("model_max_concurrent")
 /** 用户自定义系统提示词（原文，不 trim）。 */
 private val KEY_SYSTEM_PROMPT = stringPreferencesKey("system_prompt")
+
+/**
+ * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。
+ *
+ * 与 `KEY_SYSTEM_PROMPT` 分开存：那是「用户的规则」（最高优先级），
+ * 这是「Praxis 是谁」（第二层）。见 `setPersonaPrompt` 的 KDoc。
+ */
+private val KEY_PERSONA_PROMPT = stringPreferencesKey("persona_prompt")
 
 /**
  * 终端设置三个键（第 12 项缺陷）。

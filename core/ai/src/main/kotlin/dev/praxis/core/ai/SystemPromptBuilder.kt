@@ -76,8 +76,34 @@ data class SystemPromptSettings(
      * 与「模型地址/温度」这类短配置混在一起会让设置页很难排版。
      */
     val custom: String = "",
+
+    /**
+     * 用户改写过的内置人格。空串 = 用出厂 [BUILTIN_PERSONA]。
+     *
+     * ## 为什么单独一个字段（2026-11-05）
+     *
+     * 用户的要求是「可以修改内置人格的系统提示词，就放在系统提示词下面」。
+     *
+     * 人格与 [custom] 是**不同优先级的两层**（见 [PromptPriority]）：
+     *
+     * ```
+     *   用户系统提示词（最高）  <- custom：用户定的规则，带「不得覆盖」强约束
+     *   内置人格               <- persona：Praxis 是谁
+     * ```
+     *
+     * 若并进 [custom]，用户只想改一句自我介绍，却会连带改动那层强约束的措辞；
+     * 而「恢复出厂人格」也会把用户的规则一起清掉 —— 两件事不该绑在一起。
+     *
+     * 空串而不是 null：与 [custom] 同一约定（空 = 不注入/用默认），
+     * 少一层可空判断，且 DataStore 存的就是字符串。
+     */
+    val persona: String = "",
 ) {
     val isActive: Boolean get() = custom.isNotBlank()
+
+    /** 生效的人格文本：用户改过就用用户的，否则用出厂值。 */
+    val effectivePersona: String
+        get() = persona.trim().takeIf { it.isNotEmpty() } ?: BUILTIN_PERSONA
 
     companion object {
         /** 内置人格。与 user 的提示词冲突时，以用户为准。 */
@@ -135,10 +161,10 @@ object SystemPromptBuilder {
             )
         }
 
-        // ② 内置人格。
+        // ② 内置人格（用户可在设置页改写，见 `SystemPromptSettings.persona`）。
         layers += ChatMessage(
             role = ChatRole.System,
-            text = SystemPromptSettings.BUILTIN_PERSONA,
+            text = settings.effectivePersona,
         )
 
         // ③ 技能（做法）。
