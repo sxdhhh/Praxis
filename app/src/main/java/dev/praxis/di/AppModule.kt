@@ -397,6 +397,22 @@ val appModule = module {
                     dev.praxis.data.memory.SaveMemoryTool(queryPort),
                 )
             }
+
+            // ## 溢出存储的取回入口（2026-11-06）
+            //
+            // 长输出落盘后只给模型一个定位符。**没有这个工具，定位符就是
+            // 一句空话** —— 模型知道「还有更多内容」却永远看不到。
+            //
+            // 与 `LinuxToolPortImpl` 里那份 `SpillStore` 指向同一个目录（懒创建），
+            // 所以这里新建一个实例也能读到同样的文件。
+            run {
+                val spillDir = java.io.File(androidContext().filesDir, "spill")
+                registerAll(
+                    dev.praxis.data.spill.ReadSpillTool(
+                        dev.praxis.data.spill.SpillStore(spillDir),
+                    ),
+                )
+            }
         }
     }
     single { ToolExecutor(get<ToolRegistry>()) }

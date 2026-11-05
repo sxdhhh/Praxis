@@ -43,6 +43,15 @@ class LinuxToolPortImpl(
     /** 安装互斥：同一时刻只允许一个安装流程。 */
     private val installMutex = Mutex()
 
+    /**
+     * 溢出存储：超长输出落盘，只把定位符与首尾片段交给模型。
+     *
+     * 懒创建：大多数命令输出都很短，没必要在启动时就建目录。
+     */
+    private val spillStore: dev.praxis.data.spill.SpillStore by lazy {
+        dev.praxis.data.spill.SpillStore(java.io.File(context.filesDir, "spill"))
+    }
+
     /** 执行互斥：proot 的两次并发执行会争用 PTX 通道，输出会串。 */
     private val execMutex = Mutex()
 
@@ -169,9 +178,35 @@ class LinuxToolPortImpl(
         // 124 是 ProotEnvPort 的超时约定（与 coreutils 一致）。
         // 必须翻成显式标记：否则模型会把「超时」误读成「命令返回了 124」。
         val timedOut = exit == ProotEnvPort.TIMEOUT_EXIT_CODE
+        val raw = lines.toString().trimEnd()
+
+        // ## 超限时落盘而不是丢弃（2026-11-06）
+        //
+        // 旧实现超过 `MAX_OUTPUT_CHARS` 就**静默丢弃**剩余部分。后果不是
+        // 「省了上下文」，而是模型永远看不到被丢掉的那段 —— 它会基于半截
+        // 输出做判断，而用户和模型都不知道少了什么。
+        //
+        // 典型场景：`apt install` 失败，真正的错误在最后几行，而前 16000
+        // 字符全是包列表。丢掉尾部等于丢掉了唯一的线索。
+        //
+        // 现在改成：全文落盘 + 给模型定位符与首尾片段。
+        val output = if (dev.praxis.core.linux.SpillPolicy.shouldSpill(raw)) {
+            val spilled = spillStore.saveText(raw)
+            if (spilled != null) {
+                spilled.toModelText()
+            } else {
+                // 落盘失败：只能截断，但**必须说明**，不能像旧实现那样无声丢弃。
+                raw.take(LinuxToolPort.MAX_OUTPUT_CHARS) +
+                    "\n\n[输出过长且溢出保存失败，以上为前 " +
+                    "${LinuxToolPort.MAX_OUTPUT_CHARS} 字符]"
+            }
+        } else {
+            raw
+        }
+
         return LinuxExecResult(
             exitCode = exit,
-            output = lines.toString().trimEnd(),
+            output = output,
             timedOut = timedOut,
         )
     }
