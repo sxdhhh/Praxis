@@ -658,6 +658,38 @@ class ChatWiringGuardTest {
         assertTrue("超时不应标为 error", tool.contains("isError = false"))
     }
 
+    /**
+     * Koin 依赖图不得有环（2026-11-06 启动闪退根因）。
+     *
+     * ## 这条护栏防的是什么
+     *
+     * `ToolRegistry` 的 Koin 单例体里曾经直接 `get<ToolExecutor>()`，
+     * 而 `ToolExecutor` 的构造参数正是 `ToolRegistry` ——
+     * 形成 `ToolRegistry → ToolExecutor → ToolRegistry` 的环，
+     * Koin 抛 `CircularDependencyException`，**App 启动即崩**。
+     *
+     * 这类错误编译期完全看不出来，只有真机装包才会暴露。
+     * 用源码级断言钉住：单例体内部不得再向 Koin 要 `ToolExecutor`。
+     */
+    @Test
+    fun koinGraph_hasNoToolExecutorCycle() {
+        val di = read("app/src/main/java/dev/praxis/di/AppModule.kt")
+        // 允许的写法：延迟取值（lambda）。禁止的写法：单例体内直接 get。
+        assertTrue(
+            "ToolRegistry 单例体内又直接 get<ToolExecutor>()（会形成循环依赖）",
+            !di.contains("executor = get<dev.praxis.core.tool.ToolExecutor>()"),
+        )
+        assertTrue("CustomToolRunner 应改用延迟提供者", di.contains("executorProvider ="))
+    }
+
+    /** 启动期 IO 失败不得炸掉 DI 图。 */
+    @Test
+    fun startupIo_failuresAreContained() {
+        val di = read("app/src/main/java/dev/praxis/di/AppModule.kt")
+        val block = di.substringAfter("自定义工具（L2").substringBefore("溢出存储的取回入口")
+        assertTrue("自定义工具加载没有 runCatching 保护", block.contains("runCatching {"))
+    }
+
     /** 端口必须真的提供枚举能力，且适配器按名字透出。 */
     @Test
     fun ptyPort_exposesSessionNames() {
