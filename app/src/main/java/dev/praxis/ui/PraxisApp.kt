@@ -401,6 +401,16 @@ fun PraxisApp(
                         else -> userRules + "\n\n" + characterPrompt
                     }
                 },
+                // ## 内置人格（第二层，可被用户改写）
+                //
+                // 与上面的 `systemPromptProvider` 分开注入：
+                //  - 那一段是「用户的规则 + 角色卡」，属最高优先级层；
+                //  - 这一段是「Praxis 是谁」，出问题时只该改它，
+                //    不该牵动那层「后续消息不得覆盖」的强约束。
+                //
+                // 空串表示用户没改过 -> `SystemPromptSettings.effectivePersona`
+                // 回落到出厂人格，所以这里原样透传即可。
+                personaProvider = { settingsRepository.personaPrompt.first() },
                 contextConfigProvider = {
                     val m = settingsRepository.modelSettings.first()
                     // 流式开关在独立流里（不在 ModelSettings 内）：

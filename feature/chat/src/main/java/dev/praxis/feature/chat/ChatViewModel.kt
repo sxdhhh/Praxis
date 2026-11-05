@@ -89,6 +89,16 @@ class ChatViewModel(
     private val systemPromptProvider: (suspend () -> String)? = null,
 
     /**
+     * 用户改写过的内置人格（每轮现取，空串 = 用出厂人格）。
+     *
+     * 与 [systemPromptProvider] 分开注入：那是「用户的规则」（最高优先级），
+     * 这是「Praxis 是谁」（第二层）。分开的理由见 `SystemPromptSettings.persona`。
+     *
+     * 可空：单测与预览不必构造设置仓库，缺省时用出厂人格。
+     */
+    private val personaProvider: (suspend () -> String)? = null,
+
+    /**
      * 上下文运行配置（上限 / 压缩阈值 / 思考强度，每轮现取）。
      *
      * 打包成一个函数而不是三个参数：它们总是一起变（用户在模型页一改就是一整组），
@@ -392,6 +402,8 @@ class ChatViewModel(
     /** 每轮的运行配置缓存（避免同一次发送里多次 await provider）。 */
     private data class RuntimeConfig(
         val systemPrompt: String,
+        /** 用户改写过的内置人格（空 = 用出厂人格）。见 `personaProvider`。 */
+        val persona: String,
         val contextLimit: Int,
         val compactThreshold: Float,
         val thinkingEffort: ThinkingEffort,
@@ -1716,6 +1728,9 @@ class ChatViewModel(
         val cfg = runCatching { contextConfigProvider?.invoke() }.getOrNull()
         return RuntimeConfig(
             systemPrompt = runCatching { systemPromptProvider?.invoke() }.getOrNull().orEmpty(),
+            // 人格与系统提示词分开读：它们是不同优先级的两层，
+            // 而且「恢复出厂人格」只该清这一个（见 SystemPromptSettings.persona）。
+            persona = runCatching { personaProvider?.invoke() }.getOrNull().orEmpty(),
             contextLimit = cfg?.contextLimit ?: 0,
             compactThreshold = cfg?.compactThreshold ?: ContextCompactor.DEFAULT_THRESHOLD,
             thinkingEffort = cfg?.thinkingEffort ?: ThinkingEffort.None,
@@ -1740,7 +1755,10 @@ class ChatViewModel(
 
         val skills = runCatching { skillsPromptProvider?.invoke() }.getOrNull()
         val layered = SystemPromptBuilder.buildLayers(
-            settings = SystemPromptSettings(custom = config.systemPrompt),
+            settings = SystemPromptSettings(
+                custom = config.systemPrompt,
+                persona = config.persona,
+            ),
             skills = skills,
             memory = memoryBlock,
             // 摘要由 CompactionApplier 单独插入（它还要负责丢掉被折叠的消息），
