@@ -398,6 +398,42 @@ val appModule = module {
                 )
             }
 
+            // ## 自定义工具（L2：声明式 DSL + 原语白名单）（2026-11-06）
+            //
+            // 用户在 `files/tools/*.tool` 里写定义，启动时装载成真正的工具。
+            //
+            // 三条安全边界（都在 core:tool 的 CustomToolValidator 里）：
+            //  1. op 只能取白名单内的原语 —— 没有任何方式拼出任意命令执行；
+            //  2. 占位符必须已声明 —— 拼错不会静默做错事；
+            //  3. 含写操作必须声明 hasSideEffects —— 否则失败时会被误判为可安全重试。
+            //
+            // 装载时**不执行任何东西**：只解析 + 校验 + 注册。
+            run {
+                val toolsDir = java.io.File(androidContext().filesDir, "tools")
+                toolsDir.mkdirs()
+                val source = dev.praxis.data.custom.CustomToolSource(toolsDir)
+                val (defs, skipped) = kotlinx.coroutines.runBlocking { source.list() }
+                skipped.forEach {
+                    dev.praxis.ui.design.diagnostics.UiDiagnostics.note("自定义工具跳过：$it")
+                }
+                val runner = dev.praxis.core.tool.custom.CustomToolRunner(
+                    executor = get<dev.praxis.core.tool.ToolExecutor>(),
+                )
+                defs.forEach { def ->
+                    val issues = dev.praxis.core.tool.custom.CustomToolValidator.validate(def)
+                    if (issues.any { it.isError }) {
+                        // 不合法的定义**不注册**，且把原因记下来（用户能查到为什么没生效）。
+                        issues.filter { it.isError }.forEach {
+                            dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
+                                "自定义工具 ${def.name} 未装载：${it.message}",
+                            )
+                        }
+                        return@forEach
+                    }
+                    register(dev.praxis.core.tool.custom.CustomTool(def, runner))
+                }
+            }
+
             // ## 溢出存储的取回入口（2026-11-06）
             //
             // 长输出落盘后只给模型一个定位符。**没有这个工具，定位符就是

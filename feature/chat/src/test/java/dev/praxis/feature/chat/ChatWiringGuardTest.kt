@@ -574,6 +574,53 @@ class ChatWiringGuardTest {
         )
     }
 
+    /**
+     * 自定义工具（L2）的三条安全边界必须存在。
+     *
+     * ## 这条护栏防的是什么
+     *
+     * 声明式 DSL 的全部安全性都建立在「define 阶段严格校验」上。
+     * 这些校验被删掉后**不会报任何运行时错误**，只会让危险定义被装载。
+     *
+     * 三条边界缺一不可：
+     *  1. op 白名单 —— 挡住任意行为（没有它，DSL 就等价于「任意代码执行」）；
+     *  2. 占位符校验 —— 挡住「拼错但静默做错事」；
+     *  3. hasSideEffects 校验 —— 挡住「失败时被误判为可安全重试」。
+     */
+    @Test
+    fun customTool_hasThreeSafetyBoundaries() {
+        val validator = read("core/tool/src/main/kotlin/dev/praxis/core/tool/custom/CustomToolDefinition.kt")
+        val runner = read("core/tool/src/main/kotlin/dev/praxis/core/tool/custom/CustomToolRunner.kt")
+        assertTrue("缺少原语白名单", validator.contains("val SUPPORTED: Set<String>"))
+        assertTrue("缺少占位符校验", validator.contains("PLACEHOLDER_REGEX"))
+        assertTrue("缺少副作用声明校验", validator.contains("hasSideEffects 为 false"))
+        // 步数上限与总超时是「设计错误不会无限放大」的兜底。
+        assertTrue("缺少步数上限", validator.contains("MAX_STEPS"))
+        assertTrue("缺少总超时", runner.contains("withTimeoutOrNull(timeoutMs)"))
+    }
+
+    /**
+     * 自定义工具的每一步必须走标准工具流水线（不能绕过权限）。
+     *
+     * 若这里直接调原语实现，权限系统就被绕过去了 —— 而用户完全看不出来
+     *（界面显示的是「调用了自定义工具」）。
+     */
+    @Test
+    fun customTool_stepsGoThroughExecutor() {
+        val runner = read("core/tool/src/main/kotlin/dev/praxis/core/tool/custom/CustomToolRunner.kt")
+        assertTrue("没有走 ToolExecutor", runner.contains("executor.executeAll"))
+        assertTrue("没有按步骤推进", runner.contains("def.steps.withIndex()"))
+    }
+
+    /** 装载时**不得执行**任何东西（define 阶段只解析 + 校验）。 */
+    @Test
+    fun customTool_loadDoesNotExecute() {
+        val di = read("app/src/main/java/dev/praxis/di/AppModule.kt")
+        val block = di.substringAfter("自定义工具（L2").substringBefore("溢出存储的取回入口")
+        assertTrue("装载阶段调用了执行器", !block.contains(".run("))
+        assertTrue("装载阶段没有校验", block.contains("CustomToolValidator.validate"))
+    }
+
     /** 端口必须真的提供枚举能力，且适配器按名字透出。 */
     @Test
     fun ptyPort_exposesSessionNames() {
