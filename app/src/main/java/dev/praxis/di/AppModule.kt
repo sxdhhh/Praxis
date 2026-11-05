@@ -228,6 +228,16 @@ val appModule = module {
     // 设置存储：主题等持久化都走这里（DataStore，非 Room）。
     single { createSettingsRepository(androidContext()) }
 
+    /**
+     * 待发队列的存档（按会话分键）。
+     *
+     * 与 `SettingsRepository` 共用同一个 DataStore：队列就是一小段文本，
+     * 单独开一个 DataStore 只会多一份文件与一次初始化。
+     */
+    single<dev.praxis.feature.chat.PendingQueueStore> {
+        dev.praxis.data.chat.SettingsPendingQueueStore(get())
+    }
+
     // AI provider：key 与 baseUrl 走 buildConfig（真实 Key 由设置页写入后续接入）。
     single<AiProvider> {
         OpenAiCompatProvider(

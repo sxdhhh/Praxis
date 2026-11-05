@@ -547,6 +547,33 @@ class SettingsRepository(
     val personaPrompt: Flow<String> = dataStore.data.map { it[KEY_PERSONA_PROMPT] ?: "" }
 
     /**
+     * 待发队列的存档（每个会话一份，编码见 `PendingQueueCodec`）。
+     *
+     * ## 为什么必须持久化
+     *
+     * 队列是「生成中我先记下想法」用的，而生成一轮可能几十秒 ——
+     * 这期间用户完全可能切后台、被系统回收。旧实现队列只在内存，
+     * 回来时**全部消失**，且没有任何提示（用户以为发出去了）。
+     *
+     * ## 为什么按会话分键
+     *
+     * 用户在 A 会话排了 3 条，切到 B 会话不该看到它们 ——
+     * 队列的语义是「这个会话接下来要说的话」。
+     * 用 `queue_<sessionId>` 作键，与 `KEY_SYSTEM_PROMPT` 那种全局配置区分开。
+     */
+    suspend fun setPendingQueue(sessionId: String, encoded: String) {
+        dataStore.edit { prefs ->
+            prefs[stringPreferencesKey(queueKeyOf(sessionId))] = encoded
+        }
+    }
+
+    /** 读某会话的队列存档；没有则为 null。 */
+    suspend fun pendingQueue(sessionId: String): String? =
+        dataStore.data.map { it[stringPreferencesKey(queueKeyOf(sessionId))] }.first()
+
+    private fun queueKeyOf(sessionId: String): String = "pending_queue_" + sessionId
+
+    /**
      * 对话显示风格（`cursor` / `bubble`）。
      *
      * 映射成 String 而不是在这里引用 `feature:chat` 的枚举：`core:data` 不应该

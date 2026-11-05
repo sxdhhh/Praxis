@@ -154,6 +154,11 @@ fun PraxisApp(
     val characterRepository: dev.praxis.core.data.character.CharacterRepository =
         org.koin.compose.koinInject()
 
+    // 待发队列存档。进程被回收后把排队内容读回来 ——
+    // 队列是「生成中先记下想法」用的，丢了且无提示是最伤的体验。
+    val queueStore: dev.praxis.feature.chat.PendingQueueStore =
+        org.koin.compose.koinInject()
+
     // 扩展包：仓库（文件读写）与市场（网络）。两者都由 AppModule 装配。
     // 分开取而不是打成一个对象：设置页只需要仓库，市场是可选能力，
     // 混在一起会让「没有网络权限的构建」也被迫构造一个 HTTP 客户端。
@@ -411,6 +416,10 @@ fun PraxisApp(
                 // 空串表示用户没改过 -> `SystemPromptSettings.effectivePersona`
                 // 回落到出厂人格，所以这里原样透传即可。
                 personaProvider = { settingsRepository.personaPrompt.first() },
+                // 待发队列存档：进程被回收后把排队内容读回来。
+                // 与消息库分开存（见 `ChatViewModel.restoreQueue` 的说明）——
+                // 空会话也可能有排队内容。
+                queueStore = queueStore,
                 contextConfigProvider = {
                     val m = settingsRepository.modelSettings.first()
                     // 流式开关在独立流里（不在 ModelSettings 内）：
