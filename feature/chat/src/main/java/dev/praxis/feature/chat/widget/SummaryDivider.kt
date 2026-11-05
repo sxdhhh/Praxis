@@ -17,7 +17,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -34,6 +37,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import dev.praxis.ui.theme.PraxisRadius
+import dev.praxis.ui.widgets.FoldableContent
 
 /**
  * 压缩摘要的分割线（1:1 移植 Operit `SummaryMessageComposable`，
@@ -74,9 +78,24 @@ import dev.praxis.ui.theme.PraxisRadius
 @Composable
 fun SummaryDivider(
     compacted: CompactedContext,
+    /** 点「看全文」时打开弹窗（就地展开之外的备选，摘要很长时用）。 */
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // ## 就地折叠/展开（2026-11-05）
+    //
+    // 用户的要求：「摘要不用显示全文，折叠起来能展开和收回并且有动画」。
+    //
+    // 旧实现只有「点徽标弹窗看全文」：要看一眼摘要必须开弹窗、再关掉，
+    // 而用户往往只想扫一眼前几行确认模型记住了什么。
+    //
+    // 现在默认折叠、点徽标就地展开，动画交给 `FoldableContent`
+    //（它内部是 AnimatedVisibility + PraxisMotion 的时长与曲线，
+    // 全项目折叠面板共用同一套手感，不自绘）。
+    //
+    // `remember` 不带 key：摘要内容变化时用户既有的展开状态应当保留 ——
+    // 他刚点开看，摘要因为新一轮压缩而更新，面板突然自己收起来会很怪。
+    var expanded by remember { mutableStateOf(false) }
     val tokensLabel = remember(compacted.summaryTokens) {
         TokenEstimator.format(compacted.summaryTokens)
     }
@@ -90,7 +109,8 @@ fun SummaryDivider(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onClick)
+                // 点徽标 = 就地展开/收起（主动作）。
+                .clickable { expanded = !expanded }
                 .padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
@@ -133,12 +153,41 @@ fun SummaryDivider(
         Spacer(Modifier.height(2.dp))
         Text(
             // 两个数字一起说清「发生了什么」：折叠了多少条、压成了多少 token。
-            text = "以上 ${compacted.coveredCount} 条已折叠为摘要（约 $tokensLabel token）",
+            text = "以上 ${compacted.coveredCount} 条已折叠为摘要（约 $tokensLabel token）" +
+                if (expanded) " · 点上方收起" else " · 点上方展开",
             style = MiuixTheme.textStyles.footnote2,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        // 就地展开的摘要正文。限高 + 滚动：摘要可能几千字（提示词要求
+        // 「宁可内容多一点」），不限高会把整页推得很长。
+        FoldableContent(visible = expanded, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = compacted.summary.ifBlank { "（摘要为空）" },
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState())
+                            .padding(12.dp),
+                    )
+                }
+                // 全文弹窗保留：摘要很长时，360dp 高的就地面板看不完整，
+                // 弹窗能给出更大的阅读面积。
+                TextButton(
+                    text = "看全文",
+                    onClick = onClick,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
     }
 }
 
