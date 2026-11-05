@@ -354,6 +354,13 @@ dependencies {
     implementation(libs.okhttp.core)
     implementation(libs.okhttp.logging)
 
+    // FTP 服务跑在 App 进程内。见 libs.versions.toml 里 `ftpserver` 的注释：
+    // 容器内装 vsftpd 在 Android 上走不通（SELinux 拒绝执行 maintainer script）。
+    implementation(libs.ftpserver.core) {
+        // slf4j-simple 会与项目已有的 slf4j 绑定冲突。
+        exclude(group = "org.slf4j", module = "slf4j-simple")
+    }
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 

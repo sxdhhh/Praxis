@@ -1427,6 +1427,25 @@ class ProotEnvPort(private val context: Context) : LinuxEnvPort {
         }
     }
 
+    // ── FTP（2026-11-06：进程内服务，不再走容器内 vsftpd）─────────────
+    //
+    // 为什么不用 `startSession` 起 vsftpd：真机实测那条路走不通。
+    // dpkg 的 maintainer script 在 Android 上被 SELinux 拒绝执行
+    //（`/var/lib/dpkg/info/procps.postinst: update-rc.d: Permission denied`，
+    //  而该文件权限是 `-rwxr-xr-x`），vsftpd 因此永远停在 unconfigured。
+    //
+    // Apache FtpServer 跑在 App 进程里，根目录直接指向 rootfs，彻底绕开。
+
+    /** 进程内 FTP 服务（懒创建：从未用过 FTP 的用户不占资源）。 */
+    private val ftpServer: PraxisFtpServer by lazy { PraxisFtpServer() }
+
+    override suspend fun startFtp(settings: dev.praxis.core.linux.FtpSettings): String? =
+        ftpServer.start(settings)
+
+    override suspend fun stopFtp() {
+        ftpServer.stop()
+    }
+
     // ## 只能有一个 companion object（2026-11-01 修）
     //
     // 合并时一度出现两个 companion（一个公开、一个 private），Kotlin 直接报

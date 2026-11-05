@@ -23,7 +23,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.praxis.core.linux.FrpConfig
-import dev.praxis.core.linux.FtpConfig
+import dev.praxis.core.linux.FtpSettings
 import dev.praxis.core.linux.SshConfig
 import dev.praxis.core.linux.LinuxDistro
 import dev.praxis.core.linux.UbuntuMirror
@@ -100,7 +100,7 @@ fun LinuxEnvScreen(
      * 空实现会让「点了开关没反应」这种静默失效有机会溜进去。
      */
     onFtpToggle: (Boolean) -> Unit,
-    onFtpConfigChange: (FtpConfig) -> Unit,
+    onFtpConfigChange: (FtpSettings) -> Unit,
     onFtpPasswordChange: (String) -> Unit,
     /**
      * 安装勾选的软件包组（对齐 Operit `SetupScreen`）。
@@ -441,7 +441,7 @@ modifier: Modifier = Modifier,
                         checked = state.ftpEnabled,
                         onCheckedChange = onFtpToggle,
                     )
-                    if (state.ftpEnabled || state.ftpConfig != FtpConfig()) {
+                    if (state.ftpEnabled || state.ftpConfig != FtpSettings()) {
                         val ftp = state.ftpConfig
                         Column(Modifier.padding(16.dp)) {
                             Row {
@@ -461,37 +461,54 @@ modifier: Modifier = Modifier,
                                     ),
                                 )
                                 Spacer(Modifier.width(10.dp))
+                                // 被动段拆成两个数字框：旧实现是一个自由文本
+                                //（`"2122-2132"`），写错格式只能在启动后才暴露，
+                                // 而被动段错误的症状是「能登录但看不到文件」——
+                                // 极难自己排查，所以改成可分别校验的两个字段。
                                 TextField(
-                                    value = ftp.passivePorts,
-                                    onValueChange = { onFtpConfigChange(ftp.copy(passivePorts = it)) },
-                                    label = "被动端口段",
+                                    value = ftp.passivePortLow.toString(),
+                                    onValueChange = { text ->
+                                        text.toIntOrNull()?.let {
+                                            onFtpConfigChange(ftp.copy(passivePortLow = it))
+                                        }
+                                    },
+                                    label = "被动段下界",
                                     modifier = Modifier.weight(1f),
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(
-                                        keyboardType = KeyboardType.Text,
+                                        keyboardType = KeyboardType.Number,
+                                        imeAction = ImeAction.Next,
+                                    ),
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                TextField(
+                                    value = ftp.passivePortHigh.toString(),
+                                    onValueChange = { text ->
+                                        text.toIntOrNull()?.let {
+                                            onFtpConfigChange(ftp.copy(passivePortHigh = it))
+                                        }
+                                    },
+                                    label = "被动段上界",
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Number,
                                         imeAction = ImeAction.Next,
                                     ),
                                 )
                             }
-                            // 两个端口问题都当场说清：被动段写错时 vsftpd 能启动，
-                            // 但客户端连上后看不到任何文件 —— 那种失败极难自己定位。
-                            ftp.portProblem?.let { problem ->
+                            // 校验统一走 `problem`：按「端口 → 根目录 → 被动段 →
+                            // 用户名 → 密码」给出第一条原因，避免散落多个 if 且顺序不一。
+                            //
+                            // 当场说清而不是等启动失败：被动段写错时服务**能启动**，
+                            // 但客户端连上后看不到任何文件，那种失败极难自己定位。
+                            ftp.problem?.let { problem ->
                                 Spacer(Modifier.height(6.dp))
                                 Text(
                                     text = problem,
                                     style = MiuixTheme.textStyles.footnote1,
                                     color = MiuixTheme.colorScheme.error,
                                 )
-                            }
-                            if (ftp.portProblem == null) {
-                                ftp.passiveRangeProblem?.let { problem ->
-                                    Spacer(Modifier.height(6.dp))
-                                    Text(
-                                        text = problem,
-                                        style = MiuixTheme.textStyles.footnote1,
-                                        color = MiuixTheme.colorScheme.error,
-                                    )
-                                }
                             }
                             Spacer(Modifier.height(10.dp))
                             TextField(

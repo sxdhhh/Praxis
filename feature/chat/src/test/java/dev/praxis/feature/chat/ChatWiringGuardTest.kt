@@ -415,6 +415,40 @@ class ChatWiringGuardTest {
         assertTrue("技能注入后没有清空（会每轮重复注入）", vm.contains("pendingSkillInjection = null"))
     }
 
+    /**
+     * FTP 必须走**进程内服务**，而不是在容器里起 vsftpd。
+     *
+     * ## 这条护栏防的是「不知不觉退回旧方案」
+     *
+     * 真机实测：容器里 `apt-get install vsftpd` 会在 dpkg 的 maintainer
+     * script 阶段失败（`update-rc.d: Permission denied`，而文件权限是
+     * `rwxr-xr-x` → Android SELinux 禁止从 app 数据目录执行脚本）。
+     * vsftpd 依赖 procps，两者一起停在 unconfigured，二进制根本没落地。
+     *
+     * 若有人把实现换回「容器里装 vsftpd」，编译不会报错、单测也不会红 ——
+     * 只有真机点「启用 FTP」才会发现起不来。所以在这里钉住。
+     */
+    @Test
+    fun ftp_runsInProcessNotInContainer() {
+        val port = read("app/src/main/java/dev/praxis/data/linux/ProotEnvPort.kt")
+        val server = read("app/src/main/java/dev/praxis/data/linux/PraxisFtpServer.kt")
+        assertTrue("端口层没有接进程内 FTP 服务", port.contains("PraxisFtpServer"))
+        assertTrue("没有调用 fs.start()", server.contains("created.start()"))
+        // 旧方案的痕迹必须彻底消失（不留死代码）。
+        assertTrue(
+            "仍残留 vsftpd 安装脚本调用（旧方案未清理干净）",
+            !port.contains("FtpServerScript"),
+        )
+    }
+
+    /** FTP 的被动端口段必须真的配到监听器上（漏了会「能登录看不到文件」）。 */
+    @Test
+    fun ftp_setsPassivePorts() {
+        val server = read("app/src/main/java/dev/praxis/data/linux/PraxisFtpServer.kt")
+        assertTrue("没有设置被动端口段", server.contains("setPassivePorts"))
+        assertTrue("没有设置被动外部地址", server.contains("setPassiveExternalAddress"))
+    }
+
     /** 端口必须真的提供枚举能力，且适配器按名字透出。 */
     @Test
     fun ptyPort_exposesSessionNames() {

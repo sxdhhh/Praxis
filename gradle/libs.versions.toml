@@ -59,6 +59,24 @@ materialKolor = "5.0.0"
 materialIconsExtended = "1.7.8"
 okhttp = "4.12.0"
 junit = "4.13.2"
+# Apache FtpServer：FTP 服务跑在 App 进程内，**不依赖容器里的 vsftpd**。
+#
+# ## 为什么不用容器内的 vsftpd（2026-11-06 真机实测）
+#
+# 在 proot 容器里 `apt-get install vsftpd` 会在 dpkg 的 maintainer script
+# 阶段失败：`/usr/sbin/dpkg-preconfigure: Permission denied`，
+# `/var/lib/dpkg/info/procps.postinst: update-rc.d: Permission denied`。
+# vsftpd 依赖 procps，于是两者一起停在 unconfigured，二进制根本没落地。
+#
+# 根因不是权限位（文件是 rwxr-xr-x），而是 **Android SELinux 禁止从
+# app 数据目录执行脚本**。这条路在本机不成立。
+#
+# ## 为什么用 Apache FtpServer
+#
+# Operit 就是这么做的（`FtpServerManager.kt`，141 行）：纯 JVM 库，
+# `homeDirectory` 直接指向 rootfs 路径，完全不碰容器内二进制。
+# 实测 Maven Central 可达（ftpserver-core 1.2.1，HTTP 200）。
+ftpserver = "1.2.1"
 kyantBackdrop = "2.0.1"
 kyantShapes = "1.2.1"
 # 布局渲染引擎（浏览器预览管线）。
@@ -194,6 +212,9 @@ kyant-backdrop = { module = "io.github.kyant0:backdrop", version.ref = "kyantBac
 kyant-shapes = { module = "io.github.kyant0:shapes", version.ref = "kyantShapes" }
 
 junit = { module = "junit:junit", version.ref = "junit" }
+# FTP 服务：跑在 App 进程内，根目录指向容器 rootfs。见上方版本注释。
+# 排除 slf4j-simple：它会与项目已有的 slf4j 绑定冲突（两个绑定 = 启动告警 + 行为不确定）。
+ftpserver-core = { module = "org.apache.ftpserver:ftpserver-core", version.ref = "ftpserver" }
 
 # 预览渲染：`app.cash.paparazzi:paparazzi` 提供 Paparazzi 类与
 # `paparazzi` 扩展。渲染产物落在 `build/reports/paparazzi/images/`。
