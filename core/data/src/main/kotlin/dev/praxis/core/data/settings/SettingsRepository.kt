@@ -574,6 +574,46 @@ class SettingsRepository(
     private fun queueKeyOf(sessionId: String): String = "pending_queue_" + sessionId
 
     /**
+     * Linux 环境页的配置（发行版 / 镜像 / FTP 非敏感项）。
+     *
+     * ## 为什么必须持久化（2026-11-06）
+     *
+     * 旧实现全放在 ViewModel 的 `_state` 里。`viewModel(key = "linux-env")`
+     * 只在同一导航层级存活 —— **退出设置页再进来，全部回到默认值**：
+     * 用户改了 FTP 端口、选了 Kali，下次进页面又变回 Ubuntu + 2121。
+     *
+     * ## 为什么用扁平的键而不是序列化成一个字符串
+     *
+     * 单个坏字段不该让整份配置读不出来。扁平键下，「端口」写坏了只是
+     * 那一个回落默认值，其余照常生效。
+     */
+    suspend fun setLinuxEnvDistro(name: String) = put(KEY_LINUX_DISTRO, name)
+
+    /** 读选中的发行版名（枚举名，未知值由调用方回落）。 */
+    suspend fun linuxEnvDistro(): String =
+        dataStore.data.map { it[KEY_LINUX_DISTRO] ?: "" }.first()
+
+    suspend fun setLinuxEnvMirror(name: String) = put(KEY_LINUX_MIRROR, name)
+
+    suspend fun linuxEnvMirror(): String =
+        dataStore.data.map { it[KEY_LINUX_MIRROR] ?: "" }.first()
+
+    suspend fun setLinuxEnvRelease(name: String) = put(KEY_LINUX_RELEASE, name)
+
+    suspend fun linuxEnvRelease(): String =
+        dataStore.data.map { it[KEY_LINUX_RELEASE] ?: "" }.first()
+
+    /**
+     * FTP 的非敏感配置（端口 / 用户名 / 根目录 / 被动段 / 只读 / 连接数）。
+     *
+     * **不含密码**：与 API Key 同一条纪律，密码不走明文偏好。
+     */
+    suspend fun setFtpRuntime(raw: String) = put(KEY_FTP_RUNTIME, raw)
+
+    suspend fun ftpRuntime(): String =
+        dataStore.data.map { it[KEY_FTP_RUNTIME] ?: "" }.first()
+
+    /**
      * 对话显示风格（`cursor` / `bubble`）。
      *
      * 映射成 String 而不是在这里引用 `feature:chat` 的枚举：`core:data` 不应该
@@ -1170,6 +1210,10 @@ private val KEY_SYSTEM_PROMPT = stringPreferencesKey("system_prompt")
  * 这是「Praxis 是谁」（第二层）。见 `setPersonaPrompt` 的 KDoc。
  */
 private val KEY_PERSONA_PROMPT = stringPreferencesKey("persona_prompt")
+private val KEY_LINUX_DISTRO = stringPreferencesKey("linux_env_distro")
+private val KEY_LINUX_MIRROR = stringPreferencesKey("linux_env_mirror")
+private val KEY_LINUX_RELEASE = stringPreferencesKey("linux_env_release")
+private val KEY_FTP_RUNTIME = stringPreferencesKey("ftp_runtime")
 
 /**
  * 终端设置三个键（第 12 项缺陷）。

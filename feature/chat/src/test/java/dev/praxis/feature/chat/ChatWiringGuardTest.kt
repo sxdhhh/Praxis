@@ -449,6 +449,38 @@ class ChatWiringGuardTest {
         assertTrue("没有设置被动外部地址", server.contains("setPassiveExternalAddress"))
     }
 
+    /**
+     * 环境页必须**按文件系统事实**识别发行版，而不是硬编码 Ubuntu。
+     *
+     * ## 这条护栏防的是什么
+     *
+     * 真机装的是 Kali（`os-release: ID=kali`），而代码里 `distro` 初值写死
+     * `LinuxDistro.Ubuntu`、`refresh()` 只用选中项去问装没装 —— 界面永远
+     * 显示「尚未安装 Ubuntu」，用户以为环境丢了。
+     *
+     * 把探测删掉，编译不报错、单测（如果只测 ViewModel 逻辑）也不会红。
+     */
+    @Test
+    fun envPage_detectsInstalledDistro() {
+        val vm = read("feature/settings/src/main/java/dev/praxis/feature/settings/env/LinuxEnvViewModel.kt")
+        val port = read("app/src/main/java/dev/praxis/data/linux/ProotEnvPort.kt")
+        assertTrue("端口没有 detectInstalledDistros", port.contains("override fun detectInstalledDistros"))
+        assertTrue("refresh 没有采纳探测结果", vm.contains("port.detectInstalledDistros()"))
+        // 没有这条闸，用户手动选择的发行版每轮 refresh 都会被弹回去。
+        assertTrue("缺少 userPickedDistro 闸", vm.contains("userPickedDistro"))
+    }
+
+    /** 环境页配置必须持久化（否则退出再进就重置）。 */
+    @Test
+    fun envPage_persistsSettings() {
+        val vm = read("feature/settings/src/main/java/dev/praxis/feature/settings/env/LinuxEnvViewModel.kt")
+        val port = read("app/src/main/java/dev/praxis/data/linux/ProotEnvPort.kt")
+        assertTrue("ViewModel 没有恢复配置", vm.contains("port.loadEnvSettings()"))
+        assertTrue("ViewModel 没有落盘配置", vm.contains("port.saveEnvSettings("))
+        assertTrue("端口层没有实现读取", port.contains("override suspend fun loadEnvSettings"))
+        assertTrue("端口层没有实现保存", port.contains("override suspend fun saveEnvSettings"))
+    }
+
     /** 端口必须真的提供枚举能力，且适配器按名字透出。 */
     @Test
     fun ptyPort_exposesSessionNames() {

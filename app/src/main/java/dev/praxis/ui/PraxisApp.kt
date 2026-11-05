@@ -169,6 +169,13 @@ fun PraxisApp(
     val memoryStore: dev.praxis.core.memory.MemoryStore = org.koin.compose.koinInject()
     val workflowEngine: dev.praxis.core.workflow.WorkflowEngine = org.koin.compose.koinInject()
     val skillRegistry: dev.praxis.core.plugin.SkillRegistry = org.koin.compose.koinInject()
+
+    // 环境页配置的存储：发行版选择 + FTP 非敏感项。
+    // 注入到 `ProotEnvPort`，因为 port 需要它来读写（`:feature:settings` 拿不到 Context）。
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val port = org.koin.compose.getKoin().get<dev.praxis.feature.settings.env.LinuxEnvPort>()
+        (port as? dev.praxis.data.linux.ProotEnvPort)?.envSettingsStore = settingsRepository
+    }
     /**
      * 终端会话快照端口。
      *
