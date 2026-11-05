@@ -66,6 +66,8 @@ fun LinuxEnvRoute(port: LinuxEnvPort, modifier: Modifier) {
         onFtpPasswordChange = { viewModel.setFtpPassword(it) },
         // 软件包组：装到共用 rootfs 里（只增不减，与「重新安装」不同）。
         onInstallPackages = { ids -> viewModel.installPackages(ids) },
+        // 日志清空：apt 输出很长，用户可能想清掉重看。
+        onClearLog = { viewModel.clearLog() },
         modifier = modifier,
     )
 }

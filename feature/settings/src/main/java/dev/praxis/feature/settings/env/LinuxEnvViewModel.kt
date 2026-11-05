@@ -59,6 +59,19 @@ data class LinuxEnvUiState(
     val mirror: UbuntuMirror = UbuntuMirror.Tsinghua,
     /** 最近一行输出（给用户一个进度感，不放整块终端）。 */
     val lastLine: String? = null,
+
+    /**
+     * 完整日志（环形缓冲，最多 [LOG_CAPACITY] 条）。
+     *
+     * ## 为什么不再只有 lastLine
+     *
+     * 装环境失败时，**原因往往在上一行**就已经滚掉了。只显示最后一行
+     * 等于「告诉用户某一步失败了，但不告诉他为什么」。
+     */
+    val logLines: List<String> = emptyList(),
+
+    /** 日志版本号（每次新增自增），供 UI 判断「要不要滚动到底」。 */
+    val logVersion: Int = 0,
     /** 一句话状态摘要。 */
     val summary: String = "尚未安装 Linux 环境。",
     val sshEnabled: Boolean = false,
@@ -424,6 +437,22 @@ class LinuxEnvViewModel(
      * 才是正确的（用户没有在本进程里表达过偏好）。
      */
     private var userPickedDistro = false
+
+    /**
+     * 日志环形缓冲上限。
+     *
+     * 2000 行足够覆盖一次完整 apt 安装的末尾上下文；再大则每帧重组都要
+     * 遍历长列表，表现为「装到一半越来越卡」。
+     */
+    private val LOG_CAPACITY = 2000
+
+    /**
+     * 单行日志最大长度。
+     *
+     * apt 偶尔会打出几 KB 的单行（依赖树的整段说明）。不截断会让
+     * `_state` 里塞进一条占满屏幕的字符串，日志框被它撑爆。
+     */
+    private val MAX_LOG_LINE_LENGTH = 2000
 
     private var shellSession: LinuxEnvPort.SessionHandle? = null
 
@@ -1300,16 +1329,43 @@ class LinuxEnvViewModel(
 
     // ── 辅助 ────────────────────────────────────────────────────────
 
+    /** 清空日志（用户手动「清空」）。 */
+    fun clearLog() {
+        _state.update { it.copy(logLines = emptyList(), lastLine = null, logVersion = 0) }
+    }
+
     /**
-     * 把一行输出同时写进 lastLine 与日志。
+     * 写一行日志。
      *
-     * 只保留**最后一行**：装环境时 apt 会打几千行，全留在状态里会让 UI 重组爆掉，
-     * 而且用户真正想看的是「现在在做什么」。
+     * ## 从「只留最后一行」改成环形缓冲（2026-11-06）
+     *
+     * 旧实现只保留 `lastLine` 一行。装环境时 apt 会打几千行，用户看到的
+     * 永远只有「此刻在做什么」—— 一旦某一步失败，**失败原因在上一行
+     * 就已经滚掉了**，而那一行才是他需要的。
+     *
+     * ## 为什么保留上限（[LOG_CAPACITY]）
+     *
+     * apt 一次装几十个包能打上万行。无上限会让 `_state` 越来越大、
+     * 每帧重组都要遍历整个列表 —— 表现为「装到一半越来越卡」。
      */
     private fun publish(line: String) {
         val trimmed = line.trim()
         if (trimmed.isEmpty()) return
-        _state.update { it.copy(lastLine = trimmed.take(200)) }
+        _state.update { st ->
+            val next = if (st.logLines.size >= LOG_CAPACITY) {
+                // 丢掉最早的那些，保留最近 LOG_CAPACITY 条。
+                st.logLines.subList(st.logLines.size - LOG_CAPACITY + 1, st.logLines.size)
+            } else {
+                st.logLines
+            }
+            st.copy(
+                lastLine = trimmed.take(200),
+                logLines = next + trimmed.take(MAX_LOG_LINE_LENGTH),
+                // 自增版本号：UI 用它作跟随引擎的 contentVersion，
+                // 只有真的新增日志才触发滚动，普通重组不算。
+                logVersion = st.logVersion + 1,
+            )
+        }
     }
 
     override fun onCleared() {

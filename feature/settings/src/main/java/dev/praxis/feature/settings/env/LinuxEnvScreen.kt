@@ -110,6 +110,9 @@ fun LinuxEnvScreen(
      * 再加必填参数会让所有既有调用点同时编译失败。
      */
     onInstallPackages: (Set<String>) -> Unit = {},
+
+    /** 清空日志（null = 不提供该动作）。 */
+    onClearLog: (() -> Unit)? = null,
 modifier: Modifier = Modifier,
 ) {
     SettingsList(modifier = modifier.fillMaxSize()) {
@@ -144,13 +147,24 @@ modifier: Modifier = Modifier,
                         style = MiuixTheme.textStyles.footnote1,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
-                    // 最近一行输出：装环境时要能看到进度，但又不能把整页变成终端。
-                    state.lastLine?.let { line ->
+                    // ## 日志（2026-11-06 从「一行」改成独立日志框）
+                    //
+                    // 旧实现只显示 `lastLine` 一行。装环境时 apt 打几千行，
+                    // 一旦失败，**原因在上一行就已经滚掉了** —— 用户看到「失败了」，
+                    // 却拿不到任何可排查的信息。
+                    //
+                    // 新面板：环形缓冲 2000 行 + 等宽字体 + 弹簧跟随滚动 + 可复制。
+                    if (state.logLines.isNotEmpty()) {
+                        // 展开状态由本页持有：离开设置页再回来，日志还在但
+                        // 「展开着」这个偏好没必要跨页面存活（用户通常先看摘要）。
+                        var logExpanded by remember { mutableStateOf(false) }
                         Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = line,
-                            style = MiuixTheme.textStyles.footnote1,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                        InstallLogPanel(
+                            lines = state.logLines,
+                            logVersion = state.logVersion,
+                            expanded = logExpanded,
+                            onExpandedChange = { logExpanded = it },
+                            onClear = onClearLog,
                         )
                     }
                     // 缺 proot 时**必须显眼**：这是整条链路的前提，缺了就什么都做不了。
