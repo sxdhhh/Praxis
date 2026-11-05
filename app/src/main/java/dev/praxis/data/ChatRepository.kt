@@ -342,6 +342,16 @@ class ChatRepository(
     }
 
     /**
+     * 清空某会话的全部消息，**保留会话**（`/clear` 用）。
+     *
+     * 与 [deleteSession] 是两件事：那个连会话一起删，
+     * 用户会发现侧边栏那条也不见了。
+     */
+    suspend fun clearMessages(sessionId: String) {
+        messageDao.deleteAllInSession(sessionId)
+    }
+
+    /**
      * 置顶 / 取消置顶。
      *
      * 走 DAO 的 UPDATE，**不碰** upsert：

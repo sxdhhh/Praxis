@@ -86,6 +86,20 @@ interface ChatPersistence {
     suspend fun deleteSession(sessionId: String)
 
     /**
+     * 清空某会话的**全部消息**，但保留会话本身（`/clear` 用）。
+     *
+     * ## 为什么不复用它 deleteSession
+     *
+     * 两个动作的用户意图不同：`/clear` 是「这个对话我想重新开始」，
+     * 删会话是「这条不要了」。若用删会话实现清空，用户会发现
+     * 侧边栏里那条也不见了 —— 那不是他要的。
+     *
+     * 默认空实现：不落盘模式下（单测/预览）没有数据库，
+     * 调用它应当是安全的空操作而不是崩溃。
+     */
+    suspend fun clearMessages(sessionId: String) {}
+
+    /**
      * 置顶 / 取消置顶。
      *
      * 单独一个方法而不是「读 SessionItem 改字段再整条写回」：
