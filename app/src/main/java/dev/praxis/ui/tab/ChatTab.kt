@@ -608,6 +608,9 @@ fun ChatTab(
         // `/` 命令：候选列表点选后交给 ViewModel 执行。
         // 命令结果只进 notice，不进模型历史（见 runCommand 的 KDoc）。
         onCommand = viewModel::runCommand,
+        // 撤销压缩：压缩是有损操作，而触发时机常是自动的 ——
+        // 没有撤销时用户唯一的补救是重新说一遍，等于再花一次钱。
+        onUndoCompaction = viewModel::undoCompaction,
         // 候选列表 = 内置命令 + 用户可调用的技能。
         // 技能与命令共用 `/` 命名空间，所以必须一起列出来 ——
         // 否则用户不知道某个技能可以用 `/名字` 调用。

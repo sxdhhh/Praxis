@@ -486,7 +486,33 @@ data class CompactedContext(
     val summary: String = "",
     val coveredCount: Int = 0,
     val createdAt: Long = 0L,
+    /**
+     * 被这次压缩折叠掉的消息的 token 估算。
+     *
+     * ## 为什么必须有它（2026-11-06）
+     *
+     * 旧模型只有 [coveredCount]（折叠了几条）。而「几条」回答不了用户
+     * 真正关心的问题：**这次压缩到底省了多少上下文**？
+     *
+     * 3 条短消息和 3 条长工具输出，折叠的条数一样，省下的预算差几十倍。
+     * 没有这个数字，压缩对用户就是个黑盒 —— 他不知道该不该点，
+     * 也不知道点了之后还剩多少可用。
+     */
+    val coveredTokens: Int = 0,
 ) {
+
+    /**
+     * 这次压缩的净收益（token）= 折叠掉 - 摘要本身。
+     *
+     * ## 为什么可能为负
+     *
+     * 只折叠了 2 条短消息（比如「好」「继续」）时，摘要本身反而更长 ——
+     * 净收益是负数。这种情况**必须能显示出来**：用户会疑惑
+     * 「我压缩了怎么上下文反而变大了」，而答案是「这次压得不值」。
+     *
+     * 掩盖负收益（clamp 到 0）会让用户失去「不该压」的判断依据。
+     */
+    val savedTokens: Int get() = coveredTokens - summaryTokens
     val isActive: Boolean get() = summary.isNotBlank()
 
     /** 摘要自身的 token 数（用于在 UI 上显示「压缩省了多少」）。 */

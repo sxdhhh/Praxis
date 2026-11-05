@@ -273,6 +273,8 @@ fun ChatScreen(
     commands: List<CommandDefinition> = BuiltinCommands.all,
     /** 跳转到第 index 条消息（导航浮条 / 定位器回调）。 */
     onJumpToMessage: ((Int) -> Unit)? = null,
+    /** 撤销本次压缩（null = 不提供入口）。 */
+    onUndoCompaction: (() -> Unit)? = null,
     /** 编辑器：内容变化（`MutableState` 双向绑定）。 */
     onEditingTextChange: ((String) -> Unit)? = null,
     /** 编辑器：取消。 */
@@ -837,6 +839,7 @@ fun ChatScreen(
                             SummaryDivider(
                                 compacted = draft!!,
                                 onClick = onOpenSummaryDetail ?: {},
+                                onUndo = onUndoCompaction,
                             )
                         }
                         // ## 菜单必须锚在**气泡自己**身上（2026-10-22 修，第 5 项）
@@ -1104,6 +1107,7 @@ fun ChatScreen(
                         SummaryDivider(
                             compacted = draft!!,
                             onClick = onOpenSummaryDetail ?: {},
+                            onUndo = onUndoCompaction,
                         )
                     }
                 }
