@@ -176,3 +176,34 @@
     public static **[] values();
     public static ** valueOf(java.lang.String);
 }
+# ── SLF4J 绑定类（2026-11-06，release 构建暴露）─────────────────────
+#
+# ## 症状
+#
+#   ERROR: R8: Missing class org.slf4j.impl.StaticLoggerBinder
+#   ERROR: R8: Missing class org.slf4j.impl.StaticMDCBinder
+#
+# ## 原因
+#
+# Apache FtpServer（第 6 项的进程内 FTP 服务）依赖 slf4j-api 1.7.x。
+# 那一版的 LoggerFactory / MDC 用 **反射** 在运行时查找绑定实现
+# （StaticLoggerBinder / StaticMDCBinder），编译期并不存在对这些类的直接引用。
+#
+# 我们在 build.gradle.kts 里排除了 slf4j-simple（它与项目已有的 slf4j 绑定冲突），
+# 于是 R8 做静态分析时找不到这两个类，直接判失败。
+#
+# ## 为什么用 -dontwarn 而不是补一个绑定
+#
+# 项目本身已经有 slf4j 绑定（Timber 那条链），这里缺的只是 **1.7 那一版的
+# 老式绑定入口**。补一个 slf4j-simple 回来会变成「两个绑定」——那才是真正的
+# 运行时问题（启动时告警 + 行为不确定）。
+#
+# 所以正解是：告诉 R8「这些是反射目标，缺失是预期内的」。
+-dontwarn org.slf4j.impl.StaticLoggerBinder
+-dontwarn org.slf4j.impl.StaticMDCBinder
+-dontwarn org.slf4j.impl.StaticMarkerBinder
+
+# FTP 服务通过反射创建（用户表、监听器），保留其公开 API。
+-keep class org.apache.ftpserver.** { *; }
+-keep class org.apache.mina.** { *; }
+-keep class org.apache.ftpserver.ftplet.** { *; }
