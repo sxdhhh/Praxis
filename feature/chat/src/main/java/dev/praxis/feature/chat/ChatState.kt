@@ -317,6 +317,38 @@ data class ChatState(
      */
     val streamingText: Map<Long, String> = emptyMap(),
     val input: String = "",
+
+    /**
+     * `/` 命令候选的过滤词；null 表示「当前不该显示命令面板」。
+     *
+     * ## 为什么是派生属性而不是一个独立字段
+     *
+     * 它完全由 [input] 决定。存成字段就要在每一处改 input 的地方同步维护，
+     * 漏一处就会出现「输入框里已经没有斜杠了，命令面板还挂着」。
+     * 派生属性不存在这种可能。
+     *
+     * ## 取值规则（与 `SlashCommand.parse` 保持严格一致）
+     *
+     * 只在「输入以 `/` 开头且尚未输入到空白之后」时返回非 null：
+     *
+     * | input | slashQuery |
+     * |---|---|
+     * | `"/"` | `""`（显示全部命令） |
+     * | `"/co"` | `"co"` |
+     * | `"/compact"` | `"compact"`（仍显示，便于确认要打的就是它） |
+     * | `"/compact "` | null（已经进入参数阶段，列表该收起） |
+     * | `"hi /co"` | null（不在开头） |
+     */
+    val slashQuery: String?
+        get() {
+            if (!input.startsWith('/')) return null
+            val body = input.substring(1)
+            // 出现空白 = 命令名已打完，进入参数阶段：收起候选。
+            val firstSpace = body.indexOfFirst { it == ' ' || it == '\t' || it == '\n' }
+            if (firstSpace >= 0) return null
+            return body
+        }
+
     /**
      * 已选好、**尚未发送**的图片（多模态输入）。
      *
@@ -407,6 +439,23 @@ data class ChatState(
      * 消费掉就没了。这里宁可让它多停一会儿，也不要一闪而过。
      */
     val notice: String? = null,
+
+    /**
+     * 一次性请求：打开模型选择器（由 `/model` 命令置位）。
+     *
+     * ## 为什么用「请求标志」而不是回调
+     *
+     * ViewModel 不能持有 Compose 状态或 UI 控制器。用一个一次性布尔
+     * 让 UI 观察，UI 处理完再清掉 —— 与 `notice` / `pendingRetryRestore`
+     * 同一套「状态而非命令」的做法。
+     */
+    val modelPickerRequested: Boolean = false,
+
+    /** 一次性请求：新建会话（由 `/new` 置位）。 */
+    val newSessionRequested: Boolean = false,
+
+    /** 一次性请求：导出对话（由 `/export` 置位）。 */
+    val exportRequested: Boolean = false,
 
     /**
      * 待发送队列（Operit 同款：生成中也能继续写，前一轮结束后自动发下一条）。

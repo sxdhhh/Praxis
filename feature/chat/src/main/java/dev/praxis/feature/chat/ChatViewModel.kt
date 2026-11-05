@@ -32,6 +32,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import dev.praxis.feature.chat.command.BuiltinCommands
+import dev.praxis.feature.chat.command.CommandDefinition
+import dev.praxis.feature.chat.command.SlashCommand
 
 /**
  * 聊天页状态机。
@@ -1163,6 +1166,16 @@ class ChatViewModel(
     }
 
     fun send() {
+        // ## `/` 命令拦截必须**先于** trim 与各种早退（2026-11-06）
+        //
+        // 用户打 `/compact` 按回车，意图是执行命令而不是发一句话。
+        // 若放到下面 `text.isEmpty()` 早退之后，空参数的命令（如 `/clear`）
+        // 仍然能过；但 `/compact ` 带尾随空格时会被 trim 掉再判断，
+        // 两处判据不一致就会出现「有时能执行有时变成发消息」。
+        //
+        // 所以放在最前面，用**未 trim 的原文**判断 —— 与 `SlashCommand.parse`
+        // 的严格规则（不 trim、不转大小写）保持一致。
+        if (interceptCommand(_state.value.input)) return
         val text = _state.value.input.trim()
         // ## 判据与 `canSend` 保持一致：有文字**或**有图片
         //
@@ -2696,6 +2709,151 @@ class ChatViewModel(
         viewModelScope.launch {
             runCatching { store.save(sessionId, PendingQueueCodec.encode(queue)) }
         }
+    }
+    /**
+     * 清空当前对话（`/clear`）。
+     *
+     * ## 为什么连数据库一起清
+     *
+     * 只清内存会让「重启后消息又回来了」。用户的意图是「这条对话我不要了」，
+     * 所以内存、history、持久化三层都要清。
+     *
+     * ## 为什么保留会话本身
+     *
+     * 删的是**消息**不是**会话**：用户想在这个对话里重新开始，
+     * 而不是把侧边栏那一条也删掉（那是另一个动作）。
+     *
+     * ## 为什么要清压缩游标
+     *
+     * 消息都清空了，若 `compacted` 还留着摘要，下一轮会把一段「已经不存在的
+     * 历史」发给模型 —— 模型会提到用户从没说过的事。
+     */
+    fun clearConversation() {
+        history.clear()
+        compacted = CompactedContext.None
+        tokenCache.reset()
+        _state.update {
+            it.copy(
+                bubbles = emptyList(),
+                streamingText = emptyMap(),
+                streamingReasoning = null,
+                compacted = null,
+                error = null,
+            )
+        }
+        launchPersist { clearMessages(sessionId) }
+    }
+    /**
+     * 执行一条 `/` 命令。
+     *
+     * ## 命令不进入模型历史（Harness 的核心约定）
+     *
+     * 用户打 `/compact` 时，AI **不该**看到「用户说了 /compact」——
+     * 那是界面操作，不是对话内容。所以这里的所有分支都只改本地状态，
+     * 唯一会向模型提交内容的是 `/model` 之后的用户自己再发一句。
+     *
+     * 唯一例外是命令**结果**：它显示在 UI 上（`notice`），也不进历史。
+     *
+     * ## 为什么要清空输入框
+     *
+     * 用户点了候选之后，输入框里还留着 `/compact`。不清掉的话，
+     * 下一次按发送会把 `/compact` 当成普通消息发给模型 ——
+     * 而模型会一本正经地回答一个命令名。
+     *
+     * ## 需要参数的命令怎么办
+     *
+     * 把 `/name ` 填回输入框并**保留**斜杠，等用户补参数后回车。
+     * 此时 `slashQuery` 因出现空白而返回 null，候选列表自动收起。
+     */
+    fun runCommand(definition: CommandDefinition) {
+        // 先清输入框：无论下面走哪条分支，都不该让 `/xxx` 留在框里被发出去。
+        _state.update { it.copy(input = "") }
+        when (definition.name) {
+            "compact" -> {
+                if (_state.value.isBusy) {
+                    noticeCommand("正在生成，等这一轮结束再压缩。")
+                    return
+                }
+                compactNow()
+                noticeCommand("已开始压缩当前对话。")
+            }
+            "model" -> {
+                // 模型选择是界面层能力（要展开分组胶囊）。
+                // 这里只把「想切换」这件事告诉 UI ——
+                // 但 ViewModel 不能直接操作 Compose 状态，
+                // 所以用一个一次性标志让 UI 打开选择器。
+                _state.update { it.copy(modelPickerRequested = true) }
+            }
+            "new" -> {
+                _state.update { it.copy(newSessionRequested = true) }
+            }
+            "clear" -> {
+                if (_state.value.isBusy) {
+                    noticeCommand("正在生成，等这一轮结束再清空。")
+                    return
+                }
+                clearConversation()
+                noticeCommand("已清空当前对话。")
+            }
+            "export" -> {
+                if (_state.value.bubbles.isEmpty()) {
+                    noticeCommand("当前对话为空，没有可导出的内容。")
+                    return
+                }
+                _state.update { it.copy(exportRequested = true) }
+            }
+            // 未注册的命令：明确报错，**不发网络请求**。
+            // 见 `SlashCommand.find` 的 KDoc。
+            else -> noticeCommand("没有 /${definition.name} 这个命令。")
+        }
+    }
+
+    /**
+     * 把 `/xxx` 当作普通消息发出的**防止**逻辑。
+     *
+     * ## 为什么需要它
+     *
+     * 用户可能真的想发「/usr/bin 这个路径怎么改」。那条**不是**命令
+     * （`SlashCommand.parse` 会拒绝含斜杠的名字），应当正常发送。
+     *
+     * 但若用户发的是 `/compact`（语法合法、已注册）却按了回车而不是点候选，
+     * 也应当执行命令而不是把命令名发给模型。
+     *
+     * @return true 表示「已按命令处理，不要继续发送」。
+     */
+    private fun interceptCommand(text: String): Boolean {
+        val parsed = SlashCommand.parse(text) ?: return false
+        val definition = SlashCommand.find(parsed, BuiltinCommands.all)
+        if (definition == null) {
+            // 语法像命令但没注册：明确告知，不发给模型。
+            // 否则用户会看到模型在回答一个不存在的命令。
+            if (parsed.rawInput.isEmpty()) {
+                noticeCommand("没有 /${parsed.name} 这个命令。")
+                _state.update { it.copy(input = "") }
+                return true
+            }
+            // 带参数且未注册：仍可能是一句话（如「/usr/bin 怎么改」）——
+            // 但 `/usr/bin` 本身解析不过（含斜杠），走到这里的只有
+            // `/foo bar` 这种，用户几乎必然是想用命令。同样明确报错。
+            noticeCommand("没有 /${parsed.name} 这个命令。")
+            _state.update { it.copy(input = "") }
+            return true
+        }
+        // 需要参数的命令但还没给参数：把 `/name ` 留着让用户补。
+        if (parsed.rawInput.isEmpty() && needsArgument(definition)) {
+            _state.update { it.copy(input = "/" + definition.name + " ") }
+            return true
+        }
+        runCommand(definition)
+        return true
+    }
+
+    /** 该命令是否必须带参数才能执行。 */
+    private fun needsArgument(definition: CommandDefinition): Boolean = false
+
+    /** 命令结果提示（不进模型历史）。 */
+    private fun noticeCommand(text: String) {
+        _state.update { it.copy(notice = text) }
     }
     /** 手动展开 / 收起队列面板。 */
     fun setQueueExpanded(expanded: Boolean) {

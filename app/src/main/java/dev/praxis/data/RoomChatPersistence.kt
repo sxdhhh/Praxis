@@ -146,6 +146,10 @@ class RoomChatPersistence(
         repository.deleteSession(sessionId)
     }
 
+    override suspend fun clearMessages(sessionId: String) {
+        repository.clearMessages(sessionId)
+    }
+
     override suspend fun setSessionPinned(sessionId: String, pinned: Boolean) {
         repository.setSessionPinned(sessionId, pinned)
     }

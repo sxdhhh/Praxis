@@ -605,6 +605,9 @@ fun ChatTab(
         onQueueReorder = viewModel::queueReorder,
         onQueueSendAll = viewModel::queueSendAll,
         onQueueClearAll = viewModel::queueClearAll,
+        // `/` 命令：候选列表点选后交给 ViewModel 执行。
+        // 命令结果只进 notice，不进模型历史（见 runCommand 的 KDoc）。
+        onCommand = viewModel::runCommand,
         onQueueExpandedChange = viewModel::setQueueExpanded,
         onMessageAction = viewModel::onMessageAction,
         // 一次性提示（如「继续」不适用）由输入栏 4 秒后清掉。

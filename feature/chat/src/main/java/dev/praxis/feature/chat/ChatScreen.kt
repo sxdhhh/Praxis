@@ -60,6 +60,9 @@ import dev.praxis.ui.design.component.LocalScrollBottomLimit
 import dev.praxis.ui.design.component.LocalTopBarInset
 import dev.praxis.ui.design.component.imeLiftPadding
 import dev.praxis.ui.design.component.rememberImeLift
+import dev.praxis.feature.chat.command.BuiltinCommands
+import dev.praxis.feature.chat.command.CommandDefinition
+import dev.praxis.feature.chat.command.SlashCommandPanel
 import dev.praxis.feature.chat.queue.PendingQueuePanel
 import dev.praxis.feature.chat.menu.MessageContextMenu
 import dev.praxis.feature.chat.menu.MessageCopyPreviewSheet
@@ -256,6 +259,18 @@ fun ChatScreen(
     onQueueClearAll: (() -> Unit)? = null,
     /** 展开 / 收起队列面板。 */
     onQueueExpandedChange: ((Boolean) -> Unit)? = null,
+    /**
+     * 执行一条 `/` 命令。
+     *
+     * ## 为什么传的是「定义」而不是「名字 + 参数」
+     *
+     * 用户在候选列表里点选时**还没有参数**（参数可以事后补打）。
+     * 传定义让 ViewModel 决定「这条命令要不要参数」：不需要的立刻执行，
+     * 需要的把 `/name ` 填回输入框等用户补。
+     */
+    onCommand: ((CommandDefinition) -> Unit)? = null,
+    /** 可用的命令集（用于候选列表）。 */
+    commands: List<CommandDefinition> = BuiltinCommands.all,
     /** 跳转到第 index 条消息（导航浮条 / 定位器回调）。 */
     onJumpToMessage: ((Int) -> Unit)? = null,
     /** 编辑器：内容变化（`MutableState` 双向绑定）。 */
@@ -1271,6 +1286,8 @@ fun ChatScreen(
             onQueueReorder = onQueueReorder,
             onQueueSendAll = onQueueSendAll,
             onQueueClearAll = onQueueClearAll,
+            onCommand = onCommand,
+            commands = commands,
             onQueueExpandedChange = onQueueExpandedChange,
             onNoticeConsumed = onNoticeConsumed,
             // ── 底部设置条（1:1 对齐 Operit `ClassicChatSettingsBar`）──
@@ -1461,6 +1478,8 @@ private fun ChatInputBar(
     onQueueSendAll: (() -> Unit)? = null,
     onQueueClearAll: (() -> Unit)? = null,
     onQueueExpandedChange: ((Boolean) -> Unit)? = null,
+    onCommand: ((CommandDefinition) -> Unit)? = null,
+    commands: List<CommandDefinition> = BuiltinCommands.all,
     /**
      * 提示已展示完，可以清掉。
      *
@@ -1664,6 +1683,23 @@ private fun ChatInputBar(
                 }
             }
 
+
+            // ── `/` 命令候选 ────────────────────────────────────
+            //
+            // ## 为什么放在这里（最贴近输入框的一层）
+            //
+            // 命令是在**输入过程中**触发的：用户打了 `/` 才出现，一旦
+            // 继续打字或发送就该消失。把它放在离输入框最远的位置会让
+            // 「眼动距离」变长 —— 而这个地方的所有其他元素（用量条、
+            // 阶段提示、队列）都是持续存在的状态信息，性质不同。
+            if (onCommand != null) {
+                SlashCommandPanel(
+                    query = state.slashQuery,
+                    commands = commands,
+                    onPick = onCommand,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+            }
             // ── 上下文用量条 ────────────────────────────────────────
             //
             // 位置在**阶段提示之上**：它是「本轮请求的规模」，

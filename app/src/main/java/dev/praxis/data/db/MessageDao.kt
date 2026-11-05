@@ -10,6 +10,22 @@ import kotlinx.coroutines.flow.Flow
 interface MessageDao {
 
     /**
+     * 删除某会话的**全部消息**（`/clear` 用），保留会话本身。
+     *
+     * ## 为什么不复用 deleteSession
+     *
+     * 删会话会把侧边栏那条也去掉，而 `/clear` 的语义是
+     * 「这个对话我想重新开始」—— 会话还在，只是内容清空。
+     *
+     * ## 为什么是一句 DELETE 而不是逐条删
+     *
+     * 逐条删会产生 N 次事务与 N 次 Flow 发射，UI 会看到消息「一条条消失」。
+     * 单语句删除只发射一次，界面直接跳到空态。
+     */
+    @Query("DELETE FROM messages WHERE sessionId = :sessionId")
+    suspend fun deleteAllInSession(sessionId: String)
+
+    /**
      * 按写入顺序读整个会话。
      *
      * ## 为什么必须是 `orderIndex, id` 双键排序（2026-10-24 修）

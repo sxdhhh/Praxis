@@ -351,6 +351,39 @@ class ChatWiringGuardTest {
         assertTrue("ChatInputBar 没有 onEnqueue 形参", screen.contains("onEnqueue: (() -> Unit)? = null"))
     }
 
+    /**
+     * `/` 命令必须真的接通：解析 → 候选面板 → 执行 → 不进模型历史。
+     *
+     * ## 这条护栏防的是什么
+     *
+     * 命令功能最容易「看起来做了但没通」：面板能弹、点了没反应，
+     * 或者打了 `/compact` 回车后把它当普通消息发给模型。
+     */
+    @Test
+    fun slashCommand_isFullyWired() {
+        val screen = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatScreen.kt")
+        val vm = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatViewModel.kt")
+        val tab = read("app/src/main/java/dev/praxis/ui/tab/ChatTab.kt")
+        assertTrue("屏幕没有渲染命令面板", screen.contains("SlashCommandPanel("))
+        assertTrue("ChatTab 没有接 onCommand", tab.contains("onCommand = viewModel::runCommand"))
+        assertTrue("send 没有拦截命令", vm.contains("interceptCommand(_state.value.input)"))
+        // 命令结果只进 notice，绝不进 history。
+        assertTrue(
+            "runCommand 里出现了向 history 写入的调用（命令不该进模型历史）",
+            !vm.substringAfter("fun runCommand").substringBefore("fun interceptCommand")
+                .contains("history.add"),
+        )
+    }
+
+    /** 命令候选面板必须有展开动画（不能硬切，否则输入区高度突变）。 */
+    @Test
+    fun slashCommandPanel_isAnimated() {
+        val panel = read("feature/chat/src/main/java/dev/praxis/feature/chat/command/SlashCommandPanel.kt")
+        assertTrue("命令面板没有出现动画", panel.contains("AnimatedVisibility"))
+        assertTrue("命令面板没有高度展开动画", panel.contains("expandVertically"))
+        assertTrue("命令面板没有淡入淡出", panel.contains("fadeIn"))
+    }
+
     /** 端口必须真的提供枚举能力，且适配器按名字透出。 */
     @Test
     fun ptyPort_exposesSessionNames() {
