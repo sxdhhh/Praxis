@@ -162,8 +162,50 @@ jobs:
       - name: Write local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
-      - name: Unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+      # ## 为什么把单测拆成「库模块」与「:app 逐类」两步（2026-11-05）
+      #
+      # `./gradlew testDebugUnitTest` 一把梭会在 `:app:testDebugUnitTest` 上
+      # **无限等下去** —— Gradle 默认不给测试任务设超时。
+      #
+      # 已经试过两条路，都失败：
+      #
+      #   1. Gradle 任务级 `Test.timeout`（4 分钟）—— 实测跑到 13 分钟仍未结束；
+      #   2. JUnit `@Rule Timeout`（6 个 :app 测试类各加 30 秒）—— 一次都没触发。
+      #
+      # 第 2 条是最有价值的观测：JUnit 规则包住的是**每个测试方法**，
+      # 它不触发就说明卡的地方**不在任何测试方法内**，而在任务 / JVM 层。
+      #
+      # 所以改用最外层的手段：**shell 的 `timeout`**。
+      # 它不认识 Gradle、也不认识 JUnit，只在墙钟到点时杀进程 ——
+      # 恰恰因为「什么都不懂」，它不会被上面任何一层的问题绕过。
+      #
+      # 并且 `:app` **逐个测试类跑**：超时失败时能直接看出是哪一个类，
+      # 而不是只知道「这个任务卡了」。
+      - name: Unit tests (library modules)
+        run: ./gradlew testDebugUnitTest -x :app:testDebugUnitTest --stacktrace
+
+      # 逐个类跑 :app。任何一个出问题都算失败，但**不提前退出** ——
+      # 要让其余类也跑完，这样一次 CI 就能拿到完整名单。
+      - name: Unit tests (:app, per class)
+        run: |
+          set +e
+          failed=0
+          for CT in MemoryPortImplTest ToolWorkflowPortTest HardLinkParseTest \
+                    ProotLoaderStagingTest SessionShutdownTest WiringGuardTest; do
+            echo "::group::$CT"
+            timeout --signal=KILL 240 ./gradlew :app:testDebugUnitTest \
+              --tests "*$CT" --stacktrace
+            rc=$?
+            echo "::endgroup::"
+            if [ $rc -ne 0 ]; then
+              echo "::error::$CT 失败或超时（exit=$rc）"
+              failed=$((failed + 1))
+            fi
+          done
+          if [ $failed -ne 0 ]; then
+            echo "::error::$failed 个 :app 测试类失败/超时"
+            exit 1
+          fi
 
       - name: Lint
         run: ./gradlew lintDebug --stacktrace
