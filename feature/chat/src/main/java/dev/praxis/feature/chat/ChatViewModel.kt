@@ -2875,7 +2875,65 @@ class ChatViewModel(
                 // 重新生成：把这条助手回答之后的内容全部丢弃（含它本身），
                 // 再重新发一轮。丢历史是必须的 —— 否则模型看到自己上一版回答，
                 // 会倾向于复述它而不是重写。
+                //
+                // ## 「点了没反应」的根因（2026-11-05 修）
+                //
+                // 旧实现**只有 `truncateFrom(bubbleId)`**：截断把这条回复从
+                // 界面上删掉了，却没有发起新的生成。用户看到的是
+                // 「回答消失了，什么都没生成」。
+                //
+                // 注释里写着「再重新发一轮」—— 那句话是**意图不是事实**。
+                // 这条注释存在了很久，掩盖了缺的那一步：读代码时很容易
+                // 以为它已经做了。
+                //
+                // ## 为什么不复用 `retry()`
+                //
+                // `retry()` 的语义是「对**最后一条** assistant 重来」，
+                // 它自己找 target、自己算变体组。而这里是「对**长按的那条**
+                // 重来」，目标由 [bubbleId] 指定。两者目标不同，
+                // 硬套 `retry()` 会重生成错的那条（用户长按中间一条时）。
+                //
+                // 所以这里做的是：先截断到该条之前，再用截断后的历史发起一轮。
+                // ## 为什么先判 isStreaming
+                //
+                // 流式进行中截断会让正在写入的 `assistantId` 指向一个
+                // 已不存在的气泡（`updateBubble` 静默失效），表现为
+                // 「流着流着突然不动了」。与 `retry()` / `send()` 同一条纪律。
+                if (_state.value.isStreaming) {
+                    _state.update { it.copy(notice = "正在生成，等这一轮结束再重新生成。") }
+                    return null
+                }
+                // 截断到「这条之前」：`truncateFrom` 会连带砍掉这条本身，
+                // 而那正是我们要重写的对象。
                 truncateFrom(bubbleId)
+                // 截断后历史末尾是那条用户消息，直接续一轮即可。
+                // `startStream` 会新建一条 assistant 气泡并写满它。
+                val newId = nextId++
+                _state.update { st ->
+                    st.copy(
+                        bubbles = st.bubbles + ChatBubble(
+                            id = newId,
+                            role = BubbleRole.Assistant,
+                            text = "",
+                            streaming = true,
+                            timestamp = nextTimestamp(),
+                        ),
+                        isStreaming = true,
+                        error = null,
+                        stage = ChatStage.Connecting,
+                    )
+                }
+                // 先落一条空行占位：否则这一轮回复在重启后会凭空消失，
+                // 与「界面有、库里有」的一致性不符（与 `send()` 同一做法）。
+                launchPersist {
+                    val rowId = appendMessage(
+                        sessionId = sessionId,
+                        role = "assistant",
+                        content = "",
+                    )
+                    registerRowId(newId, rowId)
+                }
+                startStream(newId)
                 null
             }
 
