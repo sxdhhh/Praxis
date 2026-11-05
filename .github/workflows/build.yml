@@ -181,8 +181,17 @@ jobs:
       #
       # 并且 `:app` **逐个测试类跑**：超时失败时能直接看出是哪一个类，
       # 而不是只知道「这个任务卡了」。
+      # 库模块这步也加墙钟上界：它同样出现过长时间不返回
+      # （约 20 分钟，历史正常值 1~2 分钟）。job 级的
+      # timeout-minutes 虽然最终也会杀，但那是 60 分钟之后 ——
+      # 期间整个并发队列都被占住。
+      #
+      # 25 分钟是「比任何历史正常值都宽、又远小于 job 上限」的取值：
+      # 真慢能过，真卡则快速给出失败。
       - name: Unit tests (library modules)
-        run: ./gradlew testDebugUnitTest -x :app:testDebugUnitTest --stacktrace
+        run: |
+          timeout --signal=KILL 1500 ./gradlew testDebugUnitTest \
+            -x :app:testDebugUnitTest --stacktrace
 
       # 逐个类跑 :app。任何一个出问题都算失败，但**不提前退出** ——
       # 要让其余类也跑完，这样一次 CI 就能拿到完整名单。
