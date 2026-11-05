@@ -516,6 +516,34 @@ class ChatWiringGuardTest {
         assertTrue("定位符没有字符集校验", store.contains("isValidLocator"))
     }
 
+    /**
+     * 工具失败必须按**五类位置**归因，不能只给一句 `isError = true`。
+     *
+     * ## 这条护栏防的是什么
+     *
+     * 模型看到 `isError = true` 的默认反应是「换个写法再试一次」——
+     * 而这对「执行到一半失败」正是最危险的做法（副作用可能翻倍）。
+     *
+     * 把归因删掉，编译不报错、功能也「能跑」，只是模型会在后台做错决定，
+     * 且没有任何地方会报出这个错。
+     */
+    @Test
+    fun toolFailures_areAttributedByStage() {
+        val executor = read("core/tool/src/main/kotlin/dev/praxis/core/tool/ToolExecutor.kt")
+        val stage = read("core/tool/src/main/kotlin/dev/praxis/core/tool/ToolFailureStage.kt")
+        // 三条失败分支都必须带 stage。
+        assertTrue("未知工具没有归因", executor.contains("stage = ToolFailureStage.Argument"))
+        assertTrue("权限拒绝没有归因", executor.contains("stage = ToolFailureStage.Denied"))
+        assertTrue("执行异常没有归因", executor.contains("stage = ToolFailureStage.Execution"))
+        // 只有前两类可安全重试 —— 这是整个归因的价值所在。
+        assertTrue(
+            "safeToRetry 判定被改动（应以副作用是否可能发生为准）",
+            stage.contains("this == Argument || this == Denied"),
+        )
+        // 呈现必须从执行结果派生，不能在 UI 里靠文案 contains 判断。
+        assertTrue("缺少呈现状态派生", executor.contains("ToolPresentState"))
+    }
+
     /** 端口必须真的提供枚举能力，且适配器按名字透出。 */
     @Test
     fun ptyPort_exposesSessionNames() {

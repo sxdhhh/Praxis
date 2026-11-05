@@ -69,6 +69,18 @@ data class ToolSpec(
 data class ToolResult(
     val content: String,
     val isError: Boolean = false,
+    /**
+     * 失败发生在哪个位置；成功时为 null。
+     *
+     * ## 为什么不能只有 isError
+     *
+     * 模型看到 `isError = true` 时的默认反应是「换个写法再试一次」。
+     * 但对「执行到一半失败」来说，重试可能让副作用翻倍（比如
+     * `append_file` 追加两遍）。
+     *
+     * 五类位置的判据与恢复方式见 [ToolFailureStage]。
+     */
+    val stage: ToolFailureStage? = null,
 )
 
 /** 工具执行上下文（注入端口，不直接依赖 Android）。 */
