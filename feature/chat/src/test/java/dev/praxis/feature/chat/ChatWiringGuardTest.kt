@@ -544,6 +544,36 @@ class ChatWiringGuardTest {
         assertTrue("缺少呈现状态派生", executor.contains("ToolPresentState"))
     }
 
+    /**
+     * 压缩必须**可逆**，且收益可核算。
+     *
+     * ## 这条护栏防的是什么
+     *
+     * 压缩是有损的，而触发它的时机（上下文接近上限、内存压力）往往是自动的 ——
+     * 用户可能在没同意的情况下丢掉正用着的细节。没有撤销时唯一的补救
+     * 是「重新说一遍」，等于再花一次钱。
+     *
+     * 另一件事：只有 `coveredCount`（折叠几条）回答不了「这次省了多少」。
+     * 3 条短消息与 3 条长输出，条数一样，省下的预算差几十倍。
+     */
+    @Test
+    fun compaction_isReversibleAndMeasured() {
+        val vm = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatViewModel.kt")
+        val model = read("core/ai/src/main/kotlin/dev/praxis/core/ai/ContextCompactor.kt")
+        val applier = read("core/ai/src/main/kotlin/dev/praxis/core/ai/ContextCompactor.kt")
+        // 可逆：有撤销入口，且撤消只是清游标（不重建历史）。
+        assertTrue("没有 undoCompaction", vm.contains("fun undoCompaction()"))
+        assertTrue("撤销没有清压缩游标", vm.contains("compacted = CompactedContext.None"))
+        // 收益：必须记录被折叠的 token 数。
+        assertTrue("没有 coveredTokens 字段", model.contains("val coveredTokens: Int"))
+        assertTrue("压缩时没有填 coveredTokens", vm.contains("coveredTokens = TokenEstimator.estimate"))
+        // 可逆的前提：压缩只改发送范围，绝不物理删除。
+        assertTrue(
+            "apply 里出现了物理删除（可逆性会被破坏）",
+            !applier.contains("messages.removeAll") && !applier.contains("messages.removeAt"),
+        )
+    }
+
     /** 端口必须真的提供枚举能力，且适配器按名字透出。 */
     @Test
     fun ptyPort_exposesSessionNames() {

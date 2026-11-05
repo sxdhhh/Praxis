@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import dev.praxis.core.ai.TokenEstimator
 import dev.praxis.feature.chat.command.BuiltinCommands
 import dev.praxis.feature.chat.command.CommandDefinition
 import dev.praxis.feature.chat.command.SlashCommand
@@ -1974,6 +1975,8 @@ class ChatViewModel(
             summary = summary,
             coveredCount = end,
             createdAt = System.currentTimeMillis(),
+            // 折叠掉的这部分原文的 token 估算。用户据此判断「这次压得值不值」。
+            coveredTokens = TokenEstimator.estimate(slice),
         )
         // ## 压缩后必须清缓存
         //
@@ -2738,6 +2741,44 @@ class ChatViewModel(
         viewModelScope.launch {
             runCatching { store.save(sessionId, PendingQueueCodec.encode(queue)) }
         }
+    }
+    /**
+     * 撤销本次压缩（把摘要摘掉，让被折叠的消息重新进入上下文）。
+     *
+     * ## 为什么必须能撤销（2026-11-06）
+     *
+     * 压缩是**有损**的：原文被换成一段摘要，细节就没了。而触发它的时机
+     * （上下文接近上限、内存压力）往往是自动的 —— 用户可能在没同意的情况下
+     * 丢掉了一段他正在用的细节。
+     *
+     * 没有撤销时，用户唯一的补救是「重新说一遍」，而那等于让模型再花一次钱。
+     *
+     * ## 为什么只需要清 `compacted`
+     *
+     * 关键设计：压缩**从不删除原始消息**，只改「发给模型时折叠多少条」。
+     * 所以撤销 = 把 `compacted` 置空，`history` 里那些消息立刻重新可见。
+     * 这也是 `CompactionApplier` 用 `coveredCount` 而不是物理删除的原因。
+     *
+     * ## 为什么撤销后要清缓存
+     *
+     * `TokenCache` 记的是「上次算过的完整列表」。撤销让列表变长，
+     * 旧缓存的前缀假设不再成立，不清会得到一个既不是旧值也不是新值的用量。
+     */
+    fun undoCompaction() {
+        if (!compacted.isActive) return
+        compacted = CompactedContext.None
+        tokenCache.reset()
+        _state.update {
+            it.copy(
+                compacted = null,
+                notice = "已撤销压缩，被折叠的消息重新参与上下文。",
+            )
+        }
+        // 用量变了，重算一次让进度条立刻反映真实情况。
+        // 配置只取一次：`readRuntimeConfig` 要读 DataStore，取两次是白跑一趟，
+        // 而且两次之间用户改设置的话，算出来的消息与配置会对不上。
+        val config = readRuntimeConfig()
+        publishUsage(buildPreparedMessages(config), config)
     }
     /**
      * 清空当前对话（`/clear`）。
@@ -3543,6 +3584,7 @@ class ChatViewModel(
                     summary = summary,
                     coveredCount = end,
                     createdAt = System.currentTimeMillis(),
+                    coveredTokens = TokenEstimator.estimate(slice),
                 )
                 tokenCache.reset()
                 _state.update { it.copy(compacted = compacted) }

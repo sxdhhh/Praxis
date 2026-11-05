@@ -81,6 +81,16 @@ fun SummaryDivider(
     /** 点「看全文」时打开弹窗（就地展开之外的备选，摘要很长时用）。 */
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 撤销本次压缩（null = 不提供）。
+     *
+     * ## 为什么需要撤销入口
+     *
+     * 压缩是**有损**的，而触发它的时机（上下文接近上限、内存压力）
+     * 往往是自动的 —— 用户可能在没同意的情况下丢掉正用着的细节。
+     * 没有撤销时唯一的补救是「重新说一遍」，等于再花一次钱。
+     */
+    onUndo: (() -> Unit)? = null,
 ) {
     // ## 就地折叠/展开（2026-11-05）
     //
@@ -152,9 +162,24 @@ fun SummaryDivider(
         }
         Spacer(Modifier.height(2.dp))
         Text(
-            // 两个数字一起说清「发生了什么」：折叠了多少条、压成了多少 token。
-            text = "以上 ${compacted.coveredCount} 条已折叠为摘要（约 $tokensLabel token）" +
-                if (expanded) " · 点上方收起" else " · 点上方展开",
+            // ## 从「压成了多少」改成「净省了多少」（2026-11-06）
+            //
+            // 旧文案只报摘要自身的 token 数。用户真正关心的是**这次压缩
+            // 省了多少上下文** —— 而那要减去摘要本身的开销。
+            //
+            // 净收益可能为负（只折叠了两条短消息时摘要反而更长）。
+            // 这种情况必须如实显示：用户会疑惑「压完怎么更大了」，
+            // 而答案正是「这次压得不值」。掩盖负值会让他失去判断依据。
+            text = if (compacted.coveredTokens > 0) {
+                val saved = compacted.savedTokens
+                val sign = if (saved >= 0) "省" else "多占"
+                val abs = kotlin.math.abs(saved)
+                "以上 ${compacted.coveredCount} 条已折叠，$sign 约 $abs token" +
+                    if (expanded) " · 点上方收起" else " · 点上方展开"
+            } else {
+                "以上 ${compacted.coveredCount} 条已折叠为摘要（约 $tokensLabel token）" +
+                    if (expanded) " · 点上方收起" else " · 点上方展开"
+            },
             style = MiuixTheme.textStyles.footnote2,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             textAlign = TextAlign.Center,
@@ -179,13 +204,25 @@ fun SummaryDivider(
                             .padding(12.dp),
                     )
                 }
-                // 全文弹窗保留：摘要很长时，360dp 高的就地面板看不完整，
-                // 弹窗能给出更大的阅读面积。
-                TextButton(
-                    text = "看全文",
-                    onClick = onClick,
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                )
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                    // 全文弹窗保留：摘要很长时，360dp 高的就地面板看不完整，
+                    // 弹窗能给出更大的阅读面积。
+                    TextButton(
+                        text = "看全文",
+                        onClick = onClick,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (onUndo != null) {
+                        TextButton(
+                            text = "撤销压缩",
+                            onClick = onUndo,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
             }
         }
     }
