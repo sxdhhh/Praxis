@@ -218,6 +218,55 @@ class ContextCompactorTest {
         assertTrue(result[1].text.contains("摘要"))
     }
 
+    /**
+     * 第 8 项：上下文 = 摘要 + **摘要之后**的全部消息（一起包含，不是单独注入）。
+     *
+     * 用户原话：「给 ai 的上下文应该是摘要之后以及摘要一起包含在内
+     * 而不是单独注入摘要」。
+     *
+     * 这条测试把那个语义钉住：
+     *  - 被折叠的 2 条不再出现；
+     *  - **未被折叠的 2 条必须还在**（旧缺陷若把摘要当唯一历史就会丢掉它们）；
+     *  - 摘要排在 system 之后、对话之前。
+     */
+    @Test
+    fun `摘要与摘要之后的消息一起包含`() {
+        val messages = listOf(
+            msg(ChatRole.System, "系统"),
+            msg(ChatRole.User, "旧1"),
+            msg(ChatRole.Assistant, "旧2"),
+            msg(ChatRole.User, "新1"),
+            msg(ChatRole.Assistant, "新2"),
+        )
+        val result = CompactionApplier.apply(
+            messages,
+            CompactedContext(summary = "摘要", coveredCount = 2),
+        )
+        // 系统 + 摘要 + 未被折叠的 2 条
+        assertEquals(4, result.size)
+        assertEquals("系统", result[0].text)
+        assertTrue("摘要应紧跟 system", result[1].text.contains("摘要"))
+        assertEquals("新1", result[2].text)
+        assertEquals("新2", result[3].text)
+        // 被折叠的不该再发送（信息已在摘要里）。
+        assertTrue(result.none { it.text == "旧1" || it.text == "旧2" })
+    }
+
+    /**
+     * 第 10 项：**没有摘要时就是之前所有上下文**（一条都不丢）。
+     */
+    @Test
+    fun `没有摘要时保留全部上下文`() {
+        val messages = listOf(
+            msg(ChatRole.System, "系统"),
+            msg(ChatRole.User, "u1"),
+            msg(ChatRole.Assistant, "a1"),
+            msg(ChatRole.User, "u2"),
+        )
+        val result = CompactionApplier.apply(messages, CompactedContext.None)
+        assertEquals("摘要未生效时必须原样返回", messages, result)
+    }
+
     // ── 双阈值判定（上游 shouldGenerateSummary）──────────────────────
 
     @Test
