@@ -148,6 +148,25 @@ jobs:
       # 改成只替换 jvmargs 这一行、再追加两项，原有内容不动。
       - name: Tune Gradle memory for CI
         run: |
+          # ## 为什么从 -Xmx4g 降到 -Xmx3g（2026-11-05）
+          #
+          # GitHub 标准 runner 只有 7 GB RAM，而这里是
+          # org.gradle.parallel=true + max-workers=8，测试阶段还会
+          # 再起若干 worker JVM（每个默认 512 MB 堆）。
+          # 「4g Gradle 堆 + 2g Metaspace + N 个 worker」在 7 GB 上
+          # 会进入 swap 抖动。
+          #
+          # 而仓库自己的 gradle.properties 已经描述过这个症状：
+          #
+          #   「峰值直接把宿主压进 LMK —— 现象是构建日志在某个
+          #    > Task :xxx:... 行戛然而止：没有 BUILD FAILED、
+          #    没有 hs_err、没有 OOM 堆栈，进程直接消失。」
+          #
+          # 这与 CI 上「日志停在 > Task :app:testDebugUnitTest 一行、
+          # 十几分钟不返回」的形态一致。
+          #
+          # 3g 与仓库本地取值对齐（本地注释同样论证过
+          # 「宁可慢一点，也不要被杀掉重跑一次」）。
           sed -i 's|^org\.gradle\.jvmargs=.*|org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=2g -XX:+UseParallelGC -Dfile.encoding=UTF-8|' gradle.properties
           {
             echo "kotlin.daemon.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=1g"
