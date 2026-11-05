@@ -2104,6 +2104,26 @@ class ChatViewModel(
                                 // （模型切到工具模式前会结束这句话），之后再来的
                                 // delta 属于**下一段**输出，不能接在这段后面。
                                 sealStreamText(assistantId, buffer.toString())
+                                // ## 思考也要在这一刻封存（2026-11-05）
+                                //
+                                // 真机反馈：「思考夹在工具调用中间就会出现消失」。
+                                //
+                                // 根因：上面那行只封了**正文**，思考缓冲 `reasoningBuffer`
+                                // 没有封。工具跑完后模型会**续写下一段**，那段往往又带新的
+                                // `ReasoningDelta`，于是：
+                                //
+                                //   工具前的思考（未封存）-> 被新思考覆盖 -> 从界面消失
+                                //
+                                // 而 `sealReasoning` 只在 `Done` / 失败路径调，
+                                // 也就是说「思考 -> 工具 -> 思考」这种形态里第一段必丢。
+                                //
+                                // 修法：与正文同一时刻封存思考，并清空缓冲。
+                                // 清空是必需的 —— 否则续写阶段的思考会接在第一段后面，
+                                // 变成一段混合了两次推理的长文本，用户无法分辨哪段属于哪次。
+                                if (reasoningBuffer.isNotEmpty()) {
+                                    sealReasoning(assistantId, reasoningBuffer.toString())
+                                    reasoningBuffer.setLength(0)
+                                }
                                 // ## 参数收齐：确保每张卡都已经存在且显示「执行中」（2026-11-05）
                                 //
                                 // 真机反馈：「工具执行中的状态我没看到啊」。

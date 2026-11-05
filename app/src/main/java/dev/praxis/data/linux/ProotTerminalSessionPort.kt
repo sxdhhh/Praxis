@@ -728,6 +728,26 @@ class ProotTerminalSessionPort(
                 val code = line.removePrefix(SENTINEL).removePrefix(":").trim().toIntOrNull() ?: 0
                 return@withContext ReadOutcome(code, false)
             }
+
+            // ## 回车协议标记绝不能回传给 AI（2026-11-05）
+            //
+            // `pumpStream` 收到 CR 时会往 ScreenTap.pending 塞一条
+            // `CR_MARKER`，让终端 UI 知道「这一行是回车重写，不是新行」。
+            //
+            // 上一版只在 `ScreenTap.lines`（屏幕快照）里过滤了它，
+            // 却故意保留在 `pending`（命令消费队列）。而这里正是从
+            // pending 取行并转成工具输出的路径：
+            //
+            //   持久终端 -> pending -> readUntilSentinel -> onChunk -> AI 上下文
+            //
+            // 于是 AI 仍会看到 `PRAXIS_CR`，并把它误当成命令输出继续推理。
+            // 用户反馈的正是这个第二条路径。
+            //
+            // CR 是**显示控制信号**，不是命令语义、更不是模型上下文；
+            // 在这里直接跳过。DEAD_MARKER / SENTINEL 在上面已分别处理，
+            // 所以不会影响退出码、会话死亡诊断或屏幕上的回车渲染。
+            if (line == CR_MARKER) continue
+
             onChunk?.invoke(line + "\n")
         }
         @Suppress("UNREACHABLE_CODE")
