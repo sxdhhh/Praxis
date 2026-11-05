@@ -365,3 +365,35 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.room.testing)
 }
+
+// ─────────────────────────────────────────────────────────────
+// 单测进度日志 + 超时闸门（2026-11-05）
+//
+// ## 为什么需要
+//
+// `:app:testDebugUnitTest` 在 CI 上卡住过 17+ 分钟不结束
+// （正常 0.3~1.4 分钟）。而 Gradle **默认既不打印「正在跑哪条测试」，
+// 也不给测试任务设超时** —— 于是只能看到一个不动的进度条：
+// 既不知道卡在哪，也不知道要等多久。
+//
+// 这两项配置把「卡住」变成「有界的失败 + 明确的嫌疑名单」：
+//
+//  1. `testLogging.events("started")` 让日志里出现每条测试的开跑行。
+//     卡住时，**最后一条 started 就是嫌疑**。
+//  2. Gradle 的 `Test.timeout` 到点直接判失败，不再无限等。
+//     挂住的 run 会占住并发队列，把后面的 run 全堵在 pending ——
+//     这个代价在本项目上已经真实发生过两次（29 分钟 / 17 分钟）。
+//
+// 4 分钟是宽裕值：全过时这一个任务约 1 分钟。
+// ─────────────────────────────────────────────────────────────
+tasks.withType<Test>().configureEach {
+    timeout.set(java.time.Duration.ofMinutes(4))
+    testLogging {
+        // `started` 是诊断挂起的关键事件；failed/skipped 让失败一目了然。
+        events("started", "failed", "skipped")
+        // 异常栈要给全 —— 静态护栏断言失败时，报错信息本身就是诊断材料。
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showStandardStreams = false
+    }
+}
+
