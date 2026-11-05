@@ -27,7 +27,55 @@ data class ToolExecution(
      * 提前返回（未知工具 / 权限不足）时为 0：没有真正执行。
      */
     val elapsedMs: Long = 0L,
-)
+) {
+    /**
+     * 呈现层用的状态。
+     *
+     * ## 为什么要从 `result` 里派生，而不是让 UI 自己判 `isError`
+     *
+     * `isError` 只回答「成没成」。而工具卡要显示的是「卡在哪个阶段」——
+     * 「参数错了」和「执行到一半出错」在界面上应当是**不同的样子**
+     * （前者是黄色提示，后者要提醒用户检查副作用）。
+     *
+     * 这个派生放在 `ToolExecution` 而不是 UI：UI 拿不到 `stage` 之外的
+     * 上下文（比如是否超时），而它们都属于「呈现依据」。
+     */
+    val presentState: ToolPresentState
+        get() = when {
+            !result.isError -> ToolPresentState.Success
+            result.stage == ToolFailureStage.Denied -> ToolPresentState.Denied
+            result.stage == ToolFailureStage.Argument -> ToolPresentState.InvalidArguments
+            // 执行中/输出阶段的失败就是「执行出错」，但要在卡上标注可能已产生副作用。
+            else -> ToolPresentState.Failed(result.stage ?: ToolFailureStage.Execution)
+        }
+}
+
+/**
+ * 工具卡的呈现状态（与执行结果分开）。
+ *
+ * ## 为什么 UI 需要一个独立的枚举
+ *
+ * 直接从 `content` 字符串里做 `contains("权限")` 之类的判断是脆的：
+ * 文案一改就失效，且**不会报错**，只是卡片突然都变成同一种颜色。
+ * 枚举把「呈现」与「文案」解耦。
+ */
+sealed interface ToolPresentState {
+    /** 成功。 */
+    data object Success : ToolPresentState
+
+    /** 权限被拒（能换方案或提权，不是「坏了」）。 */
+    data object Denied : ToolPresentState
+
+    /** 参数不合法（模型自己能改）。 */
+    data object InvalidArguments : ToolPresentState
+
+    /**
+     * 执行失败。
+     *
+     * @param stage 失败位置。UI 据此决定是否显示「可能已产生副作用」的提醒。
+     */
+    data class Failed(val stage: ToolFailureStage) : ToolPresentState
+}
 
 /**
  * 工具执行器。
@@ -74,9 +122,14 @@ class ToolExecutor(
         val tool = registry.find(invocation.name)
             ?: return ToolExecution(
                 invocation = invocation,
+                // 未知工具：模型给错了名字，属于「参数/契约」错误 ——
+                // 改个名字就能成功，且此前不可能有任何副作用。
                 result = ToolResult(
-                    content = "未知工具：${invocation.name}。可用工具：${registry.names().joinToString(", ")}",
+                    content = "未知工具：${invocation.name}。" +
+                        "可用工具：${registry.names().joinToString(", ")}\n" +
+                        ToolFailureStage.Argument.recoveryHint,
                     isError = true,
+                    stage = ToolFailureStage.Argument,
                 ),
                 decision = PermissionDecision.FORBID,
             )
@@ -100,8 +153,10 @@ class ToolExecutor(
                 result = ToolResult(
                     // 明确告诉模型「被拒了」而不是「失败了」，它的下一步完全不同：
                     // 被拒应该换方案或请求提权，失败才应该重试。
-                    content = "权限不足：${invocation.name} 需要 $required，当前为 ${context.tier}。已拒绝执行。",
+                    content = "权限不足：${invocation.name} 需要 $required，当前为 ${context.tier}。已拒绝执行。\n" +
+                        ToolFailureStage.Denied.recoveryHint,
                     isError = true,
+                    stage = ToolFailureStage.Denied,
                 ),
                 decision = decision,
             )
@@ -113,14 +168,25 @@ class ToolExecutor(
         } catch (arg: ToolArgumentException) {
             // 参数错误是「模型可以自己纠正」的，必须原样回传可读描述，
             // 不能包装成「工具执行异常」——那会让模型以为是工具坏了。
-            ToolResult(content = "参数错误：${arg.message}", isError = true)
+            ToolResult(
+                content = "参数错误：${arg.message}\n" + ToolFailureStage.Argument.recoveryHint,
+                isError = true,
+                stage = ToolFailureStage.Argument,
+            )
         } catch (cancel: CancellationException) {
             // 取消必须原样抛出，否则协程的取消语义会被吞掉。
             throw cancel
         } catch (e: Exception) {
+            // ## 这里是 [ToolFailureStage.Execution]
+            //
+            // 关键区分：**可能已经产生副作用**。例如写文件的工具在 `write()`
+            // 成功、但之后的 `fsync` 抛错，文件其实已经写进去了。
+            // 因此提示里明确要求「重试前先确认实际状态」，而不是「重试即可」。
             ToolResult(
-                content = "工具执行异常：${e.message ?: e::class.java.simpleName}",
+                content = "工具执行异常：${e.message ?: e::class.java.simpleName}\n" +
+                    ToolFailureStage.Execution.recoveryHint,
                 isError = true,
+                stage = ToolFailureStage.Execution,
             )
         }
 
