@@ -52,6 +52,30 @@ import org.junit.Test
 class ModelProfilesTest {
 
     /**
+     * 每条用例的超时闸门。
+     *
+     * ## 为什么必须有它（2026-11-05）
+     *
+     * Gradle **默认不给测试任务设超时**，所以一条卡住的用例会让整个
+     * CI 单测步骤无限等下去。这个项目上真的发生了两次：
+     *
+     * ```
+     *   #169  29.0 分钟   <- 真 DataStore 版本
+     *   #171  >20 分钟    <- 修 id 之后
+     * ```
+     *
+     * 而正常的单测步骤只要 **0.3~1.4 分钟**。代价不只是慢：
+     * 挂住的 run 会占住并发队列，把后面的 run 全堵在 `pending`。
+     *
+     * 加了这个规则之后，卡住会**失败**而不是**挂住** ——
+     * 失败带堆栈（能直接看到卡在哪一行），挂住什么都没告诉你。
+     *
+     * 15 秒是宽裕值：本文件最快的一条不到 10 毫秒。
+     */
+    @get:org.junit.Rule
+    val timeout: org.junit.rules.Timeout = org.junit.rules.Timeout.seconds(15)
+
+    /**
      * 最小内存 DataStore。
      *
      * `edit {}` 是 `DataStore` 的扩展函数，内部调 `updateData`，
