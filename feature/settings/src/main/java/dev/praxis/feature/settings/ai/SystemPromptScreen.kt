@@ -45,11 +45,24 @@ fun SystemPromptScreen(
     current: String,
     onSave: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** 当前生效的人格文本（用户改过就是用户的，否则是出厂人格）。 */
+    personaCurrent: String = "",
+    /** 用户是否改过人格（决定显示「恢复出厂」还是「保存」）。 */
+    personaEdited: Boolean = false,
+    /** 出厂人格原文，用于「恢复出厂」与占位提示。 */
+    personaBuiltin: String = "",
+    /** 保存人格；空串 = 恢复出厂人格。 */
+    onSavePersona: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     // 草稿：跟随外部值重建（保存成功后外部值变，草稿与之一致）。
     var draft by remember(current) { mutableStateOf(current) }
     val dirty = draft != current
+
+    // 人格草稿：初值取「当前生效」的那份（改过就用改过的，否则是出厂）。
+    // 这样用户点进来看得到实际在用的文本，而不是一片空白。
+    var personaDraft by remember(personaCurrent) { mutableStateOf(personaCurrent) }
+    val personaDirty = personaDraft != personaCurrent
 
     SettingsList(modifier = modifier) {
         item { Spacer(Modifier.height(12.dp)) }
@@ -137,6 +150,74 @@ fun SystemPromptScreen(
                                 onClick = {
                                     draft = ""
                                     scope.launch { onSave("") }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 内置人格（第二层）────────────────────────────
+        //
+        // 用户的要求：「可以修改内置人格的系统提示词，就放在系统提示词下面的」。
+        // 所以这一节紧跟在用户规则之后，且**明确说明它是第二优先级** ——
+        // 否则用户会以为自己改的是最高优先级那份。
+        item { SmallTitle("内置人格（第二优先级）") }
+        item {
+            Card(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(
+                        text = "这是 Praxis 的默认身份描述。改它只影响「它怎么介绍自己」，" +
+                            "不会动上面那份最高优先级规则。",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    TextField(
+                        value = personaDraft,
+                        onValueChange = { personaDraft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "例如：你是 Praxis，一个务实的 Android AI 助手……",
+                        useLabelAsPlaceholder = true,
+                        minLines = 4,
+                        maxLines = 10,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = if (personaEdited) {
+                            "当前用的是你改过的版本（${personaDraft.length} 字符）。"
+                        } else {
+                            "当前用的是出厂人格。改动会在下一轮对话生效。"
+                        },
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        TextButton(
+                            text = if (personaDirty) "保存" else "已保存",
+                            enabled = personaDirty,
+                            modifier = Modifier.weight(1f),
+                            onClick = { scope.launch { onSavePersona(personaDraft) } },
+                        )
+                        // ## 为什么「恢复出厂」要单独一个按钮
+                        //
+                        // 人格与用户规则分开存（见 SystemPromptSettings.persona），
+                        // 所以「清空人格」不会误清用户规则；反过来，
+                        // 用户想把人格改回原文时，不该逼他自己去删干净 ——
+                        // 一键写回出厂文本更明确，也不会留下半截残留。
+                        if (personaEdited) {
+                            TextButton(
+                                text = "恢复出厂",
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    personaDraft = personaBuiltin
+                                    scope.launch { onSavePersona("") }
                                 },
                             )
                         }

@@ -22,11 +22,22 @@ fun SystemPromptRoute(
     modifier: Modifier,
 ) {
     val current by repository.systemPrompt.collectAsState(initial = "")
+    // 人格：库里存的是「用户改写值」（空 = 没改过）。
+    val personaStored by repository.personaPrompt.collectAsState(initial = "")
     val scope = rememberCoroutineScope()
+
+    // 界面要显示的是**实际生效**的那份：没改过就显示出厂人格，
+    // 否则输入框一片空白，用户无法基于原文微调、也看不出当前在用的是什么。
+    val personaEffective = personaStored.takeIf { it.isNotBlank() }
+        ?: dev.praxis.core.ai.SystemPromptSettings.BUILTIN_PERSONA
 
     SystemPromptScreen(
         current = current,
         onSave = { text -> scope.launch { repository.setSystemPrompt(text) } },
+        personaCurrent = personaEffective,
+        personaEdited = personaStored.isNotBlank(),
+        personaBuiltin = dev.praxis.core.ai.SystemPromptSettings.BUILTIN_PERSONA,
+        onSavePersona = { text -> scope.launch { repository.setPersonaPrompt(text) } },
         modifier = modifier,
     )
 }
