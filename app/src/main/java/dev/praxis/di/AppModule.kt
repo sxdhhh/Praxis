@@ -366,6 +366,27 @@ val appModule = module {
                     dev.praxis.data.shell.HostShellChannelsTool(hostShell),
                 )
             }
+
+            // ## 长期记忆改成「AI 自己搜/自己写」（2026-11-05）
+            //
+            // 用户原话：「长期记忆应该让 ai 自己去搜而不是直接放提示词里。
+            // 每轮先搜记忆 -> 开工 -> 写回记忆」。
+            //
+            // 旧做法是每轮把 recall(最后一句) 拼进 system，问题是：
+            //  - 搜得太早：发送那一刻还不知道模型这轮要做什么；
+            //  - 搜错了没有补救：模型无法要求「换一批」。
+            //
+            // 改为两个工具后，检索时机与 query 由模型掌握。
+            // 与聊天层共用**同一个** MemoryPortImpl：
+            // 分开建两份实例会出现「工具写进去的记忆，附件面板看不到」。
+            run {
+                val memoryPort = get<dev.praxis.feature.chat.MemoryPort>()
+                val queryPort = dev.praxis.data.memory.MemoryPortQueryAdapter(memoryPort)
+                registerAll(
+                    dev.praxis.data.memory.SearchMemoryTool(queryPort),
+                    dev.praxis.data.memory.SaveMemoryTool(queryPort),
+                )
+            }
         }
     }
     single { ToolExecutor(get<ToolRegistry>()) }
