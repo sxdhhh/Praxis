@@ -429,8 +429,40 @@ fun PraxisApp(
                 // 这一段拼接在**取的时候**做（每轮现取），
                 // 所以用户切卡、改全局规则，下一句都立刻生效。
                 systemPromptProvider = {
-                    val userRules = settingsRepository.systemPrompt.first().trim()
-                    val characterPrompt = characterRepository.activePrompt().trim()
+                    // ## 两个来源必须**各自独立**失败（2026-11-07）
+                    //
+                    // 原来两条读取写在同一个 lambda 里、共享一次求值：
+                    // `activePrompt()` 一旦抛异常，**用户规则也一起丢** ——
+                    // 因为整个 lambda 的结果只被上层一个 runCatching 包着。
+                    //
+                    // 表现就是「什么都没注入」，而用户规则明明还在库里。
+                    //
+                    // 现在拆成两段：各自的失败只影响自己，另一段照常生效，
+                    // 用户至少保有其中一份。
+                    //
+                    // ## 失败必须留痕
+                    //
+                    // 静默吞异常会让下次排查又从零开始。2026-11-07 排查
+                    // 「提示词没注入」时最痛的一点就是：DataStore 里明明有值，
+                    // 却没有任何日志能说明链路走到了哪一步、在哪一步变空。
+                    val userRules = runCatching { settingsRepository.systemPrompt.first() }
+                        .onFailure {
+                            dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
+                                "prompt",
+                                "读取用户规则失败：${it.message ?: it::class.simpleName}",
+                            )
+                        }
+                        .getOrNull().orEmpty().trim()
+
+                    val characterPrompt = runCatching { characterRepository.activePrompt() }
+                        .onFailure {
+                            dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
+                                "prompt",
+                                "读取角色卡失败：${it.message ?: it::class.simpleName}",
+                            )
+                        }
+                        .getOrNull().orEmpty().trim()
+
                     when {
                         userRules.isEmpty() -> characterPrompt
                         characterPrompt.isEmpty() -> userRules

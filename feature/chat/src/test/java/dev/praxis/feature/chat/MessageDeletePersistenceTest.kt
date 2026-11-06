@@ -3,6 +3,7 @@ package dev.praxis.feature.chat
 import dev.praxis.core.ai.AiProvider
 import dev.praxis.core.ai.AiStreamEvent
 import dev.praxis.core.ai.ChatRequest
+import dev.praxis.core.ai.ChatRole
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -101,21 +102,37 @@ class MessageDeletePersistenceTest {
         override suspend fun updateSessionTitle(sessionId: String, title: String) = Unit
     }
 
-    private class SilentProvider : AiProvider {
-        override val displayName: String = "silent"
+    /**
+     * 记录每一次发给上游的请求。
+     *
+     * 删除历史这件事**必须从模型侧验证**：`history` 是私有的，
+     * 而「界面上删掉了」与「模型不再收到它」是两件事 ——
+     * 旧实现恰好在这两者之间失配（气泡删了、history 没删干净）。
+     */
+    private class RecordingProvider : AiProvider {
+        val requests = mutableListOf<ChatRequest>()
+
+        override val displayName: String = "recording"
 
         override fun stream(request: ChatRequest): Flow<AiStreamEvent> = flow {
+            requests += request
             emit(AiStreamEvent.Delta("好的"))
             emit(AiStreamEvent.Done(finishReason = "stop"))
         }
     }
 
-    private fun vm(persistence: ChatPersistence) = ChatViewModel(
-        provider = SilentProvider(),
-        model = "test",
-        chatRepository = persistence,
-        persistDispatcher = dispatcher,
-    )
+    private fun vmWith(persistence: ChatPersistence): Pair<ChatViewModel, RecordingProvider> {
+        val provider = RecordingProvider()
+        val model = ChatViewModel(
+            provider = provider,
+            model = "test",
+            chatRepository = persistence,
+            persistDispatcher = dispatcher,
+        )
+        return model to provider
+    }
+
+    private fun vm(persistence: ChatPersistence): ChatViewModel = vmWith(persistence).first
 
     @Before
     fun setUp() {
@@ -196,5 +213,52 @@ class MessageDeletePersistenceTest {
         advanceUntilIdle()
 
         assertEquals("取消删除不该动库", before, p.rows.size)
+    }
+
+    /**
+     * 连说两次「继续」时，删**第一条**不能命中第二条（2026-11-07）。
+     *
+     * ## 旧实现怎么错的
+     *
+     * `history.indexOfLast { role 匹配 && 内容匹配 }` —— 从后往前找第一条内容
+     * 相同的。两条「继续」内容完全一样，于是删**第一条**时命中的是**第二条**：
+     * 界面上少的是第一条，模型那边少的是第二条，两边历史从此错位。
+     *
+     * 用户看不到任何异常 —— 下一轮回答只是「莫名变短」。
+     *
+     * ## 为什么必须从模型侧验证
+     *
+     * 「气泡删掉了」与「模型不再收到它」是两件事，而 bug 正好在两者之间。
+     * 所以这里发第三条消息，读 provider 实际收到的 history。
+     */
+    @Test
+    fun deletingFirstDuplicateRemovesTheRightHistoryEntry() = runTest {
+        val p = InMemoryPersistence()
+        val (model, provider) = vmWith(p)
+
+        model.onInputChange("继续")
+        model.send()
+        advanceUntilIdle()
+        model.onInputChange("继续")
+        model.send()
+        advanceUntilIdle()
+
+        val users = model.state.value.bubbles.filter { it.role == BubbleRole.User }
+        assertEquals("应有两条用户消息", 2, users.size)
+
+        model.onMessageAction(users.first().id, MessageAction.Delete)
+        model.confirmDeleteMessage()
+        advanceUntilIdle()
+
+        assertEquals("界面上应只剩一条", 1, model.state.value.bubbles.count { it.role == BubbleRole.User })
+
+        // 再发一句，让 provider 收到「删除之后」的真实 history。
+        model.onInputChange("第三句")
+        model.send()
+        advanceUntilIdle()
+
+        val sent = provider.requests.last().messages
+        val continues = sent.count { it.role == ChatRole.User && it.text == "继续" }
+        assertEquals("history 里应只剩一条「继续」", 1, continues)
     }
 }

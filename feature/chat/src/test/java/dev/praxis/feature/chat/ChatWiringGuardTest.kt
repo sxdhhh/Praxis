@@ -1,6 +1,7 @@
 package dev.praxis.feature.chat
 
 import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -760,5 +761,63 @@ class ChatWiringGuardTest {
         assertTrue("startStream(assistantId) 应在协程内", sendBlock.contains("startStream(assistantId)"))
         assertFalse("落盘不应再用 launchPersist（异步会与后续落盘抢 orderIndex）", sendBlock.contains("launchPersist {"))
     }
-}
 
+    /**
+     * 提示词的两个来源必须**各自独立**失败（2026-11-07）。
+     *
+     * ## 这条护栏防的是什么
+     *
+     * 原来两条读取写在同一个 lambda 里、共享一次求值，整个结果只被上层
+     * 一个 runCatching 包着。于是 characterRepository.activePrompt() 一抛异常，
+     * **用户规则也一起丢** —— 表现是「什么都没注入」，而用户规则明明还在库里。
+     *
+     * 拆分之后，任何一边坏掉，另一边照常生效。
+     */
+    @Test
+    fun promptSourcesFailIndependently() {
+        val raw = read("app/src/main/java/dev/praxis/ui/PraxisApp.kt")
+        val block = raw
+            .substringAfter("systemPromptProvider = {")
+            .substringBefore("personaProvider = {")
+            // 剥注释：上面那段 KDoc 会引用旧写法当反例，不剥必然误报。
+            .lines()
+            .filterNot { it.trimStart().startsWith("//") || it.trimStart().startsWith("*") }
+            .joinToString("\n")
+
+        assertTrue(
+            "用户规则应单独 runCatching",
+            block.contains("runCatching { settingsRepository.systemPrompt.first() }"),
+        )
+        assertTrue(
+            "角色卡应单独 runCatching（不能再与用户规则共享一次求值）",
+            block.contains("runCatching { characterRepository.activePrompt() }"),
+        )
+        assertTrue("用户规则失败要留痕", block.contains("读取用户规则失败"))
+        assertTrue("角色卡失败要留痕", block.contains("读取角色卡失败"))
+    }
+
+    /**
+     * 读配置失败不许静默变成空串（2026-11-07）。
+     *
+     * ## 为什么按数量断言
+     *
+     * 漏一处 onFailure 就是漏一处可诊断性，而这种漏**编译期完全看不出来**、
+     * 运行时也只是「行为有点怪」。用「runCatching 数 == onFailure 数」把
+     * 「每加一个读配置的地方都得配留痕」变成硬约束。
+     */
+    @Test
+    fun configReadFailuresAreNotSilent() {
+        val raw = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatViewModel.kt")
+        val block = raw
+            .substringAfter("private suspend fun readRuntimeConfig()")
+            .substringBefore("private fun noteConfigFailure")
+            .lines()
+            .filterNot { it.trimStart().startsWith("//") || it.trimStart().startsWith("*") }
+            .joinToString("\n")
+
+        val catches = Regex("runCatching \\{").findAll(block).count()
+        val failures = Regex("onFailure \\{").findAll(block).count()
+        assertEquals("readRuntimeConfig 里应有 4 处 runCatching", 4, catches)
+        assertEquals("每处 runCatching 都要配 onFailure", catches, failures)
+    }
+}
