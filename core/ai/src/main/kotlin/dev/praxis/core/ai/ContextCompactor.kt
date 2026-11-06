@@ -389,17 +389,34 @@ object ContextCompactor {
      * 「英文技术讨论 + 一个中文词」误判成中文语境。
      * 30 个汉字是一个短句的量级，低于它基本可以认为只是零星出现。
      */
+    /** 判中文的汉字占比阈值（R12）。见 [detectUseEnglish] 的说明。 */
+    private const val CJK_RATIO_THRESHOLD = 0.15
+
     fun detectUseEnglish(messages: List<ChatMessage>): Boolean {
         var cjk = 0
+        var total = 0
         for (message in messages) {
             for (ch in message.text) {
-                if (ch.code in 0x4E00..0x9FFF) {
-                    cjk++
-                    if (cjk >= 30) return false
-                }
+                total++
+                if (ch.code in 0x4E00..0x9FFF) cjk++
             }
         }
-        return true
+        if (total == 0) return true
+        // ## 为什么按**占比**而不是绝对个数（2026-11-07，R12 修）
+        //
+        // 旧实现是「汉字数 >= 30 才判中文」。它有漏判：
+        //
+        //   请帮我把这段代码改成 Kotlin 并且补上单元测试
+        //
+        // 这是再典型不过的中文请求，却只有 19 个汉字 —— 判成英文。
+        // 于是摘要提示词走了英文模板，中文用户拿到一份英文摘要。
+        //
+        // 绝对个数的问题在于它不看分母：19 个汉字出现在 19 个字的句子里
+        // 是纯中文，出现在 500 字的英文讨论里则只是引用了几个词。
+        //
+        // 15% 的取值同时满足两侧：上面的句子约 54%，而
+        // 「fix the bug in build.gradle 请」约 3% —— 判英文。
+        return cjk.toDouble() / total < CJK_RATIO_THRESHOLD
     }
 
     /**

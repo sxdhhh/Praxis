@@ -207,10 +207,39 @@ jobs:
       #
       # 25 分钟是「比任何历史正常值都宽、又远小于 job 上限」的取值：
       # 真慢能过，真卡则快速给出失败。
+      # ## 为什么要显式列出 9 个纯 JVM 模块（2026-11-07，R12 补）
+      #
+      # testDebugUnitTest 是 **Android 插件**的任务名。纯 JVM 模块
+      # （praxis.kotlin.jvm）的任务叫 test —— 任务名匹配在它们身上直接落空，
+      # 不报错、不执行。
+      #
+      # 后果不是「少跑一点」，而是这 9 个模块的测试**从建立起从未在 CI 上
+      # 编译过**。攒出来的债：core:model 的测试里写了一个 Python 风格的
+      # chr(31)（Kotlin 根本没这个函数），core:ai 有两个编译错误 + 四个
+      # 一直失败的用例，长期无人发现。
+      #
+      # ## 为什么不用 ./gradlew test 一把梭
+      #
+      # test 会匹配**所有**模块 —— Android 模块也有一个聚合的 test
+      # （依赖 testDebugUnitTest + testReleaseUnitTest）。一把梭会让每个
+      # Android 模块的测试跑两遍（debug 与 release），CI 时间直接翻倍。
+      #
+      # 所以显式列出。代价是新增 JVM 模块时要记得加 ——
+      # 但漏加的后果会在「那个模块的测试从没跑过」时暴露，比时间翻倍可控。
       - name: Unit tests (library modules)
         run: |
-          timeout --signal=KILL 1500 ./gradlew testDebugUnitTest \
-            -x :app:testDebugUnitTest --stacktrace
+          timeout --signal=KILL 1500 ./gradlew \
+            testDebugUnitTest -x :app:testDebugUnitTest \
+            :core:ai:test \
+            :core:goal:test \
+            :core:linux:test \
+            :core:memory:test \
+            :core:model:test \
+            :core:plugin:test \
+            :core:terminal:test \
+            :core:tool:test \
+            :core:workflow:test \
+            --stacktrace
 
       # 逐个类跑 :app。任何一个出问题都算失败，但**不提前退出** ——
       # 要让其余类也跑完，这样一次 CI 就能拿到完整名单。
