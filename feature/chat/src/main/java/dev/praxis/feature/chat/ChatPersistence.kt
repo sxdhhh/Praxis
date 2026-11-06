@@ -133,6 +133,15 @@ interface ChatPersistence {
     suspend fun updateContextUsage(sessionId: String, used: Int, limit: Int) {}
 
     /**
+     * 读回上次持久化的上下文用量（R11）。
+     *
+     * null = 没有可用记录（从没写过 / 上限为 0）。
+     * 调用方应当**保留原值**而不是用 0 覆盖 —— 「不知道」与「用了 0」
+     * 是两件事，覆盖会让进度条在中途无故归零。
+     */
+    suspend fun loadContextUsage(sessionId: String): Pair<Int, Int>? = null
+
+    /**
      * 置顶 / 取消置顶。
      *
      * 单独一个方法而不是「读 SessionItem 改字段再整条写回」：

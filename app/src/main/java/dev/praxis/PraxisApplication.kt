@@ -7,6 +7,7 @@ import dev.praxis.core.data.log.PraxisTimberTree
 import dev.praxis.di.appModule
 import dev.praxis.di.networkModule
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.startKoin
@@ -112,6 +113,40 @@ class PraxisApplication : Application() {
             .get<dev.praxis.data.memory.MemoryMonitor>()
         monitor.start(appScope)
         memoryMonitor = monitor
+
+        // ## 启动自检（2026-11-07，R11）
+        //
+        // 有几样东西坏掉时**不会报错**，只表现为「AI 行为有点怪」：
+        // 设置库读不出来（于是系统提示词为空）、DataStore 文件损坏、
+        // 用户规则被清空。用户能提供的信息只有「它今天不太对」。
+        //
+        // 所以开机时主动查一次，把结论写进日志页 ——
+        // 下一次排查就有起点，不必再从「DataStore 里到底有没有值」查起。
+        //
+        // 放在 MemoryMonitor 之后：自检要读一次 DataStore（磁盘 IO），
+        // 不该挡在首屏之前。它只跑一次，不轮询。
+        appScope.launch {
+            runCatching {
+                org.koin.core.context.GlobalContext.get()
+                    .get<dev.praxis.core.data.settings.SettingsRepository>()
+                    .systemPrompt
+                    .first()
+            }
+                .onSuccess { prompt ->
+                    val verdict = if (prompt.isBlank()) {
+                        "系统提示词为空 —— 模型只会收到内置人格（首次启动时正常）"
+                    } else {
+                        "系统提示词正常（" + prompt.length + " 字）"
+                    }
+                    dev.praxis.ui.design.diagnostics.UiDiagnostics.note("startup", verdict)
+                }
+                .onFailure { e ->
+                    dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
+                        "startup",
+                        "系统提示词读取失败：" + (e.message ?: e::class.simpleName),
+                    )
+                }
+        }
 
         // 轮询侧的「清可重建缓存」。
         //
