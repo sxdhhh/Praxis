@@ -79,6 +79,21 @@ interface SessionDao {
     suspend fun touch(id: String, ts: Long)
 
     /**
+     * 写入上下文用量（2026-11-07，R10）。
+     *
+     * ## 为什么必须是 UPDATE 而不是 upsert
+     *
+     * upsert 用的是 `OnConflictStrategy.REPLACE`，语义是「先删后插」。
+     * 而 messages 对 sessions 有 `ON DELETE CASCADE` ——
+     * 用 upsert 写一个**使用量统计**，会把该会话的聊天记录整个删光。
+     *
+     * 这个坑在本文件里已经踩过一次（见 [setPinned] 的 KDoc），
+     * 所以这里刻意写成单条 UPDATE。
+     */
+    @Query("UPDATE sessions SET contextUsed = :used, contextLimit = :limit WHERE id = :id")
+    suspend fun setContextUsage(id: String, used: Int, limit: Int)
+
+    /**
      * 只改标题。
      *
      * ## 为什么是 UPDATE 而不是 upsert（第三次强调，同一个坑）

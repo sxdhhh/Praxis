@@ -69,6 +69,10 @@ val appModule = module {
                 // 破坏性迁移等于清空用户的对话。迁移里只回填摘要行的
                 // createdAt，其余行的时间原样保留。
                 PraxisDatabase.MIGRATION_9_10,
+                // v11：sessions 加 contextUsed / contextLimit（R10）。
+                // 两个默认 0 的列 —— 老数据等价于「还不知道用量」，
+                // 与旧行为一致（旧实现在重启后同样是 0）。
+                PraxisDatabase.MIGRATION_10_11,
             )
             .build()
     }

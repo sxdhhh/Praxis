@@ -156,6 +156,10 @@ class RoomChatPersistence(
      * 不覆写会**编译通过、运行不报错**，只是删除不落盘 ——
      * 这是最难发现的一类缺陷：界面完全正常，只有重启才暴露。
      */
+    override suspend fun updateContextUsage(sessionId: String, used: Int, limit: Int) {
+        repository.updateContextUsage(sessionId, used, limit)
+    }
+
     override suspend fun deleteMessage(messageId: Long) {
         repository.deleteMessage(messageId)
     }

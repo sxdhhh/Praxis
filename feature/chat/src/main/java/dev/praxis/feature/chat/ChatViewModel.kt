@@ -205,6 +205,20 @@ class ChatViewModel(
     }
 
     /** 对话历史（送给模型的原文，不含 UI 的 Error 气泡）。 */
+    /** 上次把用量写进库的时间（R10）。0 表示还没写过。 */
+    private var lastUsagePersistedAt: Long = 0L
+
+    /**
+     * 用量持久化的最小间隔（R10）。
+     *
+     * 8 秒是权衡：杀进程重进时看到的数字最多旧 8 秒，而 8 秒内的上下文
+     * 变化对「这个会话用了多少」这个量级判断没有影响。
+     *
+     * 定成实例字段而不是顶层常量：它只服务 [publishUsage] 一处节流，
+     * 外泄成常量会让下一个人以为别处也该用它。
+     */
+    private val usagePersistIntervalMs: Long = 8_000L
+
     private val history = mutableListOf<ChatMessage>()
 
     /**
@@ -1962,6 +1976,24 @@ class ChatViewModel(
                 ),
                 thinkingEffort = config.thinkingEffort,
             )
+        }
+
+        // ## 顺手持久化用量（2026-11-07，R10）
+        //
+        // ## 为什么必须节流
+        //
+        // 这个方法在流式期间**每帧**都可能被调（每个 delta 一次）。
+        // 不节流就是每秒几十次 `UPDATE sessions`，而用量本身变化很慢
+        // （上下文不会在 100 毫秒里涨几千 token）。写那么多次没有意义，
+        // 却会把 SQLite 的写锁占住，连带拖慢消息落盘。
+        //
+        // 8 秒一次是权衡：杀进程重进时看到的数字最多旧 8 秒，
+        // 而 8 秒内的上下文变化对「这个会话用了多少」这个量级判断没有影响。
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastUsagePersistedAt >= usagePersistIntervalMs) {
+            lastUsagePersistedAt = nowMs
+            val sid = sessionId
+            launchPersist { updateContextUsage(sid, used, config.contextLimit) }
         }
     }
 
