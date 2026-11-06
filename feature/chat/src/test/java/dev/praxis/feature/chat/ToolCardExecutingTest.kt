@@ -15,6 +15,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -53,6 +54,24 @@ import org.junit.Test
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ToolCardExecutingTest {
+
+    /*
+     * ## 为什么每个用例都带 runTest(timeout)（2026-11-07）
+     *
+     * 本类有一个特殊结构：`GatedTool` 用 `gate.await()` **故意永久挂起**，
+     * 好让「工具执行中」这个中间态可断言。这本身是对的。
+     *
+     * 但 runTest 默认会等所有子协程结束。一旦框架没能把这些协程收走
+     * （CI 的 2 核 Linux 上实测如此），测试就会卡到**外层 wall-clock 超时**
+     * （Gradle 步骤的 timeout 240s，exit=124）—— 日志里什么都看不到，
+     * 只知道「这个类卡了」。
+     *
+     * 加了 60 秒上界之后，同样的故障会变成一次**明确的失败**，
+     * 而且 runTest 会报出「还有哪些协程没结束」，直接指向要查的地方。
+     *
+     * 60 秒是「远高于正常耗时（本地 <1s）、又远低于步骤超时」的取值。
+     */
+
 
     private val dispatcher = UnconfinedTestDispatcher()
 
@@ -119,7 +138,7 @@ class ToolCardExecutingTest {
      * 这正是用户说的「我没看到执行中」—— 修复前这里会**没有工具卡**。
      */
     @Test
-    fun `card exists with no result while tool is running`() = runTest {
+    fun `card exists with no result while tool is running`() = runTest(timeout = 60.seconds) {
         val gate = CompletableDeferred<Unit>()
         val registry = ToolRegistry().apply { register(GatedTool(gate)) }
         val vm = ChatViewModel(
@@ -151,7 +170,7 @@ class ToolCardExecutingTest {
 
     /** 工具跑完后，同一张卡片被填上结果（不是又插一张）。 */
     @Test
-    fun `same card is filled after the tool finishes`() = runTest {
+    fun `same card is filled after the tool finishes`() = runTest(timeout = 60.seconds) {
         val gate = CompletableDeferred<Unit>()
         val registry = ToolRegistry().apply { register(GatedTool(gate)) }
         val vm = ChatViewModel(
@@ -193,7 +212,7 @@ class ToolCardExecutingTest {
      * 而不是「跑到第几个才冒出第几张卡」。
      */
     @Test
-    fun `all calls get a card before any of them finishes`() = runTest {
+    fun `all calls get a card before any of them finishes`() = runTest(timeout = 60.seconds) {
         val gate = CompletableDeferred<Unit>()
         val registry = ToolRegistry().apply { register(GatedTool(gate)) }
         val vm = ChatViewModel(
@@ -223,7 +242,7 @@ class ToolCardExecutingTest {
 
     /** 未装配工具层时不建卡（如实告知，而不是画一张永远「执行中」的卡）。 */
     @Test
-    fun `no executor means no card`() = runTest {
+    fun `no executor means no card`() = runTest(timeout = 60.seconds) {
         val vm = ChatViewModel(
             provider = WholeToolCallsProvider(
                 listOf(ToolCall(id = "c1", name = "gated_tool", argumentsJson = "{}")),
