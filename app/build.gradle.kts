@@ -147,6 +147,29 @@ android {
              * release 不设这一项（保持默认 true），发布包该省的空间还是要省。
              */
             isCrunchPngs = false
+
+            /**
+             * 模拟器验证需要 x86_64 ABI（2026-11-06）。
+             *
+             * ## 为什么只在 debug 加
+             *
+             * - **release 只发 arm64**：真机是 arm64，且 `jniLibs` 里只有 arm64 的
+             *   `libproot.so` / `libtalloc.so`；塞 x86_64 只会让发布包白白变大，
+             *   而 x86_64 那部分在真机上永远用不到。
+             * - **debug 要装进 x86_64 模拟器**：真机锁屏或离线时，聊天界面、
+             *   消息排序、删除、系统提示词这些**都不依赖 native 库**，
+             *   模拟器足够验证它们。没有这一行，arm64-only 的包会直接被
+             *   `INSTALL_FAILED_NO_MATCHING_ABIS` 拒绝。
+             *
+             * ## 缺 x86_64 的 .so 会怎样
+             *
+             * `Pty` 的静态初始化用 `try/catch (UnsatisfiedLinkError)` 包住，
+             * 失败时 `available = false` 并记日志，终端降级为管道模式 ——
+             * **不会崩**。所以模拟器上聊天链路完全可用，只是 PTY 用不了。
+             */
+            ndk {
+                abiFilters += "x86_64"
+            }
         }
         getByName("release") {
             isMinifyEnabled = true
