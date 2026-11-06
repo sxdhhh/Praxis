@@ -131,7 +131,7 @@ class ContextCompactorTest {
             SummaryPrompts.SECTION_IDS,
             sections.map { it.id },
         )
-        assertTrue(sections.all { it.instruction.isNotBlank() })
+        assertTrue(sections.all { !it.instruction.isNullOrBlank() })
     }
 
     @Test
