@@ -203,7 +203,41 @@
 -dontwarn org.slf4j.impl.StaticMDCBinder
 -dontwarn org.slf4j.impl.StaticMarkerBinder
 
-# FTP 服务通过反射创建（用户表、监听器），保留其公开 API。
--keep class org.apache.ftpserver.** { *; }
--keep class org.apache.mina.** { *; }
--keep class org.apache.ftpserver.ftplet.** { *; }
+# ## 可选集成带来的缺失类（2026-11-06 修，CI release 实测报错）
+#
+# 上一次我写了 `-keep class org.apache.ftpserver.**` —— **那条规则本身是错的**。
+# 它把 `org.apache.ftpserver.config.spring.*` 也保住了，逼 R8 去解析那些类里对
+# Spring 的引用，于是报出：
+#
+#   Missing class org.springframework.beans.factory.FactoryBean
+#   Missing class org.springframework.beans.factory.support.AbstractBeanDefinition
+#   Missing class org.springframework.context.support.FileSystemXmlApplicationContext
+#
+# 同理 `mina-core` 的代理处理器引用 GSSAPI / SASL（只在 SOCKS5 认证时需要）：
+#
+#   Missing class org.ietf.jgss.GSSContext / GSSManager / GSSCredential / GSSName
+#   Missing class javax.security.sasl.AuthenticationException
+#
+# 这些**都是可选集成**，我们的进程内 FTP 一个都不用：
+#  - Spring 配置：我们用 Java API 构造 FtpServerFactory，从不读 XML 配置；
+#  - SOCKS5 代理：FTP 控制连接不经代理。
+#
+# 所以正解是「排除 + 不警告」，而不是「全部保留」。
+# 保留的代价不只是包变大 —— 是让 R8 必须解析一整条用不到的依赖链。
+-dontwarn org.springframework.**
+-dontwarn javax.security.sasl.**
+-dontwarn org.ietf.jgss.**
+-dontwarn org.apache.mina.proxy.**
+-dontwarn org.apache.ftpserver.config.spring.**
+-dontwarn org.apache.ftpserver.main.**
+
+# ## 只保留真正需要的部分
+#
+# FtpServerFactory / ListenerFactory / BaseUser 这些是**我们直接调用**的，
+# 不是反射目标，R8 自然会保留它们引用的类。
+#
+# 唯一需要显式保留的是 `ftplet` 的接口与实现方：FtpServer 在运行时通过它们
+# 回调（`Authority` / `UserManager`）。不保留的话，R8 可能把实现类裁掉，
+# 表现为「启动正常，一登录就崩」。
+-keep interface org.apache.ftpserver.ftplet.** { *; }
+-keep class * implements org.apache.ftpserver.ftplet.Authority { *; }
