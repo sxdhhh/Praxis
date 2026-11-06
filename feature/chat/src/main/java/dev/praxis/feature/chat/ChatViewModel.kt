@@ -1330,7 +1330,16 @@ class ChatViewModel(
         // 用户消息先落盘，再做助手占位落盘，顺序与 UI 一致。
         launchPersist {
             ensureSession(sessionId, fallbackTitle)
-            appendMessage(sessionId, role = "user", content = text)
+            // ## 用户消息也要注册行 id（2026-11-07，BUG-C）
+            //
+            // 原来只有助手占位注册了 `registerRowId`，用户消息和工具卡都没注册。
+            // 后果：长按删除**用户消息**时，`removeBubble` 拿不到 rowId，
+            // 只能改内存 —— 重启后那条用户消息原样回来。
+            //
+            // 注册之后三类气泡（user / assistant / tool）都能定位到库行，
+            // 删除才可能真正落盘。
+            val userRowId = appendMessage(sessionId, role = "user", content = text)
+            registerRowId(userBubble.id, userRowId)
             val assistantRowId = appendMessage(
                 sessionId,
                 role = "assistant",
@@ -2481,6 +2490,15 @@ class ChatViewModel(
             // 什么时候会没有卡片：网关一次性返回完整 tool_calls（不发 delta），
             // 或 `toolName` 一直是空字符串。那时按老路新建一张，不能丢结果。
             val existingCardId = pendingToolCardIds.remove(callIndex)
+            // ## 卡片 id 必须在这里定下来（2026-11-07，BUG-C）
+            //
+            // 原来 `nextId++` 写在 `_state.update` 的 lambda 里，外面拿不到，
+            // 于是工具卡的库行 id 从未注册 —— 删除工具卡时 `removeBubble`
+            // 找不到 rowId，只能改内存，重启后卡片复活。
+            //
+            // 提到 lambda 外：既保持了「每次调用只分配一个新 id」的语义，
+            // 又让下面的 `launchPersist` 能把它和库行绑起来。
+            val cardId = existingCardId ?: nextId++
             _state.update { current ->
                 val info = ToolCallInfo(
                     name = exec.invocation.name,
@@ -2492,11 +2510,11 @@ class ChatViewModel(
                     isError = exec.result.isError,
                     elapsedMs = exec.elapsedMs,
                 )
-                val existing = existingCardId?.let { id -> current.bubbles.firstOrNull { it.id == id } }
+                val existing = current.bubbles.firstOrNull { it.id == cardId }
                 if (existing != null) {
                     current.copy(
                         bubbles = current.bubbles.map { b ->
-                            if (b.id == existing.id) {
+                            if (b.id == cardId) {
                                 b.copy(text = buildToolSummary(exec), tool = info, streaming = false)
                             } else {
                                 b
@@ -2506,7 +2524,7 @@ class ChatViewModel(
                 } else {
                     current.copy(
                         bubbles = current.bubbles + ChatBubble(
-                            id = nextId++,
+                            id = cardId,
                             role = BubbleRole.Tool,
                             text = buildToolSummary(exec),
                             timestamp = nextTimestamp(),
@@ -2520,7 +2538,7 @@ class ChatViewModel(
             }
             // 工具执行结果同样要落盘，否则重启后模型看不到自己做过什么。
             launchPersist {
-                appendMessage(
+                val toolRowId = appendMessage(
                     sessionId = sessionId,
                     role = "tool",
                     content = buildToolSummary(exec),
@@ -2529,6 +2547,8 @@ class ChatViewModel(
                     toolCallId = exec.invocation.callId,
                     isError = exec.result.isError,
                 )
+                // 工具卡也要能定位到库行，否则删掉它重启就复活（BUG-C）。
+                registerRowId(cardId, toolRowId)
             }
         }
 
@@ -4266,6 +4286,26 @@ class ChatViewModel(
     private fun removeBubble(bubbleId: Long) {
         val bubble = _state.value.bubbles.firstOrNull { it.id == bubbleId } ?: return
         _state.update { it.copy(bubbles = it.bubbles.filterNot { b -> b.id == bubbleId }) }
+
+        // ## 删内存远远不够，必须删库（2026-11-07，BUG-C）
+        //
+        // 原来这里只改 `bubbles` 与 `history`，**数据库那一行原封不动**。
+        // 重启后 `loadMessages` 把它读回来，被删的卡片就复活了 ——
+        // 用户的原话是「点击删除结果重启软件后删除的卡片又回来了」。
+        //
+        // ## 为什么先把映射删掉再取
+        //
+        // `remove` 返回旧值，一次完成「取出 + 清理」：
+        // 气泡已经不存在了，留着这条映射只会泄漏，还会让后续
+        // `persistContent` 往一条已删的行里写正文。
+        //
+        // ## 拿不到 rowId 时为什么直接跳过
+        //
+        // Error 气泡从来不落盘；流式尚未写完的气泡也可能还没注册。
+        // 这两种情况本来就没有库行可删，静默跳过是正确的。
+        assistantRowIds.remove(bubbleId)?.let { rowId ->
+            launchPersist { deleteMessage(rowId) }
+        }
         if (bubble.role != BubbleRole.Error) {
             // 同样要回退 history：按内容删最后一条匹配的用户/助手消息，
             // 比按 index 删安全（Error 气泡不占 history 位置）。

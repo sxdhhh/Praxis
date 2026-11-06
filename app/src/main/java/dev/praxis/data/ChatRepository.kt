@@ -352,6 +352,29 @@ class ChatRepository(
     }
 
     /**
+     * 删除**单条**消息。
+     *
+     * ## 为什么必须有它（2026-11-07，BUG-C）
+     *
+     * 界面上长按删除一个气泡时，`ChatViewModel.removeBubble` 只把它从
+     * `bubbles` 和 `history` 里摘掉 —— **从不落盘**。于是重启后
+     * `loadMessages` 把那一行原样读回来，卡片就「复活」了。
+     * 用户的原话是「点击删除结果重启软件后删除的卡片又回来了」。
+     *
+     * 根因不是「忘了调用」，而是**端口层根本没有这个方法**：
+     * `ChatPersistence` 原来只有 `deleteSession`（连会话一起删）和
+     * `clearMessages`（清空全部），没有「删一条」。
+     *
+     * ## 为什么不 touchSession
+     *
+     * 删消息不该把会话顶到侧边栏最前 —— 那会让「我删掉了一条」
+     * 看起来像「这个会话刚有新动静」，与用户意图相反。
+     */
+    suspend fun deleteMessage(messageId: Long) {
+        messageDao.deleteById(messageId)
+    }
+
+    /**
      * 置顶 / 取消置顶。
      *
      * 走 DAO 的 UPDATE，**不碰** upsert：

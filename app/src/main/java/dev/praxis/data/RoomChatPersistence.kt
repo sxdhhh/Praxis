@@ -150,6 +150,16 @@ class RoomChatPersistence(
         repository.clearMessages(sessionId)
     }
 
+    /**
+     * 删除单条消息（覆写端口的空默认实现）。
+     *
+     * 不覆写会**编译通过、运行不报错**，只是删除不落盘 ——
+     * 这是最难发现的一类缺陷：界面完全正常，只有重启才暴露。
+     */
+    override suspend fun deleteMessage(messageId: Long) {
+        repository.deleteMessage(messageId)
+    }
+
     override suspend fun setSessionPinned(sessionId: String, pinned: Boolean) {
         repository.setSessionPinned(sessionId, pinned)
     }
