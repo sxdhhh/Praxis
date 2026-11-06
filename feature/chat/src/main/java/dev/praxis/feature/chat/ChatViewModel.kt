@@ -2067,11 +2067,19 @@ class ChatViewModel(
         // 落盘：`role = "summary"` 的行。重启时它会被读回 history，
         // 于是「摘要及其后」的组织规则跨进程一致。
         //
-        // 位置留到 R9 用锚定时间戳插入修正：这一步先保证**内容**不丢，
-        // 而 `apply` 已经按位置裁剪，摘要在列表里的相对顺序是对的。
+        // ## 用 insertMessageAt 而不是 append（R9 修）
+        //
+        // append 会把摘要放到**末尾**（它的 createdAt 最新），而
+        // `CompactionApplier` 是按摘要的**位置**裁剪的 —— 摘要跑到末尾，
+        // 它后面就没有可裁剪的内容，重启后压缩等于失效。
+        //
+        // `atOrderIndex = end`：被折叠的 end 条正好是库里的前 end 行
+        // （system 层是临时拼的，不落库，所以两边下标对齐）。
+        // 锚点不可用时 insertMessageAt 会拒绝并退化为追加，同时记诊断。
         launchPersist {
-            appendMessage(
+            insertMessageAt(
                 sessionId = sessionId,
+                atOrderIndex = end,
                 role = "summary",
                 content = summaryMessage.text,
             )
@@ -3735,8 +3743,9 @@ class ChatViewModel(
                     coveredTokens = TokenEstimator.estimate(slice),
                 )
                 launchPersist {
-                    appendMessage(
+                    insertMessageAt(
                         sessionId = sessionId,
+                        atOrderIndex = end,
                         role = "summary",
                         content = summaryMessage.text,
                     )
