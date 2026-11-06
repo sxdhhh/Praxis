@@ -144,8 +144,46 @@ class MemoryRanker(
         }
 
         // ② 关键词 / 标签两路名次（与 MemoryRetriever 的判据一致，但这里要加权）。
-        val byKeyword = candidates.sortedByDescending { keywordHits(it, terms) }
-        val byTag = candidates.sortedByDescending { tagHits(it, terms) }
+        //
+        // ## 必须**过滤零命中**，不能只排序（2026-11-07，R14 修）
+        //
+        // 旧实现是 `candidates.sortedByDescending { keywordHits(...) }` ——
+        // 排序不会剔除任何人，零命中的候选照样留在榜上，然后在 accumulate 里
+        // 拿到 `weight * 1/(k+index+1)` 的基础分。
+        //
+        // 后果：**只要它在候选池里，就能出现在结果里**，哪怕一个字都没命中。
+        // 用户看到的是「搜『夜间』，结果里混进一条『深色主题』」。
+        //
+        // 这也是 MemorySearchPipelineTest 里「edgeWeight 为零时边不生效」失败的
+        // 真正原因：那条记忆是被关键词榜带进来的，与边权重无关 ——
+        // 测试的名字误导了我一轮。
+        //
+        // ## 两种情形要分开处理
+        //
+        //  1. **有命中**：只留命中的。零命中的记忆不该出现在结果里 ——
+        //     这就是「搜『夜间』却搜出『深色主题』」的成因。
+        //  2. **全都没命中**：退回「最近使用」。返回空白对用户毫无帮助，
+        //     而「最近用过的几条」至少给了他一个可操作的方向。
+        //
+        // 两条都是既有设计，只是旧实现用 sortedByDescending 一并处理，
+        // 结果把「有命中」那一路的零命中条目也带上了。
+        val keywordScored = candidates.map { it to keywordHits(it, terms) }
+        val byKeyword = if (keywordScored.any { it.second > 0 }) {
+            keywordScored
+                .filter { it.second > 0 }
+                .sortedByDescending { it.second }
+                .map { it.first }
+        } else {
+            candidates.sortedByDescending { effectiveTime(it) }
+        }
+
+        // 标签榜不参与兜底：关键词那边已经给过「最近使用」，
+        // 两边都兜会让同一批条目被累加两次分数。
+        val tagScored = candidates.map { it to tagHits(it, terms) }
+        val byTag = tagScored
+            .filter { it.second > 0 }
+            .sortedByDescending { it.second }
+            .map { it.first }
 
         val scores = HashMap<Long, Double>()
         val sources = HashMap<Long, MutableList<String>>()
