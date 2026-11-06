@@ -100,6 +100,25 @@ interface ChatPersistence {
     suspend fun clearMessages(sessionId: String) {}
 
     /**
+     * 删除**单条**消息（长按删除必须落盘）。
+     *
+     * ## 为什么默认实现是空操作
+     *
+     * 与其它可选能力（[insertMessageAt]、[updateMessageReasoning]）同一纪律：
+     * 端口先给一个安全的默认值，存量测试替身不改代码也能继续编译。
+     *
+     * 但真实实现（`RoomChatPersistence`）**必须覆写** —— 不覆写就等于
+     * 「删除只改内存」，重启后卡片复活。这正是 BUG-C。
+     *
+     * ## 没有它时用户看到什么
+     *
+     * `ChatViewModel.removeBubble` 只能把它从 `bubbles` 与 `history` 里摘掉，
+     * 数据库那一行还在；下次 `loadMessages` 一读，被删的卡片原样回来。
+     * 用户的原话：「点击删除结果重启软件后删除的卡片又回来了」。
+     */
+    suspend fun deleteMessage(messageId: Long) {}
+
+    /**
      * 置顶 / 取消置顶。
      *
      * 单独一个方法而不是「读 SessionItem 改字段再整条写回」：
