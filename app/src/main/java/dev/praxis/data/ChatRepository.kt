@@ -540,6 +540,18 @@ class ChatRepository(
      * 走单条 UPDATE，**不碰 upsert** —— 后者是 REPLACE（先删后插），
      * 会连带触发 messages 的 CASCADE 把聊天记录删光。
      */
+    /**
+     * 读回上次持久化的上下文用量（R11）。
+     *
+     * 返回 null 表示「没有可用记录」：要么从没写过，要么上限是 0
+     * （老数据迁移后的默认值）。调用方据此保留原值，不要用 0 去覆盖。
+     */
+    suspend fun loadContextUsage(sessionId: String): Pair<Int, Int>? {
+        val session = sessionDao.find(sessionId) ?: return null
+        if (session.contextLimit <= 0) return null
+        return session.contextUsed to session.contextLimit
+    }
+
     suspend fun updateContextUsage(sessionId: String, used: Int, limit: Int) {
         sessionDao.setContextUsage(sessionId, used, limit)
     }

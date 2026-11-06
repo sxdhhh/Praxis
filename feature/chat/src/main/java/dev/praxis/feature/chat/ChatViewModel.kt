@@ -578,6 +578,28 @@ class ChatViewModel(
 
         persistScope.launch {
             try {
+                // ## 顺带恢复上下文用量（2026-11-07，R11）
+                //
+                // 用量从 R10 起会持久化。放在消息恢复的同一条路径上：
+                // 进会话立刻就有数字，用户不必对着「0 / 128k」等第一次请求算完。
+                //
+                // ## 为什么不无条件覆盖
+                //
+                // 如果本次会话内已经算过（`used > 0`），持久化的旧值只会让它倒退 ——
+                // 而进度条倒退会被用户读成「上下文被清了」。
+                //
+                // 读失败按「没有记录」处理：这是一条锦上添花的填充，
+                // 不该让整条恢复路径失败。
+                runCatching { repo.loadContextUsage(sessionId) }.getOrNull()?.let { (used, limit) ->
+                    _state.update { st ->
+                        if (st.contextUsage.used > 0) {
+                            st
+                        } else {
+                            st.copy(contextUsage = st.contextUsage.copy(used = used, limit = limit))
+                        }
+                    }
+                }
+
                 val allRows = runCatching { repo.loadMessages(sessionId) }.getOrNull()
                 if (allRows == null) {
                     // 读库失败（权限、迁移、磁盘满）。**不置 restored**：
@@ -1994,6 +2016,24 @@ class ChatViewModel(
             lastUsagePersistedAt = nowMs
             val sid = sessionId
             launchPersist { updateContextUsage(sid, used, config.contextLimit) }
+
+            // ## 诊断：上下文的实际构成（2026-11-07，R11）
+            //
+            // 「发出去了多少」这个问题，光看进度条答不了：
+            // 用户看到 80% 时想知道的往往不是数字，而是「谁占的」。
+            //
+            // 这条把**组装后的真实列表**拆开记一行 —— 它恰好就是发出去的
+            // `messages`，所以这里的 layers/total/maxChars 与上游收到的完全一致，
+            // 不是另算一遍的近似值。
+            //
+            // 复用同一个节流窗口：诊断不该有独立的写日志节奏。
+            dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
+                "Chat",
+                "ctx used=" + used + "/" + config.contextLimit +
+                    " layers=" + messages.count { it.role == dev.praxis.core.ai.ChatRole.System } +
+                    " total=" + messages.size +
+                    " maxChars=" + (messages.maxOfOrNull { it.text.length } ?: 0),
+            )
         }
     }
 
