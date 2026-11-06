@@ -39,3 +39,7 @@ build.log
 
 # JVM 崩溃转储（几十 MB，不该进仓库）
 *.hprof
+
+# JVM 崩溃日志（本机内存不足时产生，不该进仓库）
+hs_err_pid*.log
+replay_pid*.log
