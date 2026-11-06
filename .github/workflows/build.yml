@@ -66,7 +66,16 @@ jobs:
   # 同理 lint：`abortOnError = true` 配好了但从没在 CI 执行过。
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # ## 为什么是 90 而不是 60（2026-11-07，R15 放宽）
+    #
+    # 这一步现在要跑 9 个**纯 JVM 模块**的测试（R12 修的覆盖漏洞），
+    # 那是以前完全不跑的负载。加上 :app 逐类（6 x 4 分钟）与 lint，
+    # 60 分钟已经不够：
+    #
+    #     库模块 40 + :app 24 + lint 5 = 69
+    #
+    # 与 release job 取同一个上限，避免两个 job 的心智模型不一致。
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -202,11 +211,17 @@ jobs:
       # 而不是只知道「这个任务卡了」。
       # 库模块这步也加墙钟上界：它同样出现过长时间不返回
       # （约 20 分钟，历史正常值 1~2 分钟）。job 级的
-      # timeout-minutes 虽然最终也会杀，但那是 60 分钟之后 ——
+      # timeout-minutes 虽然最终也会杀，但那是 90 分钟之后 ——
       # 期间整个并发队列都被占住。
       #
-      # 25 分钟是「比任何历史正常值都宽、又远小于 job 上限」的取值：
-      # 真慢能过，真卡则快速给出失败。
+      # ## 为什么从 25 分钟放宽到 40（2026-11-07，R15）
+      #
+      # 25 分钟那个取值是在「这一步只跑 Android 模块」时定的。R12 修好覆盖
+      # 漏洞后，它还要跑 9 个纯 JVM 模块 —— 负载翻了一倍不止，实测超过 25 分钟
+      # 仍未结束。
+      #
+      # 40 分钟仍然「真卡则快速给出失败」，但给正常的全量跑留了余量；
+      # 同时 job 上限提到 90，避免它被 job 级砍掉而看不出是哪一步慢。
       # ## 为什么要显式列出 9 个纯 JVM 模块（2026-11-07，R12 补）
       #
       # testDebugUnitTest 是 **Android 插件**的任务名。纯 JVM 模块
@@ -228,7 +243,7 @@ jobs:
       # 但漏加的后果会在「那个模块的测试从没跑过」时暴露，比时间翻倍可控。
       - name: Unit tests (library modules)
         run: |
-          timeout --signal=KILL 1500 ./gradlew \
+          timeout --signal=KILL 2400 ./gradlew \
             testDebugUnitTest -x :app:testDebugUnitTest \
             :core:ai:test \
             :core:goal:test \
