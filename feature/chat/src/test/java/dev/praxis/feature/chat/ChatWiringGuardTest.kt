@@ -1,6 +1,7 @@
 package dev.praxis.feature.chat
 
 import java.io.File
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -703,4 +704,61 @@ class ChatWiringGuardTest {
         assertTrue("适配器没有实现 sessionNames()", adapter.contains("override fun sessionNames()"))
         assertTrue("适配器没有过滤已关闭的会话", adapter.contains("filterNot"))
     }
+
+    /**
+     * 工具结果落盘必须 await，不能包 launchPersist（BUG-B，2026-11-07）。
+     *
+     * ## 这条护栏防的是什么
+     *
+     * 工具结果原本走 launchPersist { appendMessage(...) } —— 异步派发；
+     * 而紧随其后的「续轮占位」是直接 repo.appendMessage(...)（await）。
+     * 两者都在抢 MAX(orderIndex) + 1，谁先拿到锁不确定：
+     *
+     *   续轮先拿到 -> 占位行 orderIndex=2、工具行 orderIndex=3
+     *
+     * 恢复时按 orderIndex ASC 排，于是**最终回答排到了工具卡前面**，
+     * 正文还被工具卡从中间劈成两段。用户截图里那个
+     * 「最终回答 → 残缺正文 → linuxexec」就是它。
+     *
+     * appendLock（Mutex）只保证「进入锁之后」串行，保证不了进入顺序；
+     * 唯一可靠的做法是让落盘在同一协程里按代码顺序 await。
+     */
+    @Test
+    fun toolResultPersistenceMustAwaitNotLaunch() {
+        val vm = flat(read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatViewModel.kt"))
+
+        assertTrue(
+            "工具结果落盘必须直接 await",
+            vm.contains("val toolRowId = repo.appendMessage("),
+        )
+        assertFalse(
+            "工具结果落盘不应走 launchPersist（会与续轮占位抢 orderIndex）",
+            vm.contains("launchPersist { val toolRowId"),
+        )
+    }
+
+    /** send() 的落盘与 startStream 必须同处一个协程，保证同序。 */
+    @Test
+    fun sendPersistsBeforeStartingStream() {
+        val raw = read("feature/chat/src/main/java/dev/praxis/feature/chat/ChatViewModel.kt")
+        val sendBlock = raw
+            .substringAfter("fun send() {")
+            .substringBefore("private suspend fun ChatPersistence.generateTitleIfPossible")
+            // ## 必须先剥掉注释再断言（这个坑已经踩过两次）
+            //
+            // 上面那段 KDoc 里**引用**了旧写法 `launchPersist { ... }`，
+            // 用来解释「为什么不再用它」。不剥注释的话，这条断言会把
+            // 「解释」当成「还在用」，于是永远红 —— 而代码其实是对的。
+            //
+            // 同类事故第一次出现在 `chatInputBar_separatesSendAndEnqueue`：
+            // 旧实现把被禁的写法写在注释里当反例，护栏直接误报。
+            .lines()
+            .filterNot { it.trimStart().startsWith("//") || it.trimStart().startsWith("*") }
+            .joinToString("\n")
+
+        assertTrue("send 里应有统一协程包裹落盘与 startStream", sendBlock.contains("viewModelScope.launch {"))
+        assertTrue("startStream(assistantId) 应在协程内", sendBlock.contains("startStream(assistantId)"))
+        assertFalse("落盘不应再用 launchPersist（异步会与后续落盘抢 orderIndex）", sendBlock.contains("launchPersist {"))
+    }
 }
+
