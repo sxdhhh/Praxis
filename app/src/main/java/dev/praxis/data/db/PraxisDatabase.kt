@@ -35,7 +35,7 @@ import dev.praxis.core.data.character.PromptTagEntity
         CharacterCardEntity::class,
         PromptTagEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.CharacterDatabase {
@@ -333,5 +333,62 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
                 db.execSQL("ALTER TABLE `messages` ADD COLUMN `reasoning` TEXT DEFAULT NULL")
             }
         }
+        /**
+         * v10：排序键从 orderIndex 换成 createdAt（2026-11-07，R6/R7）。
+         *
+         * ## 为什么需要回填
+         *
+         * R6 把排序键换成了 createdAt。绝大多数历史数据没问题 ——
+         * createdAt 是写入时的 now()，本来就和 orderIndex 同序。
+         *
+         * 唯一例外是**摘要行**：它由 insertMessageAt 插入，
+         * orderIndex 是插入位置，而 createdAt 被写成了当时的 now()
+         * = 整个会话最新。切到按 createdAt 排序后，这些摘要会跳到末尾。
+         *
+         * ## 回填成什么值
+         *
+         * 设成「它前一条消息的 createdAt」。这样：
+         *  - 与前后两条同属一个时间点，顺序由 id 兜底；
+         *  - 摘要的 id 比前一条大（后插入），所以排在它之后 —— 正确；
+         *  - **不动其它行的时间**，用户看到的消息时间不会变。
+         *
+         * ## 为什么不用「基准时间 + 序号」统一重排
+         *
+         * 那会把整段对话压成连续毫秒，用户手机上显示的
+         * 「3 天前 / 昨天 / 刚刚」会全部变成同一秒 ——
+         * 为了修一个位置问题，破坏了全部时间语义。
+         *
+         * ## 为什么索引也必须一起换
+         *
+         * Room 会拿 exportSchema 生成的期望 schema 与实际库比对。
+         * 版本号变了但索引没换，启动直接报
+         * Migration didn't properly handle，应用起不来。
+         */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // ① 摘要行回填。EXISTS 保护「插在开头」的情况：
+                //    此时没有前一条，子查询返回 NULL，而 createdAt 是 NOT NULL。
+                db.execSQL(
+                    "UPDATE `messages` SET `createdAt` = (" +
+                        "SELECT `m2`.`createdAt` FROM `messages` AS `m2` " +
+                        "WHERE `m2`.`sessionId` = `messages`.`sessionId` " +
+                        "AND `m2`.`orderIndex` < `messages`.`orderIndex` " +
+                        "ORDER BY `m2`.`orderIndex` DESC LIMIT 1) " +
+                        "WHERE `messages`.`role` = 'summary' " +
+                        "AND EXISTS (" +
+                        "SELECT 1 FROM `messages` AS `m3` " +
+                        "WHERE `m3`.`sessionId` = `messages`.`sessionId` " +
+                        "AND `m3`.`orderIndex` < `messages`.`orderIndex`)",
+                )
+
+                // ② 换索引：排序键变了，(sessionId, orderIndex) 不再被使用。
+                db.execSQL("DROP INDEX IF EXISTS `index_messages_sessionId_orderIndex`")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_messages_sessionId_createdAt` " +
+                        "ON `messages` (`sessionId`, `createdAt`)",
+                )
+            }
+        }
+
     }
 }

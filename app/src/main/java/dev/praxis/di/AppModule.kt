@@ -63,7 +63,12 @@ val appModule = module {
                 //
                 // 同样只加一个可空列，NULL 就是老消息的正确值，无需回填。
                 // 但**仍必须是显式迁移** —— messages 存的是全部聊天记录。
-                PraxisDatabase.MIGRATION_8_9,
+                // v10：排序键改 createdAt（R6），索引跟着换。
+                //
+                // 这里必须显式迁移：messages 是全部聊天记录，
+                // 破坏性迁移等于清空用户的对话。迁移里只回填摘要行的
+                // createdAt，其余行的时间原样保留。
+                PraxisDatabase.MIGRATION_9_10,
             )
             .build()
     }
