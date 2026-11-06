@@ -1327,25 +1327,49 @@ class ChatViewModel(
         // 第 2 步由后面的 `generateTitleIfPossible` 完成。
         val fallbackTitle = SessionTitle.fallback(text)
 
-        // 用户消息先落盘，再做助手占位落盘，顺序与 UI 一致。
-        launchPersist {
-            ensureSession(sessionId, fallbackTitle)
-            // ## 用户消息也要注册行 id（2026-11-07，BUG-C）
-            //
-            // 原来只有助手占位注册了 `registerRowId`，用户消息和工具卡都没注册。
-            // 后果：长按删除**用户消息**时，`removeBubble` 拿不到 rowId，
-            // 只能改内存 —— 重启后那条用户消息原样回来。
-            //
-            // 注册之后三类气泡（user / assistant / tool）都能定位到库行，
-            // 删除才可能真正落盘。
-            val userRowId = appendMessage(sessionId, role = "user", content = text)
-            registerRowId(userBubble.id, userRowId)
-            val assistantRowId = appendMessage(
-                sessionId,
-                role = "assistant",
-                content = "",
-            )
-            registerRowId(assistantId, assistantRowId)
+        // ## 落盘与流式必须**同序**（2026-11-07，BUG-B 根因之二）
+        //
+        // 这里原来用的是 `launchPersist` —— 它把整块丢进 `persistScope`，
+        // 而 `startStream(assistantId)` 紧接着在 `viewModelScope` 上开跑。
+        // 两个协程谁先执行**没有保证**。
+        //
+        // 单看一次普通对话，`pendingContent` 暂存能把「正文丢失」兜住，
+        // 所以界面上看不出问题。但 `orderIndex` 是另一回事：
+        // 如果这块落盘晚于工具结果落盘（`runToolCalls` 里那次 await），
+        // 库里顺序就会变成「工具 → user → assistant」，
+        // 重启后整轮对话读出来是错位的 —— 正是用户截图里的乱序。
+        //
+        // 改成显式 `viewModelScope.launch { 落盘; startStream }`：
+        // 落盘完成之前不会开始流式，于是
+        //
+        //   user → assistant占位 → 工具结果 → 续轮占位
+        //
+        // 的顺序由**代码顺序**唯一决定，不再依赖调度器心情。
+        viewModelScope.launch {
+            chatRepository?.let { repo ->
+                repo.ensureSession(sessionId, fallbackTitle)
+                // ## 用户消息也要注册行 id（2026-11-07，BUG-C）
+                //
+                // 原来只有助手占位注册了 `registerRowId`，用户消息和工具卡都没注册。
+                // 后果：长按删除**用户消息**时，`removeBubble` 拿不到 rowId，
+                // 只能改内存 —— 重启后那条用户消息原样回来。
+                //
+                // 注册之后三类气泡（user / assistant / tool）都能定位到库行，
+                // 删除才可能真正落盘。
+                val userRowId = repo.appendMessage(
+                    sessionId = sessionId,
+                    role = "user",
+                    content = text,
+                )
+                registerRowId(userBubble.id, userRowId)
+                val assistantRowId = repo.appendMessage(
+                    sessionId = sessionId,
+                    role = "assistant",
+                    content = "",
+                )
+                registerRowId(assistantId, assistantRowId)
+            }
+            startStream(assistantId)
         }
 
         // ── ★ 标题生成必须在 launchPersist 的**外面**单独起协程（2026-11-01 修）
@@ -1383,8 +1407,6 @@ class ChatViewModel(
                 repo.generateTitleIfPossible(fallbackTitle, text)
             }
         }
-
-        startStream(assistantId)
     }
 
     /**
@@ -2536,9 +2558,26 @@ class ChatViewModel(
                     )
                 }
             }
-            // 工具执行结果同样要落盘，否则重启后模型看不到自己做过什么。
-            launchPersist {
-                val toolRowId = appendMessage(
+            // ## 工具结果必须**同步**落盘（2026-11-07，BUG-B 根因）
+            //
+            // 旧实现是 `launchPersist { appendMessage(...) }` —— 异步的，
+            // 而紧随其后的「续轮占位」用的是 `repo.appendMessage(...)`（直接 await）。
+            // 两者都在抢 `MAX(orderIndex) + 1`：
+            //
+            //   续轮先拿到锁 -> 占位行 orderIndex=2、工具行 orderIndex=3
+            //
+            // 恢复时按 `orderIndex ASC` 排，于是**最终回答排到了工具卡之前**，
+            // 正文还被工具卡从中间劈成两段。用户截图里那个
+            // 「最终回答 → 残缺正文 → linuxexec」就是这个顺序。
+            //
+            // `appendLock`（Mutex）只能保证「进入锁之后」串行，
+            // **保证不了两个协程的进入顺序** —— 异步派发的那一个可能后到。
+            //
+            // 而 `runToolCalls` 本身就是 suspend 函数，直接 await 即可：
+            // 落盘顺序 == 代码顺序 == 逻辑顺序，orderIndex 不可能再错位。
+            // 代价是一次 DB insert 的等待（毫秒级），换来顺序正确 —— 值得。
+            chatRepository?.let { repo ->
+                val toolRowId = repo.appendMessage(
                     sessionId = sessionId,
                     role = "tool",
                     content = buildToolSummary(exec),
