@@ -32,7 +32,76 @@ class ChatRepository(
      */
     private val db: PraxisDatabase? = null,
     private val now: () -> Long = System::currentTimeMillis,
+    /**
+     * 溢出存储：正文超长时把**全文**落盘，库里只留前 [MAX_STORED_CHARS] 字符
+     * 加一个定位符。
+     *
+     * ## 为什么需要它（2026-11-07）
+     *
+     * MessageDao.observeSession 是 SELECT *，而 SQLite 的 CursorWindow
+     * 默认只有 2 MB。一条超长正文（用户粘贴长文、模型输出超长代码）
+     * 会让读取直接抛 SQLiteBlobTooBigException —— **崩在恢复路径上**，
+     * 也就是「一进会话就闪退」，而且每次重进都复现（坏数据一直在）。
+     *
+     * ## 为什么不是简单截断
+     *
+     * 截断会让那段文字**永久消失**：用户看不到、模型也看不到，
+     * 而且没有任何提示说明少了什么。落盘 + 定位符至少保住了全文 ——
+     * 模型能用 read_spill 取回，用户能在溢出目录里找到。
+     *
+     * ## 为什么可空
+     *
+     * 单测路径不需要真文件系统。为 null 时 guardContent **原样返回**
+     * 而不是截断 —— 宁可在测试里保留原文，也不要静默丢数据。
+     */
+    private val spillStore: dev.praxis.data.spill.SpillStore? = null,
 ) {
+
+    companion object {
+        /**
+         * 单条消息正文在库里最多存这么多字符。
+         *
+         * 256K 字符：纯 ASCII 约 256 KB，中文（UTF-8 三字节）约 768 KB ——
+         * 都远小于 2 MB 的 CursorWindow，留足余量给同一查询里的其它行。
+         *
+         * 取值也照顾了正常内容：一次正常的长回复通常只有几千到几万字符，
+         * 256K 不会误伤。
+         */
+        const val MAX_STORED_CHARS = 262_144
+
+        /** 溢出提示的起始标记：模型与用户都靠它认出「这里被折叠过」。 */
+        const val SPILL_NOTICE_PREFIX = "〔正文过长，全文已落盘〕"
+    }
+
+    /**
+     * 写入前的正文守卫：超长则落盘 + 截断 + 附定位符。
+     *
+     * ## 为什么放在仓储层而不是 UI 层
+     *
+     * 这是「库里不许出现超长正文」的**唯一入口**。放 UI 层的话，
+     * 任何一条新的写入路径（工具结果、摘要、导入）都要各自记得加，
+     * 漏一个就重新打开 CursorWindow 那个洞。
+     */
+    private suspend fun guardContent(text: String): String {
+        if (text.length <= MAX_STORED_CHARS) return text
+
+        // 没有溢出存储时保持原样：宁可留风险，也不静默丢内容。
+        val store = spillStore ?: return text
+        val spilled = store.saveText(text) ?: return text
+
+        return buildString {
+            append(text, 0, MAX_STORED_CHARS)
+            append("\n\n")
+            append(SPILL_NOTICE_PREFIX)
+            append("（共 ")
+            append(text.length)
+            append(" 字符，此处保留前 ")
+            append(MAX_STORED_CHARS)
+            append("）；定位符 ")
+            append(spilled.locator)
+            append("，可用 read_spill 取回全文。")
+        }
+    }
 
     /**
      * 串行化「读 MAX + 插入」这一步。
@@ -142,6 +211,13 @@ class ChatRepository(
         toolCallId: String? = null,
         isError: Boolean = false,
     ): Long {
+        // ## 守卫放在锁外（2026-11-07）
+        //
+        // guardContent 可能落盘（文件 IO）。把它放进 appendLock 会占着锁做 IO，
+        // 而工具连续返回时同一个会话里可能有多个 append 在等锁 —— 临界区里
+        // 一次几百毫秒的磁盘写就能让整轮对话卡住。
+        val storedContent = guardContent(content)
+
         // 整个「读 MAX → 插入」必须在锁内：并发时两条协程会读到同一个 MAX。
         // 详见 [appendLock] 的 KDoc。
         val id = appendLock.withLock {
@@ -151,7 +227,7 @@ class ChatRepository(
                     sessionId = sessionId,
                     orderIndex = nextIndex,
                     role = role,
-                    content = content,
+                    content = storedContent,
                     toolName = toolName,
                     toolArgs = toolArgs,
                     toolCallId = toolCallId,
@@ -166,9 +242,29 @@ class ChatRepository(
         return id
     }
 
-    /** 流式期间的增量写入（只改 content，不动其他列）。 */
+    /**
+     * 流式期间的增量写入（只改 content，不动其他列）。
+     *
+     * ## 这里只截断，**不落盘**（2026-11-07）
+     *
+     * 这是流式热路径：一秒可能被调几十次。若在这里做溢出落盘，
+     * 正文一旦越过 [MAX_STORED_CHARS]，**每个 delta 都会写一次文件** ——
+     * 磁盘被打满，而且每次落盘的内容几乎一样（正文是全量替换，不是追加）。
+     *
+     * 落盘交给 [appendMessage]：那是「一次性写入完整正文」的场景。
+     *
+     * 所以这里是**纯防御**：模型输出真的超过上限时，至少不让它撑爆
+     * CursorWindow。代价是超限那部分在库里的确没了 —— 但这个分支
+     * 需要模型单轮吐出 256K 字符（约 8.5 万 token），实际上不会走到。
+     */
     suspend fun updateMessageContent(messageId: Long, content: String) {
-        messageDao.updateContent(messageId, content)
+        val stored = if (content.length <= MAX_STORED_CHARS) {
+            content
+        } else {
+            content.take(MAX_STORED_CHARS) +
+                "\n\n" + SPILL_NOTICE_PREFIX + "（流式正文超出上限，已截断）"
+        }
+        messageDao.updateContent(messageId, stored)
     }
 
     /**

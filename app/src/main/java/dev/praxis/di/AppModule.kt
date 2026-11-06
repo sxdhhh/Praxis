@@ -189,12 +189,32 @@ val appModule = module {
 
     // 会话/消息持久化。Repository 负责 orderIndex 与 updatedAt 的成对维护，
     // ChatPersistence 只是给 feature:chat 的端口适配。
+    /**
+     * 溢出存储（单例，2026-11-07 提升）。
+     *
+     * ## 谁在用它
+     *
+     *  1. LinuxToolPortImpl —— 工具输出超长时落盘；
+     *  2. read_spill 工具 —— 模型按定位符取回；
+     *  3. ChatRepository.guardContent —— 消息正文超长时落盘。
+     *
+     * 三处本来就指向同一个目录、行为等价。提升为 single 的理由不是省内存，
+     * 而是让「溢出目录在哪」只有一处定义 —— 散在三处的新建实例里，
+     * 改目录时漏一个就会出现「存进去取不回来」。
+     */
+    single {
+        dev.praxis.data.spill.SpillStore(
+            java.io.File(androidContext().filesDir, "spill"),
+        )
+    }
     single {
         dev.praxis.data.ChatRepository(
             sessionDao = get(),
             messageDao = get(),
             // 中间插入（摘要）需要 withTransaction，所以要把库实例传进去。
             db = get(),
+            // 正文超长时落盘 + 截断（见 ChatRepository.guardContent）。
+            spillStore = get(),
         )
     }
     single<dev.praxis.feature.chat.ChatPersistence> {
@@ -476,14 +496,11 @@ val appModule = module {
             //
             // 与 `LinuxToolPortImpl` 里那份 `SpillStore` 指向同一个目录（懒创建），
             // 所以这里新建一个实例也能读到同样的文件。
-            run {
-                val spillDir = java.io.File(androidContext().filesDir, "spill")
-                registerAll(
-                    dev.praxis.data.spill.ReadSpillTool(
-                        dev.praxis.data.spill.SpillStore(spillDir),
-                    ),
-                )
-            }
+            // 与 LinuxToolPortImpl、ChatRepository 共用同一个 single：
+            // 三处指向同一目录，但只有一处定义目录（见上面 SpillStore 的注册）。
+            registerAll(
+                dev.praxis.data.spill.ReadSpillTool(get()),
+            )
         }
     }
     single { ToolExecutor(get<ToolRegistry>()) }
