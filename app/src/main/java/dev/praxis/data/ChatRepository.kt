@@ -151,7 +151,38 @@ class ChatRepository(
      * 单测就无法在不启 Room 的情况下验证「递增」这条不变式
      * （现有测试正是这么测的）。`Mutex` 保住了可测性。
      */
-    private val appendLock = Mutex()
+    /**
+     * **每个会话**一把锁（2026-11-07，R10）。
+     *
+     * ## 为什么不是全局一把
+     *
+     * 旧实现是一把全局 `Mutex`：两个会话同时写消息也要排队。
+     * 而锁保护的其实只是「读 `MAX(orderIndex)` 再插入」这一小段，
+     * 它天然是**会话内**的约束 —— A 会话的 `orderIndex` 与 B 会话无关。
+     *
+     * 真机上「切换会话时上一条还在落盘」是常态，全局锁让新会话的
+     * 第一条消息也要等前面那条写完。改成每会话后两者互不阻塞。
+     *
+     * ## 为什么用 ConcurrentHashMap 而不是 synchronized
+     *
+     * `withLock` 是挂起式的：等锁时不占线程。`synchronized` 会把线程
+     * 堵在那里，而这是每个消息都要走的路径。
+     *
+     * ## 内存
+     *
+     * map 会随会话数增长。会话删除时调 [forgetSessionLock] 清掉，
+     * 否则长时间使用会累积几万个 Mutex（每个几十字节，可控但不必要）。
+     */
+    private val appendLocks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+
+    /** 取某个会话的写锁。 */
+    private fun appendLockFor(sessionId: String): Mutex =
+        appendLocks.getOrPut(sessionId) { Mutex() }
+
+    /** 会话删除后清掉它的锁，避免 map 无限增长。 */
+    fun forgetSessionLock(sessionId: String) {
+        appendLocks.remove(sessionId)
+    }
 
     fun observeSessions(): Flow<List<SessionEntity>> = sessionDao.observeAll()
 
@@ -224,14 +255,14 @@ class ChatRepository(
     ): Long {
         // ## 守卫放在锁外（2026-11-07）
         //
-        // guardContent 可能落盘（文件 IO）。把它放进 appendLock 会占着锁做 IO，
+        // guardContent 可能落盘（文件 IO）。把它放进锁内会占着锁做 IO，
         // 而工具连续返回时同一个会话里可能有多个 append 在等锁 —— 临界区里
         // 一次几百毫秒的磁盘写就能让整轮对话卡住。
         val storedContent = guardContent(content)
 
         // 整个「读 MAX → 插入」必须在锁内：并发时两条协程会读到同一个 MAX。
-        // 详见 [appendLock] 的 KDoc。
-        val id = appendLock.withLock {
+        // 详见 [appendLocks] 的 KDoc。
+        val id = appendLockFor(sessionId).withLock {
             val nextIndex = messageDao.maxOrderIndex(sessionId) + 1
             messageDao.insert(
                 MessageEntity(
@@ -306,7 +337,7 @@ class ChatRepository(
     /**
      * 追加一个变体版本（一次写入就带上变体列）。
      *
-     * ## 为什么必须走 [appendLock]
+     * ## 为什么必须走会话锁
      *
      * 与 [appendMessage] 同一个理由：`maxOrderIndex` + `insert` 之间若被
      * 另一条协程插入，两条消息会拿到同一个 `orderIndex`。而变体场景下
@@ -319,7 +350,7 @@ class ChatRepository(
         index: Int,
         content: String,
     ): Long {
-        val id = appendLock.withLock {
+        val id = appendLockFor(sessionId).withLock {
             val nextIndex = messageDao.maxOrderIndex(sessionId) + 1
             messageDao.insert(
                 MessageEntity(
@@ -390,7 +421,7 @@ class ChatRepository(
         // 界面上看起来「摘要跳到了对话下面」。
         //
         // 正确做法是取一个落在目标位置前后两行之间的值。
-        // 并发窗口（算完到这里腾位之间）由 appendLock 之外的极小时间覆盖。
+        // 并发窗口（算完到这里腾位之间）由锁之外的极小时间覆盖。
         val anchoredCreatedAt = resolveAnchoredCreatedAt(sessionId, atOrderIndex)
 
         // ## 锚点不可用 -> 拒绝中间插入，改为追加（2026-11-07，R9）
@@ -424,7 +455,7 @@ class ChatRepository(
             db.withTransaction {
                 // 与 appendMessage 抢同一把锁：事务只保证「后移 + 插入」是原子的，
                 // 防不住另一条协程在事务之前刚读完 MAX 又插到同一位置。
-                appendLock.withLock {
+                appendLockFor(sessionId).withLock {
                     // 先腾位，再插入。顺序不能反：先插会与目标位置那一行并列，
                     // 之后才后移会把新行也一起推开（它已经满足 `>= fromIndex`）。
                     messageDao.shiftOrderIndexFrom(
@@ -449,7 +480,7 @@ class ChatRepository(
             }
         } else {
             // 无事务的降级路径（单测）。顺序同上。
-            appendLock.withLock {
+            appendLockFor(sessionId).withLock {
                 messageDao.shiftOrderIndexFrom(
                     sessionId = sessionId,
                     fromIndex = atOrderIndex,
@@ -498,6 +529,19 @@ class ChatRepository(
     suspend fun deleteSession(sessionId: String) {
         // 消息由外键 CASCADE 自动清除，这里不手动删 —— 手动删容易漏。
         sessionDao.delete(sessionId)
+        // 锁随会话一起回收（R10）：appendLocks 会随「用过的会话数」增长，
+        // 不清理的话长时间使用会累积几万个 Mutex（每个几十字节，可控但不必要）。
+        forgetSessionLock(sessionId)
+    }
+
+    /**
+     * 写入上下文用量（R10）。
+     *
+     * 走单条 UPDATE，**不碰 upsert** —— 后者是 REPLACE（先删后插），
+     * 会连带触发 messages 的 CASCADE 把聊天记录删光。
+     */
+    suspend fun updateContextUsage(sessionId: String, used: Int, limit: Int) {
+        sessionDao.setContextUsage(sessionId, used, limit)
     }
 
     /**

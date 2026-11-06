@@ -35,7 +35,7 @@ import dev.praxis.core.data.character.PromptTagEntity
         CharacterCardEntity::class,
         PromptTagEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.CharacterDatabase {
@@ -390,5 +390,30 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
             }
         }
 
+        /**
+         * v11：sessions 加 contextUsed / contextLimit（2026-11-07，R10）。
+         *
+         * ## 为什么可以只 ADD COLUMN
+         *
+         * 两列都是非空整数、默认 0，而 0 正是老数据的**正确**语义：
+         * 「还不知道这个会话用了多少上下文」。不需要回填、不需要重建表。
+         *
+         * ## 默认值必须写进 DDL
+         *
+         * Room 会把建表语句与期望 schema 逐字比对。Kotlin 侧写了 `= 0`
+         * 而 DDL 里漏掉 `DEFAULT 0`，启动就会报
+         * `Migration didn't properly handle` —— 应用直接起不来。
+         *
+         * ## 为什么不做成 destructive
+         *
+         * sessions 是 messages 的外键父表（`ON DELETE CASCADE`），
+         * 删表重建等于清空用户全部聊天记录。两个默认 0 的列不值得这个代价。
+         */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `sessions` ADD COLUMN `contextUsed` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `sessions` ADD COLUMN `contextLimit` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
     }
 }

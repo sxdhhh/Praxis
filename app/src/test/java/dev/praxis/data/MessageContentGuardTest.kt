@@ -83,6 +83,9 @@ class MessageContentGuardTest {
     private class FakeSessionDao : SessionDao {
         override suspend fun touch(id: String, ts: Long) = Unit
 
+        // R10 新增：用量持久化。测试不关心它，但要满足接口。
+        override suspend fun setContextUsage(id: String, used: Int, limit: Int) = Unit
+
         override fun observeAll(): Flow<List<SessionEntity>> = flowOf(emptyList())
         override fun count(): Flow<Int> = flowOf(0)
         override suspend fun upsert(session: SessionEntity) = TODO()

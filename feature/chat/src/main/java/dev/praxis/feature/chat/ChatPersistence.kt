@@ -119,6 +119,20 @@ interface ChatPersistence {
     suspend fun deleteMessage(messageId: Long) {}
 
     /**
+     * 持久化上下文用量（2026-11-07，R10）。
+     *
+     * ## 为什么值得存
+     *
+     * 用量本来只活在内存缓存里。重启后要等第一次请求算完才有数字，
+     * 而那时用户可能已经盯着一个「0 / 128k」的进度条好几秒。
+     *
+     * 存一次「上次算出来的值」，进会话立刻就有可信的起点。
+     *
+     * 默认空实现：与其它可选能力同一纪律，测试替身不用改就能编译。
+     */
+    suspend fun updateContextUsage(sessionId: String, used: Int, limit: Int) {}
+
+    /**
      * 置顶 / 取消置顶。
      *
      * 单独一个方法而不是「读 SessionItem 改字段再整条写回」：
