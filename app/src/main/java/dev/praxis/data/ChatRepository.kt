@@ -390,9 +390,36 @@ class ChatRepository(
         // 界面上看起来「摘要跳到了对话下面」。
         //
         // 正确做法是取一个落在目标位置前后两行之间的值。
-        // 并发窗口（算完到这里腾位之间）由 appendLock 之外的极小时间覆盖，
-        // R9 会把锚点解析挪进锁内并补齐 5 项校验。
+        // 并发窗口（算完到这里腾位之间）由 appendLock 之外的极小时间覆盖。
         val anchoredCreatedAt = resolveAnchoredCreatedAt(sessionId, atOrderIndex)
+
+        // ## 锚点不可用 -> 拒绝中间插入，改为追加（2026-11-07，R9）
+        //
+        // 五项校验（见 resolveAnchoredCreatedAt）里任何一条不满足都会返回 null。
+        // 此时**不能硬插**：
+        //
+        //  - 顺序非法意味着这个位置的 createdAt 已经不可信，硬取中点会把行放到
+        //    语义错误的地方；
+        //  - 而摘要的位置**就是**上下文裁剪的依据（CompactionApplier 按位置切），
+        //    插错位置等于压缩行为出错，且重启后依然错。
+        //
+        // 追加到末尾是保守选择：位置不理想，但内容一定在，且原因进了诊断日志。
+        if (anchoredCreatedAt == null) {
+            dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
+                "db",
+                "中间插入被拒绝（锚点不可用），退化为追加：atOrderIndex=" + atOrderIndex,
+            )
+            return appendMessage(
+                sessionId = sessionId,
+                role = role,
+                content = content,
+                toolName = toolName,
+                toolArgs = toolArgs,
+                toolCallId = toolCallId,
+                isError = isError,
+            )
+        }
+
         val id = if (db != null) {
             db.withTransaction {
                 // 与 appendMessage 抢同一把锁：事务只保证「后移 + 插入」是原子的，
@@ -579,30 +606,53 @@ class ChatRepository(
     /**
      * 为一个「插到历史中间」的消息算时间戳。
      *
-     * ## 三种情况
+     * ## 返回 null 的意思是「拒绝这次中间插入」（2026-11-07，R9）
      *
-     *  - 目标位置为空（插在末尾）-> 走分配器，拿一个比所有历史都大的值；
-     *  - 目标位置是第一条（插在开头）-> 比它小 1；
-     *  - 前后都有 -> 取中点。间隔不足 1 时退化为「前一条 + 1」，
-     *    因为整数时间戳没有更细的刻度可用。
+     * 调用方据此改走 append —— 位置不准好过内容丢失，
+     * 但绝不硬算一个假的中点。
      *
-     * 查询失败时一律退回分配器：插入位置可能不准，但**至少不会崩**，
-     * 也不会产生与历史并列的时间戳。
+     * ## 旧实现（R6）为什么不行
+     *
+     * 它在算不出来时静默退回分配器：位置错了却**看不出来**。
+     * 而摘要插错位置会让「重启后压缩失效」—— 因为 `CompactionApplier.apply`
+     * 是按摘要的**位置**裁剪的：摘要跑到末尾，它后面就没有可裁剪的内容了。
+     *
+     * ## 五项校验（对齐 Operit `resolveAnchoredMessageLocked`）
+     *
+     *  1. 会话为空 -> 这不是「中间插入」，交给分配器；
+     *  2. 只有后锚点 -> 插在最前，比它小 1；
+     *  3. 只有前锚点 -> 插在最后，比它大 1；
+     *  4. **顺序非法**：`orderIndex` 说前锚点在前，而 `createdAt` 反了
+     *     -> 拒绝。这是历史脏数据（R7 迁移只回填了摘要行），
+     *     硬取中点会落在一个语义错误的位置上；
+     *  5. **间隔不足 1**：整数时间戳没有更细的刻度，取不出「严格介于两者之间」
+     *     的值 -> 拒绝。
+     *
+     * 查询本身抛异常时也返回 null（当作「锚点不可用」）—— 与「拒绝」同一处理，
+     * 不区分「查不到」和「查失败」：两者对调用方的含义相同。
      */
-    private suspend fun resolveAnchoredCreatedAt(sessionId: String, atOrderIndex: Int): Long {
-        val atTarget = runCatching { messageDao.atOrderIndex(sessionId, atOrderIndex) }
-            .getOrNull() ?: return timestampAllocator.next()
+    private suspend fun resolveAnchoredCreatedAt(sessionId: String, atOrderIndex: Int): Long? {
+        val atTarget = runCatching { messageDao.atOrderIndex(sessionId, atOrderIndex) }.getOrNull()
         val previous = if (atOrderIndex > 0) {
             runCatching { messageDao.atOrderIndex(sessionId, atOrderIndex - 1) }.getOrNull()
         } else {
             null
         }
+        val before = previous
+        val after = atTarget
         return when {
-            previous == null -> atTarget.createdAt - 1L
-            else -> {
-                val span = atTarget.createdAt - previous.createdAt
-                if (span <= 1L) previous.createdAt + 1L else previous.createdAt + span / 2L
-            }
+            // ① 会话为空：第一条消息，不是中间插入。
+            before == null && after == null -> timestampAllocator.next()
+            // ② 插在最前。此处 after 必非空（上一分支已排除两者都空）。
+            before == null -> after!!.createdAt - 1L
+            // ③ 插在最后。
+            after == null -> before.createdAt + 1L
+            // ④ 顺序非法。
+            before.createdAt >= after.createdAt -> null
+            // ⑤ 间隔不足 1。
+            after.createdAt - before.createdAt <= 1L -> null
+            // 取中点：严格落在两者之间。
+            else -> before.createdAt + (after.createdAt - before.createdAt) / 2L
         }
     }
 
