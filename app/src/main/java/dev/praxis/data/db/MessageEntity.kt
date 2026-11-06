@@ -29,7 +29,15 @@ import androidx.room.PrimaryKey
     ],
     indices = [
         Index("sessionId"),
-        Index(value = ["sessionId", "orderIndex"]),
+        // ## 为什么是 createdAt 而不是 orderIndex（2026-11-07，R6/R7）
+        //
+        // 排序键已经换成 createdAt（见 MessageDao.observeSession），
+        // 索引必须跟着换，否则每次读会话都是全表扫描 + 临时排序：
+        // 一条会话几千行时足以让「进入会话」卡一下。
+        //
+        // orderIndex 的索引一并去掉：它不再参与任何查询排序，
+        // 留着只是白白拖慢每次插入（每多一个索引，写入就多一次 B 树维护）。
+        Index(value = ["sessionId", "createdAt"]),
         // 变体组查询：`WHERE sessionId = ? AND variantGroupId = ?`。
         // 列顺序不能反（复合索引只对前缀生效）；索引名必须合 Room 的
         // `index_<表>_<列...>` 命名，否则启动时 schema 校验会报
