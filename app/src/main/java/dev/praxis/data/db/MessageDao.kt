@@ -26,9 +26,32 @@ interface MessageDao {
     suspend fun deleteAllInSession(sessionId: String)
 
     /**
-     * 按写入顺序读整个会话。
+     * 按时间顺序读整个会话。
      *
-     * ## 为什么必须是 `orderIndex, id` 双键排序（2026-10-24 修）
+     * ## 为什么第一排序键是 `createdAt`（2026-11-07，R6 改动）
+     *
+     * 之前是 `orderIndex, id`。现在换成 `createdAt, id`，原因是
+     * `orderIndex` 有两个治不好的问题：
+     *
+     *  1. **它由数据库分配**（`MAX(orderIndex) + 1`），与业务顺序隔着一次
+     *     异步调用。R3 把两条写入路径串成了同步，但分配机制本身仍然脆弱：
+     *     任何新加的写入路径只要忘了串行，顺序就又乱。
+     *  2. **它容不下「插到历史中间」**。摘要要插在被折叠那段的末尾，
+     *     用 `orderIndex` 就得把后面所有行整体后移；而时间戳可以直接
+     *     取前后两行的中点（见 `ChatRepository.insertMessageAt`）。
+     *
+     * `createdAt` 由 `MessageTimestampAllocator` 分配，保证**严格递增**，
+     * 且分配在业务代码里、跟着代码顺序走。
+     *
+     * ## `id ASC` 为什么必须保留
+     *
+     * 历史数据里可能存在同一毫秒的 `createdAt`（那时还没有分配器）。
+     * `id` 是 `AUTOINCREMENT`，其递增顺序就是真实插入顺序，
+     * 用它兜底能让**脏数据也排对**，无需迁移。
+     *
+     * ## 历史沿革：为什么曾经是 `orderIndex, id`
+     *
+     * 旧实现只写 `ORDER BY orderIndex ASC`
      *
      * 旧实现只写 `ORDER BY orderIndex ASC`。而 `orderIndex` **允许重复**：
      * 索引是 `Index(value = ["sessionId", "orderIndex"])`，**不是 UNIQUE**。
@@ -59,7 +82,7 @@ interface MessageDao {
      */
     @Query(
         "SELECT * FROM messages WHERE sessionId = :sessionId " +
-            "ORDER BY orderIndex ASC, id ASC",
+            "ORDER BY createdAt ASC, id ASC",
     )
     fun observeSession(sessionId: String): Flow<List<MessageEntity>>
 

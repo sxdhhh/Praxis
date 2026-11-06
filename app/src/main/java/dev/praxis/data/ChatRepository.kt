@@ -55,6 +55,17 @@ class ChatRepository(
      * 而不是截断 —— 宁可在测试里保留原文，也不要静默丢数据。
      */
     private val spillStore: dev.praxis.data.spill.SpillStore? = null,
+    /**
+     * 消息时间戳分配器（R6 起，排序键是 `createdAt`）。
+     *
+     * ## 为什么由这里注入而不是内部 new
+     *
+     * 恢复历史后要把水位推高（`observe(maxCreatedAt)`），
+     * 而那次调用发生在 `ChatViewModel` 侧。两边必须是**同一个实例**，”
+     * 否则恢复推高的是另一个对象的水位，新消息仍然可能排在历史之前。
+     */
+    private val timestampAllocator: dev.praxis.core.model.MessageTimestampAllocator =
+        dev.praxis.core.model.MessageTimestampAllocator(),
 ) {
 
     companion object {
@@ -232,7 +243,8 @@ class ChatRepository(
                     toolArgs = toolArgs,
                     toolCallId = toolCallId,
                     isError = isError,
-                    createdAt = now(),
+                    // 排序键：由分配器保证严格递增（见 MessageTimestampAllocator）。
+                    createdAt = timestampAllocator.next(),
                 ),
             )
         }
@@ -371,6 +383,16 @@ class ChatRepository(
         toolCallId: String? = null,
         isError: Boolean = false,
     ): Long {
+        // ## 锚定时间戳必须在腾位**之前**算（R6）
+        //
+        // 排序键换成 createdAt 之后，如果这里直接给 now()，
+        // 摘要会拿到「当前时间」= 整个会话最新 —— 于是它排到**末尾**，
+        // 界面上看起来「摘要跳到了对话下面」。
+        //
+        // 正确做法是取一个落在目标位置前后两行之间的值。
+        // 并发窗口（算完到这里腾位之间）由 appendLock 之外的极小时间覆盖，
+        // R9 会把锚点解析挪进锁内并补齐 5 项校验。
+        val anchoredCreatedAt = resolveAnchoredCreatedAt(sessionId, atOrderIndex)
         val id = if (db != null) {
             db.withTransaction {
                 // 与 appendMessage 抢同一把锁：事务只保证「后移 + 插入」是原子的，
@@ -393,7 +415,7 @@ class ChatRepository(
                             toolArgs = toolArgs,
                             toolCallId = toolCallId,
                             isError = isError,
-                            createdAt = now(),
+                            createdAt = anchoredCreatedAt,
                         ),
                     )
                 }
@@ -416,7 +438,7 @@ class ChatRepository(
                         toolArgs = toolArgs,
                         toolCallId = toolCallId,
                         isError = isError,
-                        createdAt = now(),
+                        createdAt = anchoredCreatedAt,
                     ),
                 )
             }
@@ -428,9 +450,23 @@ class ChatRepository(
     /** 一次性列出会话（按 updatedAt 倒序）。 */
     suspend fun loadSessionsOnce(): List<SessionEntity> = sessionDao.observeAll().first()
 
-    /** 一次性读全部消息（启动恢复用；实时观察走 observeMessages）。 */
-    suspend fun loadMessagesOnce(sessionId: String): List<MessageEntity> =
-        messageDao.observeSession(sessionId).first()
+    /**
+     * 一次性读全部消息（启动恢复用；实时观察走 observeMessages）。
+     *
+     * ## 读历史必须**同时**推高时间戳水位（2026-11-07，R6）
+     *
+     * 进程刚起来时分配器的水位是 0。若不管，下一条新消息会拿到一个
+     * 比所有历史都小的时间戳，于是被排到**几小时前的对话前面** ——
+     * 用户看到刚发的话出现在最上面。
+     *
+     * 放在这里而不是 ChatViewModel：所有恢复路径（首屏、切换会话、
+     * 变体切换）都要经过本方法，一处挂钩就能全覆盖。
+     */
+    suspend fun loadMessagesOnce(sessionId: String): List<MessageEntity> {
+        val rows = messageDao.observeSession(sessionId).first()
+        rows.maxOfOrNull { it.createdAt }?.let { timestampAllocator.observe(it) }
+        return rows
+    }
 
     suspend fun deleteSession(sessionId: String) {
         // 消息由外键 CASCADE 自动清除，这里不手动删 —— 手动删容易漏。
@@ -540,6 +576,36 @@ class ChatRepository(
      * 修法：用一条 `UPDATE` 只改时间列。`SessionDao` 已经有 `setPinned`
      * 用同样的思路（它的注释里也记过这个坑），这里补一个 `touch`。
      */
+    /**
+     * 为一个「插到历史中间」的消息算时间戳。
+     *
+     * ## 三种情况
+     *
+     *  - 目标位置为空（插在末尾）-> 走分配器，拿一个比所有历史都大的值；
+     *  - 目标位置是第一条（插在开头）-> 比它小 1；
+     *  - 前后都有 -> 取中点。间隔不足 1 时退化为「前一条 + 1」，
+     *    因为整数时间戳没有更细的刻度可用。
+     *
+     * 查询失败时一律退回分配器：插入位置可能不准，但**至少不会崩**，
+     * 也不会产生与历史并列的时间戳。
+     */
+    private suspend fun resolveAnchoredCreatedAt(sessionId: String, atOrderIndex: Int): Long {
+        val atTarget = runCatching { messageDao.atOrderIndex(sessionId, atOrderIndex) }
+            .getOrNull() ?: return timestampAllocator.next()
+        val previous = if (atOrderIndex > 0) {
+            runCatching { messageDao.atOrderIndex(sessionId, atOrderIndex - 1) }.getOrNull()
+        } else {
+            null
+        }
+        return when {
+            previous == null -> atTarget.createdAt - 1L
+            else -> {
+                val span = atTarget.createdAt - previous.createdAt
+                if (span <= 1L) previous.createdAt + 1L else previous.createdAt + span / 2L
+            }
+        }
+    }
+
     private suspend fun touchSession(sessionId: String) {
         // 不先 find 判空：UPDATE 命中 0 行是无害的，
         // 而多一次 SELECT 在这里没有意义（这是每条消息都会走的路径）。

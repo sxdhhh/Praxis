@@ -207,6 +207,14 @@ val appModule = module {
             java.io.File(androidContext().filesDir, "spill"),
         )
     }
+    /**
+     * 消息时间戳分配器（R6 起，排序键是 createdAt）。
+     *
+     * 必须是 single：ChatRepository 用它在写入时分配时间戳，
+     * 而恢复历史时的「推高水位」也作用在**同一个**实例上。
+     * 两个实例会让恢复推错对象，新消息仍可能排到历史之前。
+     */
+    single { dev.praxis.core.model.MessageTimestampAllocator() }
     single {
         dev.praxis.data.ChatRepository(
             sessionDao = get(),
@@ -215,6 +223,8 @@ val appModule = module {
             db = get(),
             // 正文超长时落盘 + 截断（见 ChatRepository.guardContent）。
             spillStore = get(),
+            // 时间戳分配器：与恢复水位共用同一个 single。
+            timestampAllocator = get(),
         )
     }
     single<dev.praxis.feature.chat.ChatPersistence> {
