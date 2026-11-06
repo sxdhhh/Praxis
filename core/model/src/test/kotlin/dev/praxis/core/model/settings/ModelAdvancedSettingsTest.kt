@@ -18,13 +18,13 @@ class ModelAdvancedSettingsTest {
     /**
      * 分隔符常量，与 [ModelAdvancedSettings.SEPARATOR] 同值。
      *
-     * ## 为什么写成 chr(31) 而不是字面量
+     * ## 为什么写成 toChar(31) 而不是字面量
      *
      * 这是一个不可见的控制字符。直接写字面量既看不见也容易在
      * 编辑/粘贴中丢掉，测试就会变成「拿两个空字符串比相不相等」。
-     * 用 chr(31) 表达意图明确，也不可能被肉眼误读。
+     * 用 toChar(31) 表达意图明确，也不可能被肉眼误读。
      */
-    private val SEP = chr(31).toString()
+    private val SEP = 31.toChar().toString()
 
 
     @Test
