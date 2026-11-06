@@ -99,7 +99,9 @@ class PluginRepositoryTest {
         val fatal = plugin.problems.filterIsInstance<ManifestProblem.Fatal>().single()
         assertEquals("manifest", fatal.field)
         assertTrue("要说清是语法问题：${fatal.message}", fatal.message.contains("语法"))
-        assertNotNull("用户要能看到失败原因", plugin.failureText())
+        // failureText 是属性（String?），不是函数 —— 写成 failureText() 编译不过。
+        // 这个模块的测试同样从未在 CI 上编译过（R12 修的覆盖漏洞）。
+        assertNotNull("用户要能看到失败原因", plugin.failureText)
     }
 
     @Test
