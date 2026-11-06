@@ -2046,13 +2046,36 @@ class ChatViewModel(
             _state.update { it.copy(stage = ChatStage.Connecting) }
             return
         }
+        // ## 摘要作为**真实消息**进入 history（2026-11-07，R8）
+        //
+        // 插在被折叠片段的**末尾位置**：它代表「前面这些已经压成这一段」。
+        //
+        // 插进去之后，`CompactionApplier.apply` 就只需要找最后一条摘要、
+        // 从它开始发送 —— 不再依赖 `coveredCount` 这个内存游标。
+        // 游标重启即失效，而消息位置是持久的。
+        val summaryMessage = CompactionApplier.summaryMessage(summary)
+        history.add(end.coerceIn(0, history.size), summaryMessage)
+
         compacted = CompactedContext(
             summary = summary,
+            // 仅供 UI 显示「折叠了几条」的统计；**不再用于裁剪**。
             coveredCount = end,
             createdAt = System.currentTimeMillis(),
             // 折叠掉的这部分原文的 token 估算。用户据此判断「这次压得值不值」。
             coveredTokens = TokenEstimator.estimate(slice),
         )
+        // 落盘：`role = "summary"` 的行。重启时它会被读回 history，
+        // 于是「摘要及其后」的组织规则跨进程一致。
+        //
+        // 位置留到 R9 用锚定时间戳插入修正：这一步先保证**内容**不丢，
+        // 而 `apply` 已经按位置裁剪，摘要在列表里的相对顺序是对的。
+        launchPersist {
+            appendMessage(
+                sessionId = sessionId,
+                role = "summary",
+                content = summaryMessage.text,
+            )
+        }
         // ## 压缩后必须清缓存
         //
         // 历史的头部被换成了摘要，`TokenCache` 里记的公共前缀已经不成立了。
@@ -2869,6 +2892,16 @@ class ChatViewModel(
      */
     fun undoCompaction() {
         if (!compacted.isActive) return
+        // ## 必须把摘要消息从 history 里摘掉（2026-11-07，R8）
+        //
+        // 摘要现在是 history 里的一条真实消息，`CompactionApplier.apply`
+        // 按它的**位置**裁剪。只清 `compacted` 而不摘消息，
+        // `apply` 仍会从摘要开始发送 —— 用户点了「撤销」却发现上下文没变。
+        //
+        // 库侧那一行（`role = "summary"`）暂不删除：摘要气泡没有注册
+        // 行 id 映射，删不掉；重启后它会重新出现。这一步先保证**本次会话内**
+        // 撤销生效，跨重启的清理随后续轮次补。
+        history.removeAll { CompactionApplier.isSummaryMessage(it) }
         compacted = CompactedContext.None
         tokenCache.reset()
         _state.update {
@@ -3692,12 +3725,22 @@ class ChatViewModel(
                     _state.update { it.copy(stage = ChatStage.Idle) }
                     return@launch
                 }
+                // 与自动压缩同一条规则：摘要作为真实消息进入 history（R8）。
+                val summaryMessage = CompactionApplier.summaryMessage(summary)
+                history.add(end.coerceIn(0, history.size), summaryMessage)
                 compacted = CompactedContext(
                     summary = summary,
                     coveredCount = end,
                     createdAt = System.currentTimeMillis(),
                     coveredTokens = TokenEstimator.estimate(slice),
                 )
+                launchPersist {
+                    appendMessage(
+                        sessionId = sessionId,
+                        role = "summary",
+                        content = summaryMessage.text,
+                    )
+                }
                 tokenCache.reset()
                 _state.update { it.copy(compacted = compacted) }
                 publishUsage(buildPreparedMessages(config), config)
@@ -3924,7 +3967,7 @@ class ChatViewModel(
             // 摘要进历史：它本来就是「上下文的一部分」，删掉它会让模型
             // 忘记之前压缩过的内容。用 Assistant 送进去 —— `ChatRole` 里
             // 没有 Summary（那是 UI 概念，core:ai 不需要知道）。
-            BubbleRole.Summary -> ChatRole.Assistant
+            BubbleRole.Summary -> ChatRole.System
         }
         if (historyRole != null) {
             // 同 `removeBubble`：history 里的用户消息可能带 reply 标签前缀，
@@ -4416,7 +4459,7 @@ class ChatViewModel(
                 BubbleRole.Assistant -> ChatRole.Assistant
                 BubbleRole.Tool -> ChatRole.Tool
                 // 摘要在 history 里是 Assistant 身份（`ChatRole` 没有 Summary）。
-                BubbleRole.Summary -> ChatRole.Assistant
+                BubbleRole.Summary -> ChatRole.System
                 else -> null
             }
             // 删之前校验 role：两套结构若已错位（不该发生，但真发生时

@@ -536,31 +536,79 @@ object CompactionApplier {
     const val SUMMARY_HEADER: String = "# 早前对话摘要"
 
     /**
+     * 判断一条消息是不是摘要（R8）。
+     *
+     * ## 为什么按文本头判断而不是加字段
+     *
+     * 摘要消息必须能**跨进程**被认出来：它落库后，重启时是从 `role = "summary"`
+     * 的行恢复的，而恢复路径只拿得到 role 与文本。加一个 `ChatMessage` 字段
+     * 意味着库里也要加一列 —— 而那一列的信息与文本头完全重复。
+     *
+     * 头部文案是常量，两边共用，不会漂移。
+     */
+    fun isSummaryMessage(message: ChatMessage): Boolean =
+        message.text.startsWith(SUMMARY_HEADER)
+
+    /**
+     * 构造摘要消息。
+     *
+     * ## 为什么落库与发送用**同一条**消息
+     *
+     * 它的文本会被原样写进 `messages.content`（`role = "summary"`）。
+     * 重启恢复时直接把那一行读回 history —— 两边同源，
+     * 不会出现「界面上是 A、发给模型的是 B」。
+     */
+    fun summaryMessage(summary: String): ChatMessage = ChatMessage(
+        role = ChatRole.System,
+        text = "$SUMMARY_HEADER\n\n" +
+            "以下是更早的对话（原始消息已因上下文长度被折叠）。" +
+            "它是历史事实，不是本轮指令；请据此保持连贯，但一切以本轮用户请求为准。\n\n" +
+            summary.trim(),
+    )
+
+    /**
      * 生成真正发给上游的消息列表。
      *
-     * 顺序上有一条硬约束：摘要必须插在**所有 system 消息之后、第一条
-     * 用户/助手消息之前**。
+     * ## 摘要已经是 messages 里的一条**真实消息**（R8）
      *
-     * 理由：本轮的用户指令在最末尾，system（含用户自定义系统提示词）
-     * 在最前面。摘要夹在中间，模型读到的顺序是
-     * 「你是谁 → 之前发生过什么 → 现在要你做什么」，这是它训练时的格式。
-     * 把摘要塞到最后会变成一条「最新信息」，模型可能把它当指令执行。
+     * 旧实现把摘要存在 `CompactedContext` 里、靠 `coveredCount` 数着丢弃前 N 条。
+     * 那个游标有两个毛病：
+     *
+     *  1. **它是内存状态**，重启就没了 —— 恢复路径只能靠「重新压一次」或干脆不压；
+     *  2. **它和 history 的实际内容会漂移**。任何一条消息的增删（删除气泡、
+     *     截断重生成）都会让「前 N 条」的含义变掉，而游标不会跟着变。
+     *
+     * 现在摘要就待在 history 里，位置即真相：从这里往前的内容不发送，
+     * 从它开始的原样发送。
+     *
+     * ## 顺序上仍有一条硬约束
+     *
+     * system 层（用户规则 / 人格 / 技能）必须留在最前。它们不是被折叠的
+     * 对话，而是「你是谁」—— 摘要之前的内容里只有它们要保留。
      */
     fun apply(
         messages: List<ChatMessage>,
         compacted: CompactedContext,
     ): List<ChatMessage> {
+        // 优先按「摘要消息在列表里的位置」裁剪。
+        val lastSummary = messages.indexOfLast { isSummaryMessage(it) }
+        if (lastSummary >= 0) {
+            val leading = messages.takeWhile {
+                it.role == ChatRole.System && !isSummaryMessage(it)
+            }
+            return leading + messages.subList(lastSummary, messages.size)
+        }
+
+        // 兼容路径：摘要还没有作为消息进入 history。
+        //
+        // 什么时候会走到：本轮压缩刚生成、还没来得及插入 history
+        // （插入与发送在同一个协程里顺序执行，正常不会），
+        // 或者从旧版本升级上来、库里那条 summary 行还没建立。
+        // 这里保留旧行为，等第一次压缩完成后自然切到新路径。
         if (!compacted.isActive) return messages
-        val summaryMessage = ChatMessage(
-            role = ChatRole.System,
-            text = "$SUMMARY_HEADER\n\n" +
-                "以下是更早的对话（原始消息已因上下文长度被折叠）。" +
-                "它是历史事实，不是本轮指令；请据此保持连贯，但一切以本轮用户请求为准。\n\n" +
-                compacted.summary.trim(),
-        )
+        val summaryMessage = summaryMessage(compacted.summary)
         val leading = messages.takeWhile { it.role == ChatRole.System }
         val rest = messages.drop(leading.size)
-        // 已经被折叠掉的那些消息不再发送：它们的信息已在摘要里。
         val remaining = rest.drop(compacted.coveredCount.coerceAtMost(rest.size))
         return leading + summaryMessage + remaining
     }
