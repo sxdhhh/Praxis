@@ -457,8 +457,17 @@ class TokenCacheTest {
         val fullTotal = cache.count(full)
         // 截断成前缀（模拟 truncateFrom）。
         val truncated = full.take(2)
-        // 不 reset：会返回旧总数（错误）。
-        assertEquals(fullTotal, cache.count(truncated))
+        // ## 断言跟着事实改（2026-11-07，R12）
+        //
+        // 这条原来写的是 assertEquals(fullTotal, ...)，即「不 reset 会返回
+        // 截断前的旧总数」。实测返回的是截断后的真实值 —— 说明 TokenCache
+        // 已经能识别「新列表是旧列表的前缀」并重算。
+        //
+        // 要守的不变式因此改成：**缓存可以保守，但绝不能虚高**。
+        // 虚高会让进度条显示一个比实际大的数字，用户据此误判「快满了」。
+        val withoutReset = cache.count(truncated)
+        assertEquals(TokenEstimator.estimate(truncated), withoutReset)
+        assertTrue("不能虚高", withoutReset <= fullTotal)
         // reset 之后：得到截断后的真实值。
         cache.reset()
         assertEquals(TokenEstimator.estimate(truncated), cache.count(truncated))

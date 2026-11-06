@@ -82,10 +82,19 @@ class OpenAiToolCallProtocolTest {
     @Test
     fun `文本增量与工具调用可以同时存在`() {
         val a = OpenAiStreamAssembler()
-        a.feed(payload("""{"content":"我来读一下"}"""))
-        a.feed(payload("""{"tool_calls":[{"index":0,"id":"c0","function":{"name":"read_file","arguments":"{}"}}]}"""))
-
-        val events = a.finish()
+        // ## 必须收集 feed() 的返回值（2026-11-07，R12 修）
+        //
+        // 这个 assembler 的设计是**实时下发**：`feed` 的 KDoc 写明
+        // 「返回本片可直接下发的事件（Delta / Done）」，
+        // `finish` 只做收尾（ToolCalls + Done），**不重发已经发过的 Delta**。
+        //
+        // 旧断言丢掉了 feed 的返回值、只翻 finish 的结果，于是永远找不到
+        // 那段文本 —— 而它在第一次 feed 时就已经发出去了。
+        val events = buildList {
+            addAll(a.feed(payload("""{"content":"我来读一下"}""")))
+            addAll(a.feed(payload("""{"tool_calls":[{"index":0,"id":"c0","function":{"name":"read_file","arguments":"{}"}}]}""")))
+            addAll(a.finish())
+        }
         assertTrue(events.filterIsInstance<AiStreamEvent.Delta>().any { it.text.contains("读一下") })
         assertEquals(1, events.filterIsInstance<AiStreamEvent.ToolCalls>().single().calls.size)
     }

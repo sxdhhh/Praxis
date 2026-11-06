@@ -157,11 +157,19 @@ class SummaryCondenserTest {
         val text = "前文<tool name=\"a\"><param name=\"x\">1</param></tool>" +
             "中段<tool_result name=\"a\" status=\"success\"><content>2</content></tool_result>后文"
         val segments = SummaryCondenser.splitSegments(text)
-        assertEquals(4, segments.size)
+        // ## 为什么是 5 段而不是 4（2026-11-07，R12 修）
+        //
+        // 用例里的文本是「前文 + tool 块 + 中段 + tool_result 块 + 后文」，
+        // 而断言写的是 4 —— 漏算了中间那段「中段」。
+        //
+        // 这是断言与用例脱节，不是分块逻辑错。保留「中段」比删掉它更有价值：
+        // 「两个块之间夹着普通文本」正是最容易切错的情形。
+        assertEquals(5, segments.size)
         assertTrue(segments[0] is SummaryCondenser.Segment.Text)
         assertTrue(segments[1] is SummaryCondenser.Segment.Tool)
-        assertTrue(segments[2] is SummaryCondenser.Segment.ToolResult)
-        assertTrue(segments[3] is SummaryCondenser.Segment.Text)
+        assertTrue(segments[2] is SummaryCondenser.Segment.Text)
+        assertTrue(segments[3] is SummaryCondenser.Segment.ToolResult)
+        assertTrue(segments[4] is SummaryCondenser.Segment.Text)
     }
 
     @Test
