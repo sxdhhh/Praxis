@@ -616,7 +616,10 @@ class ChatWiringGuardTest {
     @Test
     fun customTool_stepsGoThroughExecutor() {
         val runner = read("core/tool/src/main/kotlin/dev/praxis/core/tool/custom/CustomToolRunner.kt")
-        assertTrue("没有走 ToolExecutor", runner.contains("executor.executeAll"))
+        // 执行器现在由 lambda 延迟提供（见 CustomToolRunner 的 KDoc：
+        // 直接持有会与 ToolRegistry 形成 Koin 循环依赖，App 启动即崩）。
+        // 断言要跟着改，但**意图不变**：每一步都必须真的走 ToolExecutor。
+        assertTrue("没有走 ToolExecutor", runner.contains("executorProvider().executeAll"))
         assertTrue("没有按步骤推进", runner.contains("def.steps.withIndex()"))
     }
 
