@@ -1811,20 +1811,55 @@ class ChatViewModel(
      * 不是「因为设置读不出来所以发不出去」。
      */
     private suspend fun readRuntimeConfig(): RuntimeConfig {
-        val cfg = runCatching { contextConfigProvider?.invoke() }.getOrNull()
+        // ## 每一处 runCatching 都要留痕（2026-11-07）
+        //
+        // 这些 `getOrNull().orEmpty()` 会把失败**静默**变成空串，
+        // 于是「提示词没注入」在界面上只表现为「模型行为有点怪」，
+        // 排查时无从下手 —— 2026-11-07 那次就卡在这里：
+        // DataStore 里明明有值，却没有任何日志能说明链路断在哪一步。
+        //
+        // 留痕的成本是一条日志，收益是下次一眼看到原因。
+        val cfg = runCatching { contextConfigProvider?.invoke() }
+            .onFailure { noteConfigFailure("上下文配置", it) }
+            .getOrNull()
         return RuntimeConfig(
-            systemPrompt = runCatching { systemPromptProvider?.invoke() }.getOrNull().orEmpty(),
+            systemPrompt = runCatching { systemPromptProvider?.invoke() }
+                .onFailure { noteConfigFailure("系统提示词", it) }
+                .getOrNull().orEmpty(),
             // 人格与系统提示词分开读：它们是不同优先级的两层，
             // 而且「恢复出厂人格」只该清这一个（见 SystemPromptSettings.persona）。
-            persona = runCatching { personaProvider?.invoke() }.getOrNull().orEmpty(),
+            persona = runCatching { personaProvider?.invoke() }
+                .onFailure { noteConfigFailure("人格", it) }
+                .getOrNull().orEmpty(),
             contextLimit = cfg?.contextLimit ?: 0,
             compactThreshold = cfg?.compactThreshold ?: ContextCompactor.DEFAULT_THRESHOLD,
             thinkingEffort = cfg?.thinkingEffort ?: ThinkingEffort.None,
-            summaryModel = runCatching { summaryModelProvider?.invoke() }.getOrNull()
+            summaryModel = runCatching { summaryModelProvider?.invoke() }
+                .onFailure { noteConfigFailure("摘要模型", it) }
+                .getOrNull()
                 ?.takeIf { it.isNotBlank() } ?: model,
             // 缺省 true（流式）：配置读不出来时保持默认体验，
             // 而不是静默把用户切成非流式。
             stream = cfg?.stream ?: true,
+        )
+    }
+
+    /**
+     * 读配置失败时的统一留痕入口。
+     *
+     * ## 为什么收敛成一个方法
+     *
+     * 四处调用点的措辞必须一致，否则日志里会出现
+     * 「读取系统提示词失败」与「提示词读取异常」两种说法，排查时要搜两遍。
+     * 收敛成一处，格式只有一个定义。
+     *
+     * 走 UiDiagnostics 而不是 Timber：feature 层没有 Timber 依赖，
+     * 而 UiDiagnostics 正好是「普通事件」的归属地（见它的 KDoc）。
+     */
+    private fun noteConfigFailure(what: String, error: Throwable) {
+        dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
+            "config",
+            "读取${what}失败：${error.message ?: error::class.simpleName}",
         )
     }
 
@@ -4323,7 +4358,24 @@ class ChatViewModel(
 
     /** 删除单个气泡。 */
     private fun removeBubble(bubbleId: Long) {
-        val bubble = _state.value.bubbles.firstOrNull { it.id == bubbleId } ?: return
+        val snapshot = _state.value.bubbles
+        val bubble = snapshot.firstOrNull { it.id == bubbleId } ?: return
+
+        // ## history 序号必须在删气泡**之前**算（2026-11-07）
+        //
+        // 序号的定义是「这条气泡之前有多少条会进 history 的气泡」，
+        // 而 bubbles 一旦被改动，这个数就算不出来了。
+        //
+        // 对应规则与 `truncateFrom` 完全一致：
+        //
+        //     history ← bubbles 中所有非 Error 气泡，按顺序一一对应
+        //
+        // 两处**必须同规则**：否则「删一条」与「从某条截断」会在同一条
+        // 历史里留下不同的空洞，而两者都声称自己在维护同一份 history。
+        val historyIndex = snapshot
+            .takeWhile { it.id != bubbleId }
+            .count { it.role != BubbleRole.Error }
+
         _state.update { it.copy(bubbles = it.bubbles.filterNot { b -> b.id == bubbleId }) }
 
         // ## 删内存远远不够，必须删库（2026-11-07，BUG-C）
@@ -4346,30 +4398,32 @@ class ChatViewModel(
             launchPersist { deleteMessage(rowId) }
         }
         if (bubble.role != BubbleRole.Error) {
-            // 同样要回退 history：按内容删最后一条匹配的用户/助手消息，
-            // 比按 index 删安全（Error 气泡不占 history 位置）。
-            val role = when (bubble.role) {
+            // ## 按**序号**删，不再按内容匹配（2026-11-07）
+            //
+            // 旧实现是 `indexOfLast { role 匹配 && 内容匹配 }`。它有一个
+            // 用户真的会遇到的问题：连说两次「继续」时，删第二条会命中第一条 ——
+            // 界面上删对了，模型那边却少了一条本该保留的话，
+            // 而用户完全看不出来（下一轮回答只是「莫名变短」）。
+            //
+            // 内容匹配还有第二个坑：history 里的用户消息可能带
+            // `<reply_to …>` 前缀（见 `send()` 的注入），而气泡里只有纯文本，
+            // 于是「回复别人的那条」永远匹配不上 —— 气泡删了、history 还在，
+            // 模型下一轮仍然「记得」这条已经被删掉的话。
+            //
+            // 序号法一次解决这两个问题，且与 `truncateFrom` 同规则。
+            val expectedRole = when (bubble.role) {
                 BubbleRole.User -> ChatRole.User
                 BubbleRole.Assistant -> ChatRole.Assistant
                 BubbleRole.Tool -> ChatRole.Tool
-                // 摘要在 history 里是 Assistant 身份（`ChatRole` 没有 Summary），
-                // 所以删它时要按 Assistant 去匹配 —— 写成 null 会让
-                // history 里留下一条界面上已经不存在的摘要，
-                // 模型下一轮还会读到它（「明明删了却还记得」）。
+                // 摘要在 history 里是 Assistant 身份（`ChatRole` 没有 Summary）。
                 BubbleRole.Summary -> ChatRole.Assistant
                 else -> null
             }
-            if (role != null) {
-                // ## 为什么要先削 reply 标签再比（连带的必改点）
-                //
-                // history 里的用户消息可能带 `<reply_to …>` 前缀（见 `send()`
-                // 里的注入），而气泡里只有纯文本。直接 `it.text == bubble.text`
-                // 在「这条是回复别人的」时永远匹配不上 → 气泡删了、history
-                // 没删 → 模型下一轮仍然「记得」这条被删掉的话。
-                val idx = history.indexOfLast {
-                    it.role == role && stripReplyTag(it.text) == bubble.text
-                }
-                if (idx >= 0) history.removeAt(idx)
+            // 删之前校验 role：两套结构若已错位（不该发生，但真发生时
+            // 旧实现会静默删错），宁可多留一条也不要删错一条。
+            val hit = history.getOrNull(historyIndex)
+            if (expectedRole != null && hit != null && hit.role == expectedRole) {
+                history.removeAt(historyIndex)
             }
         }
     }
