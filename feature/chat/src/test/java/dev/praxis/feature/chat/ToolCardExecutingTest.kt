@@ -93,11 +93,35 @@ class ToolCardExecutingTest {
         override val tier: PermissionTier = PermissionTier.ROOT
     }
 
-    /** 一次性吐出完整 ToolCalls（模拟不发分片的网关）。 */
+    /**
+     * 一次性吐出完整 ToolCalls（模拟不发分片的网关）。
+     *
+     * ## 只在**第一轮**吐工具调用（2026-11-07 修挂起）
+     *
+     * 原来每次 stream 都 emit 同一批 ToolCalls。而 ChatViewModel 在工具跑完之后
+     * 会**再请求一轮**，于是：
+     *
+     *     请求 -> ToolCalls -> 跑工具 -> 请求 -> ToolCalls -> 跑工具 -> ...
+     *
+     * 这是个无限循环。`advanceUntilIdle()` 会一直推进这个循环，永远推不完 ——
+     * 测试就挂在那里。CI 上表现为 240s 超时（exit=124），本地同样是挂。
+     *
+     * 真实网关不会这样：工具执行完的那一轮，模型只会给一段收尾文字。
+     * 假 provider 也照此建模，循环才有终点。
+     */
     private class WholeToolCallsProvider(private val calls: List<ToolCall>) : AiProvider {
         override val displayName: String = "whole-tool-calls"
 
+        /** 第几次被调用（从 0 开始）。用于「只第一轮吐工具」。 */
+        private var turn = 0
+
         override fun stream(request: ChatRequest): Flow<AiStreamEvent> = flow {
+            if (turn++ > 0) {
+                // 续轮：模型不再要求工具，只给一段收尾。
+                emit(AiStreamEvent.Delta("好了"))
+                emit(AiStreamEvent.Done(finishReason = "stop"))
+                return@flow
+            }
             emit(AiStreamEvent.ToolCalls(calls))
             // 工具跑完之后模型还会再答一轮；这里给个终止。
             emit(AiStreamEvent.Done(finishReason = "tool_calls"))
