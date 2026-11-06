@@ -273,10 +273,17 @@ class TerminalSessionToolsTest {
     // ── screen ────────────────────────────────────────────────
 
     @Test
+    // ## max_lines 是必需参数（2026-11-07，R14 补）
+    //
+    // 它挡的是「一次把整个 scrollback 拉进上下文」——那是几千行。
+    // 模型不传会直接报「缺少必需的整数参数」，而不是拿到一段截断的内容
+    // 却不知道自己只看到了一部分。
+    //
+    // 用例原本没传，因为这条约束是在它之后才加的。
     fun `screen 返回屏幕内容`() = runTest {
         val port = portWithSession()
         port.screenText = "root@praxis:~# "
-        val result = GetTerminalScreenTool(port).execute("""{"session_id":"s1"}""", context)
+        val result = GetTerminalScreenTool(port).execute("""{"session_id":"s1","max_lines":50}""", context)
         assertFalse(result.isError)
         assertTrue(result.content.contains("root@praxis"))
     }
@@ -285,7 +292,7 @@ class TerminalSessionToolsTest {
     fun `screen 无内容时也给出可读结果而不是空串`() = runTest {
         val port = portWithSession()
         port.screenText = ""
-        val result = GetTerminalScreenTool(port).execute("""{"session_id":"s1"}""", context)
+        val result = GetTerminalScreenTool(port).execute("""{"session_id":"s1","max_lines":50}""", context)
         assertFalse(result.isError)
         assertTrue(result.content.contains("(空)"))
     }
