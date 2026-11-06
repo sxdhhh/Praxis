@@ -245,6 +245,7 @@ jobs:
         run: |
           timeout --signal=KILL 2400 ./gradlew \
             testDebugUnitTest -x :app:testDebugUnitTest \
+            -x :feature:chat:testDebugUnitTest \
             :core:ai:test \
             :core:goal:test \
             :core:linux:test \
@@ -255,6 +256,45 @@ jobs:
             :core:tool:test \
             :core:workflow:test \
             --stacktrace
+
+      # ## :feature:chat 必须**逐类**跑（2026-11-07，R15 补）
+      #
+      # 全量跑时它会挂起：实测在 CI 上 `> Task :feature:chat:testDebugUnitTest`
+      # 之后 38 分钟零输出，直到 wall-clock timeout 把它杀掉（exit 124）。
+      #
+      # ## 为什么逐类就好
+      #
+      # 17 个测试类**单独跑全部正常**（本地实测每个 24~83 秒，其中大部分是
+      # Gradle 启动开销）。所以问题不在某个类，而在「一次跑全部」这个模式本身 ——
+      # 具体原因还没查到（跨类共享状态？测试框架的清理顺序？）。
+      #
+      # 逐类的价值不是绕过它，而是**让它可定位**：哪一类挂起，日志里就直接
+      # 看得出是哪一类，而不是只知道「这个任务卡了」。这也是 :app 那一步
+      # 早就采用同一做法的原因。
+      - name: Unit tests (:feature:chat, per class)
+        run: |
+          set +e
+          failed=0
+          for CT in ChatContinueTest ChatStageTest ChatStreamingTextTest \
+                    ChatTitleTriggerTest ChatWiringGuardTest MessageContextMenuTest \
+                    MessageEditorPartsTest MessageDeletePersistenceTest \
+                    PendingQueueCodecTest PendingQueueTest ReasoningPersistenceTest \
+                    SendActionModeTest SessionTitleTest SlashQueryTest \
+                    ThrottledContentWriterTest ToolCardExecutingTest BuildTurnEntriesTest; do
+            echo "::group::$CT"
+            timeout --signal=KILL 240 ./gradlew :feature:chat:testDebugUnitTest \
+              --tests "*$CT" --stacktrace
+            rc=$?
+            echo "::endgroup::"
+            if [ $rc -ne 0 ]; then
+              echo "::error::$CT 失败或超时（exit=$rc）"
+              failed=$((failed + 1))
+            fi
+          done
+          if [ $failed -ne 0 ]; then
+            echo "::error::$failed 个 :feature:chat 测试类失败/超时"
+            exit 1
+          fi
 
       # 逐个类跑 :app。任何一个出问题都算失败，但**不提前退出** ——
       # 要让其余类也跑完，这样一次 CI 就能拿到完整名单。

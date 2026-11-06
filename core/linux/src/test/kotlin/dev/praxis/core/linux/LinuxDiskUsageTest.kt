@@ -115,6 +115,21 @@ class LinuxDiskUsageTest {
 
     @Test
     fun `同一 inode 的硬链接只算一次`() {
+        // ## 为什么在 Windows 上跳过（2026-11-07）
+        //
+        // 去重靠 inode。Linux 上用 `unix:dev` + `unix:ino`；
+        // Windows 的 JVM **没有** `unix:*` 属性，退回 `fileKey` ——
+        // 它在 NTFS 上不携带 inode，于是两个硬链接拿到不同的 key，去重失效。
+        //
+        // 这不是被测代码的缺陷：本模块的实际运行环境是 Android 上的
+        // proot 容器（Linux），`unix:dev/ino` 一定可用。
+        // 在 Windows 上断言，等于用一个该环境不具备的能力去否定实现。
+        //
+        // 用 assumeTrue 而不是注释掉：CI（Linux）上它仍然跑、仍然守。
+        org.junit.Assume.assumeTrue(
+            "Windows 的 fileKey 不含 inode，无法验证硬链接去重",
+            !System.getProperty("os.name").orEmpty().startsWith("Windows"),
+        )
         val original = write("orig.bin", 4096)
         // 建硬链接：需要与源在同一文件系统（临时目录满足）。
         val linked = runCatching {

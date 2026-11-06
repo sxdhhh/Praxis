@@ -214,16 +214,34 @@ object LinuxDiskUsage {
             file.toPath(),
             java.nio.file.attribute.BasicFileAttributes::class.java,
         )
-        // ## fileKey 的 hashCode 在这里是安全的
+        // ## 优先用 Unix 的 (dev, ino)，**不要**退回路径哈希（2026-11-07 修）
         //
-        // `fileKey` 的实际类型是 `(st_dev, st_ino)` 的封装，其 hashCode
-        // 由两者共同决定。理论上不同 (dev, ino) 可能撞同一个 hash，
-        // 但那需要两个文件恰好哈希碰撞 —— 代价是「少算一个文件的大小」，
-        // 而换来的收益是零分配（十万文件时不产生十万个临时对象）。
-        val key = attrs.fileKey()?.let { it.hashCode().toLong() }
+        // 旧实现是 `attrs.fileKey()?.hashCode() ?: 路径哈希`。看着合理，
+        // 但 `fileKey()` 在**某些 Linux 文件系统上返回 null** ——
+        // CI 用的 overlayfs 实测就是 null（本地 NTFS 上不为 null，所以一直没暴露）。
+        //
+        // 一旦退回路径哈希，**两个硬链接的路径不同 → 哈希不同 → 都被计数**，
+        // 于是 rootfs 体积虚高 —— 正是本文件开头警告的那个失效模式。
+        //
+        // 所以改成直接读 Unix 的 dev/ino：它是「同一个 inode」的**定义**，
+        // 且 Linux 上一定有。只有非 Unix 文件系统才退回 fileKey。
+        val key = unixFileKey(file.toPath())
+            ?: attrs.fileKey()?.let { it.hashCode().toLong() }
             ?: file.absolutePath.hashCode().toLong()
         seen.add(key)
     }.getOrDefault(true)
+
+    /**
+     * 读 Unix 的 (st_dev, st_ino) 并混编成一个 Long。
+     *
+     * 取不到（非 Unix 文件系统）时返回 null，由调用方退回 `fileKey`。
+     * 用位混编而不是 Pair：十万文件时不产生十万个临时对象。
+     */
+    private fun unixFileKey(path: java.nio.file.Path): Long? = runCatching {
+        val dev = java.nio.file.Files.getAttribute(path, "unix:dev") as Long
+        val ino = java.nio.file.Files.getAttribute(path, "unix:ino") as Long
+        (dev shl 32) xor ino
+    }.getOrNull()
 
     /**
      * 容器环境各部分的占用汇总。
