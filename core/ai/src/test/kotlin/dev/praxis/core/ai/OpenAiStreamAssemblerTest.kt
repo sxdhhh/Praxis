@@ -53,10 +53,14 @@ class OpenAiStreamAssemblerTest {
     fun `all known reasoning field names are accepted`() {
         for (key in listOf("reasoning_content", "reasoning", "thinking")) {
             val a = OpenAiStreamAssembler()
+            // JUnit 没有 (expected, actual, message) 这个重载 ——
+            // 只有 (message, expected, actual)。写成后者会被 Kotlin 解析成
+            // assertEquals(String, Any, Any)，于是 expected 位置期待一个 String，
+            // 编译直接失败。message 必须放第一个。
             assertEquals(
+                "字段名 $key 没被识别",
                 listOf(AiStreamEvent.ReasoningDelta("x")),
                 a.feed(reasoningChunk(key, "x")),
-                "字段名 $key 没被识别",
             )
         }
     }
