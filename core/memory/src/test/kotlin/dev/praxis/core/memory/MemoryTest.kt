@@ -12,7 +12,13 @@ private class FakeStore(initial: List<MemoryItem> = emptyList()) : MemoryStore {
     val items = initial.toMutableList()
     var nextId = (initial.maxOfOrNull { it.id } ?: 0L) + 1
 
-    override suspend fun all(): List<MemoryItem> = items.toList()
+    // ## override 不能带默认值（2026-11-07，R12）
+    //
+    // 接口里是 all(spaceId: String? = MemoryItem.DEFAULT_SPACE_ID)，
+    // 但 Kotlin 规定默认值只能写在**声明**处，override 时再写一遍是编译错误。
+    //
+    // 本 fake 忽略 spaceId：这些用例只验写入管线，不涉及跨空间隔离。
+    override suspend fun all(spaceId: String?): List<MemoryItem> = items.toList()
 
     override suspend fun insert(item: MemoryItem): Long {
         val id = nextId++
@@ -29,7 +35,11 @@ private class FakeStore(initial: List<MemoryItem> = emptyList()) : MemoryStore {
         items.removeAll { it.id == id }
     }
 
-    override suspend fun findSimilar(content: String, threshold: Double): MemoryItem? =
+    override suspend fun findSimilar(
+        content: String,
+        threshold: Double,
+        spaceId: String,
+    ): MemoryItem? =
         items.firstOrNull { jaccardSimilarity(it.content, content) >= threshold }
 }
 
