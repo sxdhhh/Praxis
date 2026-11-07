@@ -67,7 +67,8 @@ function list_windows(args) { return "ok"; }
 
         // 文档 §3.1：advice 工具是纯提示，不要求脚本里有同名函数，也不作为工具暴露。
         assertEquals(1, declarations.size)
-        assertEquals("win:list_windows", declarations[0].name)
+        // 分隔符是下划线：冒号会让 OpenAI 兼容接口拒掉整个请求。
+        assertEquals("win_list_windows", declarations[0].name)
         assertEquals("list_windows", declarations[0].entryFunction)
     }
 
@@ -116,5 +117,37 @@ function list_windows(args) { return "ok"; }
         assertTrue(schema.contains("\"properties\":{}"))
         // required 空也要存在：OpenAI 兼容的校验器会检查它的类型。
         assertTrue(schema.contains("\"required\":[]"))
+    }
+
+    // ── 工具名必须是合法标识（2026-11-07 线上事故）──
+
+    @Test
+    fun 工具名清洗成合法字符() {
+        val text = """
+/* METADATA
+{ "name": "x", "tools": [ { "name": "a.b c" } ] }
+*/
+"""
+        val metadata = ScriptMetadataParser.parse(text)!!.getOrThrow()
+
+        val name = ScriptMetadataParser.toToolDeclarations("sub", metadata)[0].name
+
+        assertEquals("sub_a_b_c", name)
+        assertTrue("必须是合法工具名：" + name, name.matches(Regex("^[A-Za-z0-9_-]{1,64}$")))
+    }
+
+    @Test
+    fun 清洗后撞名加序号而不是覆盖() {
+        val text = """
+/* METADATA
+{ "name": "x", "tools": [ { "name": "a:b" }, { "name": "a_b" } ] }
+*/
+"""
+        val metadata = ScriptMetadataParser.parse(text)!!.getOrThrow()
+
+        val names = ScriptMetadataParser.toToolDeclarations("sub", metadata).map { it.name }
+
+        // 两个工具都要能用：撞名加序号，不然后者会静默覆盖前者。
+        assertEquals(listOf("sub_a_b", "sub_a_b_2"), names)
     }
 }

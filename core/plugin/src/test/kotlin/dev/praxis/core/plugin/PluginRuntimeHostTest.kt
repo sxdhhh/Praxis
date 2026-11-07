@@ -441,7 +441,7 @@ METADATA
         host.load(pkg, content(subpackages = mapOf("win" to script)))
 
         // 注册名带子包前缀（文档 §3.2.3）：多子包同名函数不加前缀会互相覆盖。
-        assertNotNull("METADATA 声明的工具必须注册", registry.find("win:hello"))
-        assertEquals(listOf("win:hello"), host.toolsOf("com.a.pkg"))
+        assertNotNull("METADATA 声明的工具必须注册", registry.find("win_hello"))
+        assertEquals(listOf("win_hello"), host.toolsOf("com.a.pkg"))
     }
 }

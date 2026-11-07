@@ -131,17 +131,51 @@ object ScriptMetadataParser {
      *
      * @param subpackageId 子包 id（不含容器前缀）
      */
-    fun toToolDeclarations(subpackageId: String, metadata: ScriptMetadata): List<PluginToolDeclaration> =
-        metadata.tools
+    fun toToolDeclarations(subpackageId: String, metadata: ScriptMetadata): List<PluginToolDeclaration> {
+        // ## 名字必须是合法的工具名（2026-11-07 线上事故）
+        //
+        // Operit 的内部注册名是 <子包>:<工具>，但 OpenAI 兼容接口只接受
+        // [A-Za-z0-9_-]，带冒号的会被上游拒掉 —— 表现是整次请求 400
+        // 「the tool name is invalid or duplicated」，用户看到的是
+        // 「发不出去」，完全不知道是插件工具名的问题。
+        //
+        // 所以分隔符用下划线，并清洗掉其它非法字符。Praxis 没有对外契约
+        // 依赖冒号，不需要保留两种名字。
+        val used = mutableSetOf<String>()
+        return metadata.tools
             .filter { !it.advice }
-            .map { tool ->
+            .mapNotNull { tool ->
+                val base = sanitizeToolName(subpackageId + "_" + tool.name)
+                    ?: return@mapNotNull null
+                // 清洗后可能撞名（a:b 与 a_b）。撞了就加序号，
+                // 两个工具都还能用，而不是后者静默覆盖前者。
+                var name = base
+                var suffix = 2
+                while (!used.add(name)) {
+                    name = base.take(60) + "_" + suffix
+                    suffix += 1
+                }
                 PluginToolDeclaration(
-                    name = subpackageId + ":" + tool.name,
+                    name = name,
                     description = tool.description.resolve().ifBlank { tool.name },
                     parametersJson = buildParametersSchema(tool.parameters),
                     entryFunction = tool.name,
                 )
             }
+    }
+
+    /**
+     * 清洗成合法的工具名：只留字母、数字、下划线、连字符，最长 64。
+     *
+     * @return null 表示清洗后什么都不剩（调用方据此丢弃这个工具）
+     */
+    fun sanitizeToolName(raw: String): String? {
+        val mapped = raw.map { ch ->
+            if (ch.isLetterOrDigit() || ch == '_' || ch == '-') ch else '_'
+        }.joinToString("")
+        val trimmed = mapped.trim('_').take(64)
+        return trimmed.ifEmpty { null }
+    }
 
     /**
      * 参数列表 → JSON Schema。
