@@ -43,3 +43,9 @@ build.log
 # JVM 崩溃日志（本机内存不足时产生，不该进仓库）
 hs_err_pid*.log
 replay_pid*.log
+
+# 本地开发笔记与记忆库：不发布。
+# 含内网地址、机器与逆向记录，属于本机资料，不进仓库。
+docs/memories/
+docs/HANDOFF.md
+docs/SETTLEMENT.md
