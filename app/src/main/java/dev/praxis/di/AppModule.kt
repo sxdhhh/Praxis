@@ -188,6 +188,22 @@ val appModule = module {
         dev.praxis.data.plugin.PraxisWebViewPluginRuntime(androidContext())
     }
 
+    // 运行时宿主：按包记账工具与入口，卸载时据此释放。
+    single {
+        dev.praxis.core.plugin.PluginRuntimeHost(
+            get<dev.praxis.core.tool.ToolRegistry>(),
+            get<dev.praxis.core.plugin.PluginScriptRuntime>(),
+        )
+    }
+
+    // 启动装载编排：把已启用的包装进运行时。
+    single {
+        dev.praxis.core.plugin.PluginActivation(
+            get<dev.praxis.core.plugin.PluginRepository>(),
+            get<dev.praxis.core.plugin.PluginRuntimeHost>(),
+        )
+    }
+
     // 导入外部归档（.toolpkg / 目录）：`PluginRepository.install` 用它预检。
     //
     // ## 为什么在这里注册成全局可变字段

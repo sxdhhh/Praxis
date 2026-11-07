@@ -105,6 +105,8 @@ fun SettingsHost(
      * 显示「未装配运行时」，而不是让既有调用点全部改签名。
      */
     pluginRuntime: dev.praxis.core.plugin.PluginScriptRuntime? = null,
+    /** 运行时捕获到的入口（包 id → 入口）。合并规则见 collectEntryPoints。 */
+    capturedEntries: Map<String, List<dev.praxis.core.plugin.PluginEntryPoint>> = emptyMap(),
     /**
      * Linux 环境的执行端口（proot / tar / 进程）。
      *
@@ -188,6 +190,7 @@ fun SettingsHost(
         SettingsPageBody(
             route = route,
             pluginRuntime = pluginRuntime,
+            capturedEntries = capturedEntries,
             repository = repository,
             versionName = versionName,
             versionCode = versionCode,
@@ -247,6 +250,8 @@ private fun SettingsPageBody(
     workflowEngine: dev.praxis.core.workflow.WorkflowEngine,
     /** 插件脚本运行时。见 [SettingsHost] 上的同名参数。 */
     pluginRuntime: dev.praxis.core.plugin.PluginScriptRuntime? = null,
+    /** 运行时捕获到的入口（包 id → 入口）。合并规则见 collectEntryPoints。 */
+    capturedEntries: Map<String, List<dev.praxis.core.plugin.PluginEntryPoint>> = emptyMap(),
     /**
      * 角色卡仓储。
      *
@@ -478,6 +483,7 @@ private fun SettingsPageBody(
             } else {
                 dev.praxis.feature.settings.plugin.CompatPluginEntryRoute(
                     repository = repo,
+                    capturedEntries = capturedEntries,
                     modifier = modifier,
                 )
             }

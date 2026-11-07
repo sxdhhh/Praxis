@@ -185,6 +185,21 @@ fun PraxisApp(
      */
     val pluginRuntime: dev.praxis.core.plugin.PluginScriptRuntime =
         org.koin.compose.koinInject()
+
+    /** 运行时宿主：按包记账工具与入口，卸载时据此释放。 */
+    val pluginHost: dev.praxis.core.plugin.PluginRuntimeHost =
+        org.koin.compose.koinInject()
+
+    /** 启动装载编排。 */
+    val pluginActivation: dev.praxis.core.plugin.PluginActivation =
+        org.koin.compose.koinInject()
+
+    // 启动装载：把已启用的包装进运行时。
+    //
+    // 失败不影响启动（一个包坏了不该让应用打不开），报告留给入口页展示。
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        pluginActivation.activateAll()
+    }
     val memoryStore: dev.praxis.core.memory.MemoryStore = org.koin.compose.koinInject()
     val workflowEngine: dev.praxis.core.workflow.WorkflowEngine = org.koin.compose.koinInject()
     val skillRegistry: dev.praxis.core.plugin.SkillRegistry = org.koin.compose.koinInject()
@@ -973,6 +988,7 @@ fun PraxisApp(
                     }
                 },
                 pluginRuntime = pluginRuntime,
+                capturedEntries = pluginHost.capturedEntries(),
                 capabilities = capabilities,
                 onRequestCapability = { capability ->
                     val launched = capabilityRequester.request(

@@ -92,7 +92,7 @@ interface PluginStorage {
 class PluginRepository(
     private val storage: PluginStorage,
     private val now: () -> Long = { System.currentTimeMillis() },
-) {
+) : PluginSource {
 
     /**
      * 扫描所有已安装包。
