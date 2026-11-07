@@ -53,6 +53,9 @@ class PluginRuntimeHostTest {
         var lastSubpackageScripts: Map<String, String> = emptyMap()
         var lastReadFile: ((String) -> String?)? = null
 
+        override suspend fun render(packageId: String, entryId: String): Result<String> =
+            Result.success("""{"tree":{"type":"Text","props":{"text":"ok"}}}""")
+
         override suspend fun invoke(
             packageId: String,
             toolName: String,
@@ -353,6 +356,9 @@ class PluginRuntimeHostTest {
                 entryFunction: String,
                 argumentsJson: String,
             ): ToolResult = throw IllegalStateException("脚本炸了")
+
+            override suspend fun render(packageId: String, entryId: String): Result<String> =
+                Result.failure(IllegalStateException("脚本炸了"))
 
             override suspend fun unload(packageId: String) = Unit
         }

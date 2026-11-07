@@ -64,6 +64,9 @@ object PluginRuntimeBootstrapScript {
         reg.errors.push('registerUiRoute expects an object');
         return;
       }
+      if (typeof def.screen === 'function' && def.id) {
+        root.__praxis_screens[def.id] = def.screen;
+      }
       reg.uiRoutes.push({
         id: def.id,
         route: def.route || def.routeId,
@@ -97,6 +100,9 @@ object PluginRuntimeBootstrapScript {
         reg.errors.push('registerToolboxUiModule expects an object');
         return;
       }
+      if (typeof def.screen === 'function' && def.id) {
+        root.__praxis_screens[def.id] = def.screen;
+      }
       reg.uiRoutes.push({
         id: def.id,
         route: def.route || def.routeId,
@@ -112,6 +118,9 @@ object PluginRuntimeBootstrapScript {
       if (!def || typeof def !== 'object') {
         reg.errors.push('registerDesktopWidget expects an object');
         return;
+      }
+      if (typeof def.screen === 'function' && def.id) {
+        root.__praxis_screens[def.id] = def.screen;
       }
       reg.uiRoutes.push({
         id: def.id,
@@ -137,6 +146,12 @@ object PluginRuntimeBootstrapScript {
 
   var root = typeof globalThis !== 'undefined' ? globalThis : this;
   root.ToolPkg = ToolPkg;
+
+  // 入口 id -> screen 函数。
+  //
+  // 为什么留句柄而不只留个布尔：渲染时要**调用**它。路径不可靠（模块名由
+  // require 解析决定），句柄是注册那一刻作者给的那个函数，不会错。
+  root.__praxis_screens = {};
 
   root.__praxis_registrations_json = function () {
     return JSON.stringify(reg);
@@ -228,6 +243,48 @@ object PluginRuntimeBootstrapScript {
    *
    * @return JSON 字符串：{ ok: true, result } 或 { error }
    */
+  /**
+   * 渲染一个 compose_dsl 入口。
+   *
+   * ## 契约（照 JsComposeDslRuntimeScript.__operit_build_compose_response）
+   *
+   *     entry(ctx) -> { type, props, children, slots }
+   *     响应 = { tree, state, memo }
+   *
+   * entry 取 module.exports.default 或 module.exports.Screen。
+   *
+   * ## ctx 现在是空的
+   *
+   * Operit 的 ctx 由 922 行的 JsComposeDslBridge 构造（状态、动作、主题、资源）。
+   * Praxis 还没有那套桥，所以这里给空对象 —— 依赖 ctx 的入口会抛错，错误回到
+   * 调用方，而不是画出一个假页面。
+   *
+   * @return JSON 字符串：{ tree, state, memo } 或 { error }
+   */
+  root.__praxis_render = function (entryId) {
+    var screen = root.__praxis_screens[entryId];
+    if (typeof screen !== "function") {
+      return JSON.stringify({ error: "入口没有可渲染的 screen: " + entryId });
+    }
+    var bundle = { ctx: {}, state: {}, memo: {} };
+    try {
+      var tree = screen(bundle.ctx);
+      if (tree && typeof tree.then === "function") {
+        return JSON.stringify({
+          error: "入口返回了 Promise；Praxis 的渲染桥只支持同步返回"
+        });
+      }
+      if (!tree || typeof tree !== "object" || typeof tree.type !== "string") {
+        return JSON.stringify({
+          error: "入口没有返回渲染树（需要 { type, props, children, slots }）"
+        });
+      }
+      return JSON.stringify({ tree: tree, state: bundle.state, memo: bundle.memo });
+    } catch (e) {
+      return JSON.stringify({ error: String(e && e.message ? e.message : e) });
+    }
+  };
+
   root.__praxis_invoke = function (entryFunction, argsJson) {
     var fn = null;
     if (typeof root[entryFunction] === 'function') {

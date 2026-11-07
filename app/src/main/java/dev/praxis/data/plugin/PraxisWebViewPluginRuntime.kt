@@ -156,6 +156,30 @@ class PraxisWebViewPluginRuntime(
         }
     }
 
+    override suspend fun render(packageId: String, entryId: String): Result<String> =
+        withContext(Dispatchers.Main) {
+            val engine = engines[packageId]
+                ?: return@withContext Result.failure(
+                    IllegalStateException("插件 " + packageId + " 的运行时已释放"),
+                )
+
+            val raw = unwrapJsString(
+                eval(engine.web, "__praxis_render(" + quoteJs(entryId) + ")"),
+            )
+            val json = runCatching { JSONTokener(raw).nextValue() as? JSONObject }.getOrNull()
+                ?: return@withContext Result.failure(
+                    IllegalStateException("渲染返回了无法解析的结果：" + raw),
+                )
+
+            // 引导脚本把脚本侧异常转成 { error }：这里是它唯一的出口，
+            // 吞掉就成了「页面空白、没人知道为什么」。
+            val error = json.optString("error")
+            if (error.isNotEmpty()) {
+                return@withContext Result.failure(IllegalStateException(error))
+            }
+            Result.success(raw)
+        }
+
     override suspend fun unload(packageId: String) = withContext(Dispatchers.Main) {
         releaseEngine(packageId)
     }

@@ -99,6 +99,19 @@ interface PluginScriptRuntime {
         argumentsJson: String,
     ): ToolResult
 
+    /**
+     * 取某个 UI 入口的渲染树（compose_dsl）。
+     *
+     * ## 为什么返回原始 JSON 而不是已解析的树
+     *
+     * 解析（[ComposeDslParser]）是纯逻辑，放 core:plugin 里能单测；端口只负责
+     * 「让脚本跑起来、把 JSON 拿回来」。混在一起会让运行时依赖 UI 模块。
+     *
+     * @param entryId 注册时给出的入口 id
+     * @return 脚本返回的 { tree, state, memo }；失败时 Result.failure
+     */
+    suspend fun render(packageId: String, entryId: String): Result<String>
+
     /** 卸载一个包：销毁它的运行上下文，释放 WebView。 */
     suspend fun unload(packageId: String)
 }
