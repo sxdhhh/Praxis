@@ -179,8 +179,9 @@ fun PraxisRoute.title(): String = when (this) {
     PraxisRoute.SettingsTerminal -> "终端设置"
     PraxisRoute.SettingsPackages -> "扩展包"
     PraxisRoute.SettingsCompatPluginEntries -> "兼容插件入口"
-    // 成员属性优先于本扩展函数，不会递归。
-    is PraxisRoute.PluginEntry -> this.title
+    // when (this) 的 is 分支不会智能转换 this，必须显式取出来：
+    // 直接写 this.title 会去找 PraxisRoute 上的成员 title，编译不过。
+    is PraxisRoute.PluginEntry -> (this as PraxisRoute.PluginEntry).title
     PraxisRoute.SettingsLog -> "日志"
     PraxisRoute.SettingsAbout -> "关于"
     PraxisRoute.SettingsOpenSourceLicense -> "开源许可"
