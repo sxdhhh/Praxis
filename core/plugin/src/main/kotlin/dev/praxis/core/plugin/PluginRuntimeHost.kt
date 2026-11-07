@@ -30,6 +30,22 @@ data class PluginToolDeclaration(
 }
 
 /**
+ * 待执行的脚本及其在包内的路径。
+ *
+ * ## 为什么必须带路径
+ *
+ * 真实包是多文件产物：`dist/main.js` 里写 `require("./ui/x.js")`。
+ * 不给出「当前模块是谁」，宿主就无法把相对路径解析成包内路径 ——
+ * 只能猜，而猜错的表现是「注册阶段第一步就抛错」，作者完全无从判断。
+ *
+ * 路径语义与 [PluginArchive.normalizePath] 一致：包根相对、`/` 分隔。
+ */
+data class PluginScriptSource(
+    val path: String,
+    val text: String,
+)
+
+/**
  * 脚本执行端口。
  *
  * ## 为什么这层必须抽象
@@ -53,19 +69,22 @@ data class PluginToolDeclaration(
 interface PluginScriptRuntime {
 
     /**
-     * 装载一个包：执行主入口与启用的子包，收集它们注册的工具。
+     * 装载一个包：执行主入口与启用的子包，收集它们注册的工具与入口。
      *
      * @param packageId 包 id（用于日志与隔离）
-     * @param mainScript 主入口脚本正文
-     * @param subpackageScripts 子包 id → 脚本正文（只含启用的）
+     * @param main 主入口脚本（**带路径**：脚本里的 require 是相对自身目录的）
+     * @param subpackages 启用的子包：id → 脚本（同样带路径）
      * @param resourceResolver 资源 key → 字节（图标、模板等按需取）
+     * @param readFile 包内相对路径 → 文本；供脚本 require 用。
+     *        路径一律是**包根相对**、`/` 分隔。返回 null 表示该文件不存在。
      * @return 注册结果；失败时返回错误而不是抛（一个包坏了不该影响别的）
      */
     suspend fun load(
         packageId: String,
-        mainScript: String,
-        subpackageScripts: Map<String, String>,
+        main: PluginScriptSource,
+        subpackages: List<Pair<String, PluginScriptSource>>,
         resourceResolver: (String) -> ByteArray?,
+        readFile: (String) -> String?,
     ): PluginLoadOutcome
 
     /**
@@ -180,17 +199,26 @@ class PluginRuntimeHost(
         val mainScript = content.mainScript
             ?: return PluginLoadOutcome(emptyList(), listOf("主入口脚本 '${content.manifest.main}' 读取失败"))
 
-        // 只装启用中的子包。
-        val enabledSubpackageScripts = content.subpackageScripts
-            .filterKeys { plugin.isSubpackageEnabled(it) }
-            .mapNotNull { (id, script) -> script?.let { id to it } }
-            .toMap()
+        // 只装启用中的子包。路径一起带上：脚本里的 require 相对自身目录。
+        //
+        // 用**已安装插件**的 manifest 而不是 content 的：启停状态记录在
+        // 安装态上（disabledSubpackageIds），而 content 只是这次从归档里
+        // 读到的内容 —— 两者在「用户关掉某个子包」时会不一致。
+        val enabledSubpackages = plugin.manifest.subpackages
+            .filter { plugin.isSubpackageEnabled(it.id) }
+            .mapNotNull { sub ->
+                val text = content.subpackageScripts[sub.id] ?: return@mapNotNull null
+                sub.id to PluginScriptSource(path = sub.entry, text = text)
+            }
 
         val outcome = runtime.load(
             packageId = plugin.id,
-            mainScript = mainScript,
-            subpackageScripts = enabledSubpackageScripts,
+            main = PluginScriptSource(path = plugin.manifest.main, text = mainScript),
+            subpackages = enabledSubpackages,
             resourceResolver = { key -> content.resourceBytes[key] },
+            // 路径先归一化再查表：`./a.js` 与 `a.js` 是同一个文件，
+            // 而表的键是归一化后的形态。
+            readFile = { raw -> PluginArchive.normalizePath(raw)?.let { content.textFiles[it] } },
         )
 
         // ## 入口先记账，工具后注册（2026-11-08）

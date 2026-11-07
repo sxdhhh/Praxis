@@ -9,10 +9,12 @@ import dev.praxis.core.plugin.PluginLoadOutcome
 import dev.praxis.core.plugin.PluginRegistrationCodec
 import dev.praxis.core.plugin.PluginRuntimeBootstrapScript
 import dev.praxis.core.plugin.PluginScriptRuntime
+import dev.praxis.core.plugin.PluginScriptSource
 import dev.praxis.core.tool.ToolResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import org.json.JSONTokener
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
@@ -28,15 +30,15 @@ import kotlin.coroutines.resume
  *
  * ## 一个包一个 WebView
  *
- * 包之间的全局变量必须隔离：`ToolPkg`、`require` 的模块缓存、脚本自己的
- * 模块级状态都挂在全局上。共用一个 WebView 会让 A 包的 `require('x')`
- * 拿到 B 包的缓存。
+ * 包之间的全局变量必须隔离：ToolPkg、require 的模块缓存、脚本自己的
+ * 模块级状态都挂在全局上。共用一个 WebView 会让 A 包的 require 拿到 B 包的缓存。
  *
- * ## 与 Operit 的差距（如实记录）
+ * ## 模块路径
  *
- * Operit 的 JsEngine 有 2767 行，含工具调用桥、Compose DSL 宿主、图片池、
- * 路由网关。这里只做**注册阶段**：跑脚本、收注册结果、能按名调用函数。
- * 宿主能力（Tools.*）尚未暴露 —— 也就是说插件脚本现在还调不到任何系统能力。
+ * 每个脚本执行前都会把 globalThis.__praxis_current_module 设成它自己的
+ * 包内路径，引导脚本里的 require 据此解析相对路径。没有这一步，
+ * dist/main.js 里的 require("./ui/x.js") 会解析成 ui/x.js 而不是
+ * dist/ui/x.js —— 而错误信息只是一句 module not found。
  */
 class PraxisWebViewPluginRuntime(
     private val context: Context,
@@ -45,8 +47,8 @@ class PraxisWebViewPluginRuntime(
     /** 一个包的运行上下文。 */
     private class Engine(
         val web: WebView,
-        /** 包内可读文件（相对路径 → 正文）。当前来自 content.resourceBytes。 */
-        val files: Map<String, String>,
+        /** 包内相对路径 → 文本。供 PraxisHost.readFile（require）使用。 */
+        val readFile: (String) -> String?,
     )
 
     private val engines = ConcurrentHashMap<String, Engine>()
@@ -54,18 +56,17 @@ class PraxisWebViewPluginRuntime(
     @SuppressLint("SetJavaScriptEnabled")
     override suspend fun load(
         packageId: String,
-        mainScript: String,
-        subpackageScripts: Map<String, String>,
+        main: PluginScriptSource,
+        subpackages: List<Pair<String, PluginScriptSource>>,
         resourceResolver: (String) -> ByteArray?,
+        readFile: (String) -> String?,
     ): PluginLoadOutcome = withContext(Dispatchers.Main) {
         // 重装同一包时先释放旧上下文：不然旧 WebView 的全局变量还在，
         // 新脚本会拿到上次的 ToolPkg 注册残留。
         releaseEngine(packageId)
 
-        val files = buildFileTable()
-        val web = createWebView(packageId, files)
-        val engine = Engine(web, files)
-        engines[packageId] = engine
+        val web = createWebView(readFile)
+        engines[packageId] = Engine(web, readFile)
 
         val errors = mutableListOf<String>()
         try {
@@ -73,14 +74,14 @@ class PraxisWebViewPluginRuntime(
             eval(web, PluginRuntimeBootstrapScript.JS)
 
             // 子包脚本先装：主脚本可能在注册阶段就要用到它们的导出。
-            for ((subId, script) in subpackageScripts) {
-                val failure = eval(web, wrapModule(script))
+            for ((subId, source) in subpackages) {
+                val failure = eval(web, wrapModule(source))
                 if (failure != "null") {
                     errors += "子包 " + subId + " 装载失败：" + failure
                 }
             }
 
-            val mainFailure = eval(web, wrapModule(mainScript))
+            val mainFailure = eval(web, wrapModule(main))
             if (mainFailure != "null") {
                 // 主脚本自己坏了：注册阶段跑不起来，直接返回错误，
                 // 不要把「没注册任何东西」当成「包没有入口」。
@@ -126,13 +127,14 @@ class PraxisWebViewPluginRuntime(
                 isError = true,
             )
 
-        val payload = escapeForJsString(argumentsJson)
         val raw = unwrapJsString(
-            eval(engine.web, "__praxis_invoke(" + quoteJs(entryFunction) + ", \"" + payload + "\")"),
+            eval(
+                engine.web,
+                "__praxis_invoke(" + quoteJs(entryFunction) + ", " + quoteJs(argumentsJson) + ")",
+            ),
         )
 
-        val json = runCatching { JSONTokener(raw).nextValue() as? org.json.JSONObject }
-            .getOrNull()
+        val json = runCatching { JSONTokener(raw).nextValue() as? JSONObject }.getOrNull()
         when {
             json == null -> ToolResult(content = "插件返回了无法解析的结果：" + raw, isError = true)
             json.has("error") -> ToolResult(
@@ -142,7 +144,7 @@ class PraxisWebViewPluginRuntime(
             else -> {
                 val result = json.opt("result")
                 ToolResult(
-                    content = if (result == null || result == org.json.JSONObject.NULL) {
+                    content = if (result == null || result == JSONObject.NULL) {
                         "(插件未返回内容)"
                     } else {
                         result.toString()
@@ -167,13 +169,13 @@ class PraxisWebViewPluginRuntime(
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun createWebView(packageId: String, files: Map<String, String>): WebView {
+    private fun createWebView(readFile: (String) -> String?): WebView {
         val web = WebView(context)
         web.settings.javaScriptEnabled = true
         // 包脚本只在本地执行，不需要网络与文件系统访问。
         web.settings.allowFileAccess = false
         web.settings.allowContentAccess = false
-        web.addJavascriptInterface(FileBridge(files), BRIDGE_NAME)
+        web.addJavascriptInterface(FileBridge(readFile), BRIDGE_NAME)
         return web
     }
 
@@ -196,33 +198,20 @@ class PraxisWebViewPluginRuntime(
         }
 
     /**
-     * 把脚本包成 CommonJS 模块。
+     * 把脚本包成 CommonJS 模块，并给它一个「当前位置」。
      *
-     * 不加这一层的话，`exports.registerToolPkg = ...` 会直接抛
-     * 「exports is not defined」，而作者从界面只看到「没反应」。
+     * 不包 exports/module，脚本里的 exports.registerToolPkg = ... 会直接抛
+     * 「exports is not defined」；不设当前模块路径，相对 require 会解析错。
+     * 两种失败在界面上都只表现为「没反应」。
      */
-    private fun wrapModule(source: String): String =
-        "(function(){var exports={};var module={exports:exports};" +
-            "try{" + source + "\n;globalThis.exports=exports;return null;}" +
+    private fun wrapModule(source: PluginScriptSource): String {
+        val path = quoteJs(source.path)
+        return "(function(){" +
+            "var exports={};var module={exports:exports};" +
+            "globalThis.__praxis_current_module=" + path + ";" +
+            "try{" + source.text + "\n;globalThis.exports=exports;return null;}" +
             "catch(e){return String(e&&e.message?e.message:e);}})()"
-
-    /**
-     * 包内文件表（相对路径 → 正文），给 require 用。
-     *
-     * ## 现在是空的，这是明确的不支持，不是偷懒
-     *
-     * `PluginScriptRuntime.load` 只拿到 mainScript / subpackageScripts /
-     * 按 key 索引的资源字节，**没有「包内相对路径 → 正文」这个能力**。
-     * 而真实包是打包产物：sidebar_sillytavern 的 dist/main.js 会
-     * require 同包的 dist/ui/.../index.ui.js。
-     *
-     * 编一份假的文件表只会让 require 在某些包上碰巧成功、在另一些包上
-     * 静默失败。所以这里返回空表，require 直接抛「module not found」，
-     * 错误信息会出现在 PluginLoadOutcome.errors 里。
-     *
-     * 解法是给端口加文件读取能力（下一轮第一件事）。
-     */
-    private fun buildFileTable(): Map<String, String> = emptyMap()
+    }
 
     /** evaluateJavascript 的结果是 JSON 字面量；字符串会被再次转义。 */
     private fun unwrapJsString(raw: String): String {
@@ -243,15 +232,14 @@ class PraxisWebViewPluginRuntime(
         .replace("\r", "\\r")
 
     /** 只读文件桥：给 require 用。 */
-    private class FileBridge(private val files: Map<String, String>) {
+    private class FileBridge(private val readFile: (String) -> String?) {
 
         @JavascriptInterface
-        fun readFile(path: String): String? = files[path] ?: files[path.removePrefix("./")]
+        fun readFile(path: String): String? = readFile.invoke(path)
     }
 
     private companion object {
         const val BRIDGE_NAME = "PraxisHost"
         const val EMPTY_PAGE = "<html><body></body></html>"
-
     }
 }

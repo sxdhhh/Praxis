@@ -37,16 +37,21 @@ class PluginRuntimeHostTest {
 
         override suspend fun load(
             packageId: String,
-            mainScript: String,
-            subpackageScripts: Map<String, String>,
+            main: PluginScriptSource,
+            subpackages: List<Pair<String, PluginScriptSource>>,
             resourceResolver: (String) -> ByteArray?,
+            readFile: (String) -> String?,
         ): PluginLoadOutcome {
             loaded += packageId
-            lastSubpackageScripts = subpackageScripts
+            lastMainPath = main.path
+            lastSubpackageScripts = subpackages.associate { (id, source) -> id to source.text }
+            lastReadFile = readFile
             return PluginLoadOutcome(tools, errors, entryPoints)
         }
 
+        var lastMainPath: String = ""
         var lastSubpackageScripts: Map<String, String> = emptyMap()
+        var lastReadFile: ((String) -> String?)? = null
 
         override suspend fun invoke(
             packageId: String,
@@ -84,6 +89,7 @@ class PluginRuntimeHostTest {
     private fun content(
         main: String? = "// main",
         subpackages: Map<String, String?> = emptyMap(),
+        files: Map<String, String> = emptyMap(),
     ): PluginArchiveContent = PluginArchiveContent(
         manifest = PluginManifest(id = "com.a.pkg", main = "index.js"),
         problems = emptyList(),
@@ -91,6 +97,7 @@ class PluginRuntimeHostTest {
         subpackageScripts = subpackages,
         resourceBytes = emptyMap(),
         manifestEntryName = "manifest.hjson",
+        textFiles = files,
     )
 
     private val declaration = PluginToolDeclaration(
@@ -334,9 +341,10 @@ class PluginRuntimeHostTest {
         val failing = object : PluginScriptRuntime {
             override suspend fun load(
                 packageId: String,
-                mainScript: String,
-                subpackageScripts: Map<String, String>,
+                main: PluginScriptSource,
+                subpackages: List<Pair<String, PluginScriptSource>>,
                 resourceResolver: (String) -> ByteArray?,
+                readFile: (String) -> String?,
             ) = PluginLoadOutcome(listOf(declaration))
 
             override suspend fun invoke(
@@ -381,5 +389,32 @@ class PluginRuntimeHostTest {
         host.unload("pkg.a")
         assertNull(registry.find("a_tool"))
         assertNotNull("卸载 A 不能影响 B", registry.find("b_tool"))
+    }
+
+    // ── 端口带路径与文件读取（R6）──
+
+    @Test
+    fun `装载时把主脚本路径交给运行时`() = runTest {
+        val runtime = FakeRuntime()
+        val host = PluginRuntimeHost(ToolRegistry(), runtime)
+
+        host.load(plugin(), content())
+
+        // 脚本里的 require 是相对自身目录的，不给路径就只能猜。
+        assertEquals("index.js", runtime.lastMainPath)
+    }
+
+    @Test
+    fun `包内文件读取器按归一化路径取文本`() = runTest {
+        val runtime = FakeRuntime()
+        val host = PluginRuntimeHost(ToolRegistry(), runtime)
+        host.load(
+            plugin(),
+            content(files = mapOf("dist/ui/x.js" to "export default 1")),
+        )
+
+        // 脚本写的是 ./dist/ui/x.js；表的键是归一化后的形态。
+        assertEquals("export default 1", runtime.lastReadFile?.invoke("./dist/ui/x.js"))
+        assertNull("读不到就该给 null，而不是空串", runtime.lastReadFile?.invoke("dist/missing.js"))
     }
 }

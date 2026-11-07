@@ -127,6 +127,25 @@ data class PluginArchiveContent(
     val resourceBytes: Map<String, ByteArray>,
     /** 清单文件名（`manifest.hjson` 或 `manifest.json`），便于报错定位。 */
     val manifestEntryName: String,
+    /**
+     * 包内文本文件表：**包根相对路径** → 正文。
+     *
+     * ## 为什么需要它
+     *
+     * 真实包是打包产物：main 脚本会 require 同目录下的 UI 模块脚本。
+     * 没有这张表，脚本在 require 那一行就抛错，注册阶段根本没开始，
+     * 而作者从界面只能看到「没反应」。
+     *
+     * ## 键为什么是包根相对
+     *
+     * 清单可能在唯一的一层子目录里（`mypkg/manifest.json`）。若键保留
+     * `mypkg/` 前缀，脚本里写的 `./ui/x.js` 就对不上了 —— 脚本眼里的
+     * 包根是清单所在目录，不是 zip 根。
+     *
+     * 只收文本类条目（见 [PluginArchiveReader.TEXT_ENTRY_SUFFIXES]）：
+     * 把图片等二进制当文本读进来既占内存又是垃圾数据。
+     */
+    val textFiles: Map<String, String> = emptyMap(),
 ) {
     val isUsable: Boolean get() = problems.none { it is ManifestProblem.Fatal }
 }
@@ -141,6 +160,19 @@ object PluginArchiveReader {
 
     /** 清单候选文件名，按优先级。 */
     private val MANIFEST_CANDIDATES = listOf("manifest.hjson", "manifest.json")
+
+    /**
+     * 收进 [PluginArchiveContent.textFiles] 的条目后缀。
+     *
+     * 只收脚本与清单类文本：图片/字体/WASM 按文本读既浪费内存，
+     * 又会给 require 提供一堆无法执行的内容。
+     */
+    private val TEXT_ENTRY_SUFFIXES = listOf(".js", ".mjs", ".cjs", ".json", ".hjson")
+
+    private fun isTextEntry(entry: String): Boolean {
+        val lower = entry.lowercase()
+        return TEXT_ENTRY_SUFFIXES.any { lower.endsWith(it) }
+    }
 
     /**
      * @param archive 包内容
@@ -193,6 +225,24 @@ object PluginArchiveReader {
                 archive.readBytes(path)?.let { resource.key to it }
             }.toMap()
 
+            // ── 5. 文本文件表（供脚本 require）─────────────────
+            // 键剥掉清单所在的子目录前缀：脚本眼里的包根是清单所在目录。
+            val textFiles = entries.mapNotNull { entry ->
+                if (!isTextEntry(entry)) return@mapNotNull null
+                val normalized = PluginArchive.normalizePath(entry) ?: return@mapNotNull null
+                val relative = if (basePath.isEmpty()) {
+                    normalized
+                } else {
+                    normalized.removePrefix(basePath + "/")
+                }
+                if (relative == normalized && basePath.isNotEmpty()) {
+                    // 不在清单目录之下（例如同级另一个目录），不属于包根。
+                    return@mapNotNull null
+                }
+                val text = archive.readText(entry) ?: return@mapNotNull null
+                relative to text
+            }.toMap()
+
             PluginArchiveContent(
                 manifest = mapped.manifest,
                 problems = mapped.problems,
@@ -200,6 +250,7 @@ object PluginArchiveReader {
                 subpackageScripts = subpackageScripts,
                 resourceBytes = resourceBytes,
                 manifestEntryName = manifestEntry,
+                textFiles = textFiles,
             )
         }
 

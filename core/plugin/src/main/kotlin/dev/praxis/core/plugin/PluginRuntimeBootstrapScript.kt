@@ -155,25 +155,71 @@ object PluginRuntimeBootstrapScript {
    * 所以宿主通过 PraxisHost.readFile 提供同步读取。
    */
   root.__praxis_modules = {};
-  root.require = function (path) {
-    if (typeof path !== 'string' || !path) {
+
+  /**
+   * 把相对请求解析成包根相对路径。
+   *
+   * 例子：当前模块 dist/main.js 里 require('./ui/x.js')
+   *   -> 目录 dist/ + ui/x.js -> dist/ui/x.js
+   * 不以 ./ 开头、也不以 / 开头的请求按包根解析（Node 会去找 node_modules，
+   * 包内没有那种东西，按包根更符合直觉）。
+   */
+  function resolveModulePath(request) {
+    if (typeof request !== 'string' || !request) {
       throw new Error('require expects a module path');
     }
-    var normalized = path.replace(/^\.\//, '');
-    if (root.__praxis_modules[normalized]) {
-      return root.__praxis_modules[normalized].exports;
+    var current = root.__praxis_current_module || '';
+    var slash = current.lastIndexOf('/');
+    var base = slash >= 0 ? current.substring(0, slash + 1) : '';
+    var combined = request.charAt(0) === '/' ? request.substring(1) : base + request;
+    var parts = combined.split('/');
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      var segment = parts[i];
+      if (!segment || segment === '.') {
+        continue;
+      }
+      if (segment === '..') {
+        out.pop();
+        continue;
+      }
+      out.push(segment);
     }
-    if (typeof PraxisHost === 'undefined' || typeof PraxisHost.readFile !== 'function') {
-      throw new Error('PraxisHost.readFile is unavailable; cannot require ' + normalized);
+    return out.join('/');
+  }
+
+  root.require = function (request) {
+    var normalized = resolveModulePath(request);
+    var candidates = [normalized, normalized + '.js', normalized + '/index.js'];
+    var resolved = null;
+    var source = null;
+    for (var i = 0; i < candidates.length; i++) {
+      if (root.__praxis_modules[candidates[i]]) {
+        return root.__praxis_modules[candidates[i]].exports;
+      }
+      if (typeof PraxisHost === 'undefined' || typeof PraxisHost.readFile !== 'function') {
+        throw new Error('PraxisHost.readFile is unavailable; cannot require ' + normalized);
+      }
+      var text = PraxisHost.readFile(candidates[i]);
+      if (typeof text === 'string') {
+        resolved = candidates[i];
+        source = text;
+        break;
+      }
     }
-    var source = PraxisHost.readFile(normalized);
-    if (typeof source !== 'string') {
+    if (resolved === null) {
       throw new Error('module not found in package: ' + normalized);
     }
     var module = { exports: {} };
-    root.__praxis_modules[normalized] = module;
-    var factory = new Function('exports', 'module', 'require', source);
-    factory(module.exports, module, root.require);
+    root.__praxis_modules[resolved] = module;
+    var previous = root.__praxis_current_module;
+    root.__praxis_current_module = resolved;
+    try {
+      var factory = new Function('exports', 'module', 'require', source);
+      factory(module.exports, module, root.require);
+    } finally {
+      root.__praxis_current_module = previous;
+    }
     return module.exports;
   };
 
