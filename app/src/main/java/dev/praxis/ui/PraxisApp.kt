@@ -445,7 +445,7 @@ fun PraxisApp(
                     // 静默吞异常会让下次排查又从零开始。2026-11-07 排查
                     // 「提示词没注入」时最痛的一点就是：DataStore 里明明有值，
                     // 却没有任何日志能说明链路走到了哪一步、在哪一步变空。
-                    val userRules = runCatching { settingsRepository.systemPrompt.first() }
+                    val userRulesRaw = runCatching { settingsRepository.systemPrompt.first() }
                         .onFailure {
                             dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
                                 "prompt",
@@ -453,6 +453,32 @@ fun PraxisApp(
                             )
                         }
                         .getOrNull().orEmpty().trim()
+
+                    // ## 如果这段文字其实是一张角色卡（2026-11-07）
+                    //
+                    // 设置页那个框的名字就叫「系统提示词」，所以用户很容易把
+                    // 一整张卡的 JSON 粘进去。它存进去是纯文本，注入后模型收到的
+                    // 是一坨 JSON —— JSON 是数据不是指令，于是人设一句都不生效，
+                    // 而且没有任何报错可查。
+                    //
+                    // 这里按卡的语义解释一次：能解析成卡就注入卡组装好的提示词，
+                    // 同时记一条诊断，提示用户改到「角色」页导入（那里可编辑、
+                    // 可切换、可导出）。
+                    //
+                    // 解析不出来就是普通规则文本，原样使用 —— 「永远用中文」
+                    // 这类输入完全不受影响。
+                    val asCard = dev.praxis.core.model.character.TavernCardImporter
+                        .promptFromCardJson(userRulesRaw)
+                    val userRules = if (asCard != null) {
+                        dev.praxis.ui.design.diagnostics.UiDiagnostics.note(
+                            "prompt",
+                            "系统提示词其实是一张角色卡，已按角色卡组装后注入" +
+                                "（建议改到「角色」页导入，可编辑可切换）",
+                        )
+                        asCard.trim()
+                    } else {
+                        userRulesRaw
+                    }
 
                     val characterPrompt = runCatching { characterRepository.activePrompt() }
                         .onFailure {

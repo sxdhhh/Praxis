@@ -253,6 +253,41 @@ object TavernCardImporter {
     }
 
     /**
+     * 把「一段可能是一张角色卡的文本」解析成可直接注入的提示词。
+     *
+     * ## 为什么需要它（2026-11-07，真实故障）
+     *
+     * 用户把一整张 Operit 卡的 JSON 粘进了设置里的「系统提示词」输入框。
+     * 那个框存的是纯文本（system_prompt），于是模型收到的是一坨 JSON ——
+     * JSON 是**数据**，不是指令。人设一句都没生效，用户只看到
+     * 「AI 不按我说的演」，而且没有任何报错可查。
+     *
+     * 这里的判断是：只要文本长得像卡，就按卡的语义解释它
+     * （解析 → 组装 prompt）。解析不出来就返回 null，调用方原样使用原文，
+     * 所以普通规则文本（「永远用中文」）完全不受影响。
+     *
+     * 用纯函数而不是放进 Repository：它不碰数据库、不碰 Context，
+     * 可以纯 JVM 单测锁住「粘卡能用」这条路径。
+     *
+     * @return 组装好的提示词；不是卡、或组装结果为空时返回 null
+     */
+    fun promptFromCardJson(raw: String): String? {
+        val trimmed = raw.trim()
+        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null
+        return runCatching {
+            val tavern = parse(trimmed).getOrNull() ?: return null
+            val result = toCharacterCard(tavern, cardId = PASTED_CARD_ID).getOrNull() ?: return null
+            val carried = result.newTags.associateBy { it.id }
+            CharacterPromptComposer
+                .compose(card = result.card, tagLookup = { carried[it] })
+                .takeIf { it.isNotBlank() }
+        }.getOrNull()
+    }
+
+    /** 粘贴路径用的临时卡 id。不落库，只为满足转换函数的必填参数。 */
+    private const val PASTED_CARD_ID: String = "__pasted_card__"
+
+    /**
      * 酒馆卡 → Praxis 角色卡。
      *
      * ## 两种路径
