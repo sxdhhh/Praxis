@@ -27,6 +27,8 @@ class PluginRuntimeHostTest {
     private class FakeRuntime(
         var tools: List<PluginToolDeclaration> = emptyList(),
         var errors: List<String> = emptyList(),
+        /** 假运行时也能报入口 —— 真实实现从 registerUiRoute 等调用里捕获。 */
+        var entryPoints: List<PluginEntryPoint> = emptyList(),
     ) : PluginScriptRuntime {
 
         val loaded = mutableListOf<String>()
@@ -41,7 +43,7 @@ class PluginRuntimeHostTest {
         ): PluginLoadOutcome {
             loaded += packageId
             lastSubpackageScripts = subpackageScripts
-            return PluginLoadOutcome(tools, errors)
+            return PluginLoadOutcome(tools, errors, entryPoints)
         }
 
         var lastSubpackageScripts: Map<String, String> = emptyMap()
@@ -96,6 +98,80 @@ class PluginRuntimeHostTest {
         description = "做点事",
         parametersJson = """{"type":"object","properties":{"x":{"type":"string"}}}""",
     )
+
+    /** 造一个入口（形状取自 Operit 的真实注册载荷）。 */
+    private fun entry(id: String, order: Int = 0): PluginEntryPoint = PluginEntryPoint(
+        id = id,
+        routeId = PluginEntryPoint.routeIdOf("com.a.pkg", id),
+        kind = PluginEntryPoint.Kind.UiRoute,
+        screen = "ui/" + id + ".js",
+        title = LocalizedText.ofZh(id),
+        order = order,
+    )
+
+    /**
+     * 只注册 UI 入口、一个工具都不注册的包，也必须被记账。
+     *
+     * ## 这条守的是一个真实缺陷
+     *
+     * Operit 的 examples/sidebar_sillytavern 正是这种包：registerUiRoute 建页面、
+     * registerNavigationEntry 挂侧边栏，**不注册任何工具**。
+     *
+     * 旧实现在 tools 为空时直接 return，入口被整个丢掉 ——
+     * 表现是「装了包但兼容插件入口页空白」，没有任何报错。
+     */
+    @Test
+    fun `只注册入口不注册工具的包也要记账`() = runTest {
+        val runtime = FakeRuntime()
+        runtime.entryPoints = listOf(entry("dashboard"))
+        val host = PluginRuntimeHost(ToolRegistry(), runtime)
+
+        val outcome = host.load(plugin(), content())
+
+        assertTrue("只注册入口也算装载成功", outcome.isUsable)
+        assertEquals(1, host.entriesOf("com.a.pkg").size)
+        assertEquals(1, host.capturedEntries()["com.a.pkg"]!!.size)
+        assertEquals("只注册入口的包同样持有运行时，卸载要能释放", 1, host.loadedCount)
+    }
+
+    @Test
+    fun `卸载后入口随之消失`() = runTest {
+        val runtime = FakeRuntime()
+        runtime.entryPoints = listOf(entry("dashboard"))
+        val host = PluginRuntimeHost(ToolRegistry(), runtime)
+        host.load(plugin(), content())
+
+        host.unload("com.a.pkg")
+
+        assertTrue("停用后入口不能留在列表里", host.entriesOf("com.a.pkg").isEmpty())
+        assertTrue(host.capturedEntries().isEmpty())
+        assertEquals(listOf("com.a.pkg"), runtime.unloaded)
+    }
+
+    @Test
+    fun `工具与入口可以同时存在`() = runTest {
+        val runtime = FakeRuntime(tools = listOf(declaration))
+        runtime.entryPoints = listOf(entry("dashboard"), entry("settings"))
+        val host = PluginRuntimeHost(ToolRegistry(), runtime)
+
+        host.load(plugin(), content())
+
+        assertEquals(1, host.toolsOf("com.a.pkg").size)
+        assertEquals(2, host.entriesOf("com.a.pkg").size)
+    }
+
+    @Test
+    fun `重复装载不叠加入口`() = runTest {
+        val runtime = FakeRuntime()
+        runtime.entryPoints = listOf(entry("dashboard"))
+        val host = PluginRuntimeHost(ToolRegistry(), runtime)
+
+        host.load(plugin(), content())
+        host.load(plugin(), content())
+
+        // load 内部先 unload 再装；记账是覆盖而不是追加。
+        assertEquals(1, host.entriesOf("com.a.pkg").size)
+    }
 
     @Test
     fun `装载后工具出现在注册表里`() = runTest {

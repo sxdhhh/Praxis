@@ -89,8 +89,18 @@ data class PluginLoadOutcome(
     val tools: List<PluginToolDeclaration>,
     /** 注册过程中出现的错误（JS 抛异常、脚本语法错等）。 */
     val errors: List<String> = emptyList(),
+    /**
+     * 脚本注册的 UI 入口（registerUiRoute / registerNavigationEntry 等）。
+     *
+     * ## 与 tools 是**两条独立的注册线**
+     *
+     * Operit 的 examples/sidebar_sillytavern 这类包**只注册入口、不注册工具**。
+     * 所以判断「这次装载有没有产出」不能只看 tools，否则这类包会被当成空载。
+     */
+    val entryPoints: List<PluginEntryPoint> = emptyList(),
 ) {
-    val isUsable: Boolean get() = errors.isEmpty() || tools.isNotEmpty()
+    val isUsable: Boolean
+        get() = errors.isEmpty() || tools.isNotEmpty() || entryPoints.isNotEmpty()
 }
 
 /**
@@ -122,6 +132,14 @@ class PluginRuntimeHost(
 
     /** 包 id → 该包注册的工具名（按注册顺序）。 */
     private val registeredTools = mutableMapOf<String, MutableList<String>>()
+
+    /**
+     * 包 id → 该包捕获到的 UI 入口（运行时注册的）。
+     *
+     * 与 [registeredTools] 同理：卸载时只能拿到包 id，所以注册时就要记账 ——
+     * 否则停用后入口会永远留在「兼容插件入口」列表里，用户点了必然失败。
+     */
+    private val registeredEntries = mutableMapOf<String, List<PluginEntryPoint>>()
 
     /**
      * 已装载的包 id。
@@ -175,22 +193,35 @@ class PluginRuntimeHost(
             resourceResolver = { key -> content.resourceBytes[key] },
         )
 
-        if (outcome.tools.isEmpty()) {
-            return outcome
+        // ## 入口先记账，工具后注册（2026-11-08）
+        //
+        // 旧实现在 tools 为空时直接 return —— 而 sidebar_sillytavern 那类包
+        // 只注册 UI 入口、一个工具都不注册，于是入口被整个丢掉，
+        // 表现就是「装了包但兼容插件入口页是空的」。
+        //
+        // 入口与工具是两条独立的线，各自记账，互不依赖。
+        if (outcome.entryPoints.isNotEmpty()) {
+            registeredEntries[plugin.id] = outcome.entryPoints.toList()
         }
 
-        // 转成 Tool 并注册（允许替换：更新场景）。
-        val toolObjects = outcome.tools.map { declaration ->
-            PluginBackedTool(
-                packageId = plugin.id,
-                declaration = declaration,
-                runtime = runtime,
-            )
+        if (outcome.tools.isNotEmpty()) {
+            // 转成 Tool 并注册（允许替换：更新场景）。
+            val toolObjects = outcome.tools.map { declaration ->
+                PluginBackedTool(
+                    packageId = plugin.id,
+                    declaration = declaration,
+                    runtime = runtime,
+                )
+            }
+            registry.registerOrReplaceAll(toolObjects)
+            registeredTools[plugin.id] = outcome.tools.map { it.name }.toMutableList()
         }
-        registry.registerOrReplaceAll(toolObjects)
 
-        registeredTools[plugin.id] = outcome.tools.map { it.name }.toMutableList()
-        loadedPackageIds.add(plugin.id)
+        // 只要脚本真的产出过东西（工具或入口），就算已装载 ——
+        // 卸载时要据此释放运行时。只注册入口的包同样持有运行上下文。
+        if (outcome.tools.isNotEmpty() || outcome.entryPoints.isNotEmpty()) {
+            loadedPackageIds.add(plugin.id)
+        }
         return outcome
     }
 
@@ -200,6 +231,7 @@ class PluginRuntimeHost(
      * 幂等：对没装载过的包调用不做事。
      */
     suspend fun unload(packageId: String) {
+        registeredEntries.remove(packageId)
         val names = registeredTools.remove(packageId).orEmpty()
         if (names.isNotEmpty()) {
             registry.removeAll(names)
@@ -211,6 +243,18 @@ class PluginRuntimeHost(
 
     /** 某个包现在贡献了哪些工具。 */
     fun toolsOf(packageId: String): List<String> = registeredTools[packageId].orEmpty().toList()
+
+    /** 某个包捕获到哪些入口（运行时注册的）。 */
+    fun entriesOf(packageId: String): List<PluginEntryPoint> =
+        registeredEntries[packageId].orEmpty()
+
+    /**
+     * 全部包捕获到的入口（包 id → 入口）。
+     *
+     * 返回副本：调用方合并时不应该改动宿主内部的记账表。
+     */
+    fun capturedEntries(): Map<String, List<PluginEntryPoint>> =
+        registeredEntries.mapValues { it.value.toList() }
 
     /** 全部插件贡献的工具名（调试与 UI 统计用）。 */
     fun allPluginToolNames(): Set<String> = registeredTools.values.flatten().toSet()
