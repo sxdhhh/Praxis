@@ -93,7 +93,7 @@ class PluginEntryPointTest {
               "toolpkg_id": "demo.pkg",
               "main": "main.js",
               "entries": [
-                {"id": "panel", "kind": "navigation", "screen": "ui/panel.js"}
+                {"id": "panel", "kind": "ui_route", "screen": "ui/panel.js"}
               ]
             }
         """.trimIndent()
@@ -152,7 +152,7 @@ class PluginEntryPointTest {
               "toolpkg_id": "demo.pkg",
               "main": "main.js",
               "ui_entries": [
-                {"id": "nav1", "kind": "navigation", "screen": "ui/nav.js"}
+                {"id": "nav1", "kind": "ui_route", "screen": "ui/nav.js"}
               ]
             }
         """.trimIndent()
@@ -167,7 +167,7 @@ class PluginEntryPointTest {
               "toolpkg_id": "demo.pkg",
               "main": "main.js",
               "entries": [
-                {"id": "dup", "kind": "navigation", "title": "第一个", "screen": "a.js"},
+                {"id": "dup", "kind": "ui_route", "title": "第一个", "screen": "a.js"},
                 {"id": "dup", "kind": "toolbox", "title": "第二个", "screen": "b.js"}
               ]
             }
@@ -205,7 +205,7 @@ class PluginEntryPointTest {
               "toolpkg_id": "other.pkg",
               "main": "main.js",
               "entries": [
-                {"id": "z", "kind": "navigation", "title": "停用包的入口", "screen": "ui/z.js", "order": 1}
+                {"id": "z", "kind": "navigation", "surface": "toolbox", "route": "toolpkg:other.pkg:ui:z", "title": "停用包的入口", "screen": "ui/z.js", "order": 1}
               ]
             }
             """.trimIndent(),
@@ -227,5 +227,102 @@ class PluginEntryPointTest {
         assertTrue(points.first { it.point.id == "demo_sidebar" }.enabled)
         // key 跨包唯一，Compose 列表拿它做动画。
         assertEquals("com.operit.sidebar_demo/demo_sidebar", points.first { it.point.id == "demo_sidebar" }.key)
+    }
+
+    // ── action：不跳页面、点一下执行函数（Operit 的 ToolPkgNavigationActionHookRuntime） ──
+
+    @Test
+    fun `action 字符串写法`() {
+        val json = """
+            {
+              "toolpkg_id": "demo.pkg",
+              "main": "main.js",
+              "entries": [
+                {"id": "act", "kind": "navigation", "surface": "toolbox", "action": "onClick"}
+              ]
+            }
+        """.trimIndent()
+        val e = manifestOf(json).entries.single()
+
+        assertEquals("onClick", e.action!!.function)
+        // 纯 action 入口不跳页面，因此没有路由 —— 生成一个会让界面显示点不开的跳转目标。
+        assertNull(e.routeId)
+        assertTrue("有 action 就算能用", e.hasTarget)
+        assertEquals("执行 onClick()", e.targetLabel())
+    }
+
+    @Test
+    fun `action 对象写法带函数源码`() {
+        val json = """
+            {
+              "toolpkg_id": "demo.pkg",
+              "main": "main.js",
+              "entries": [
+                {
+                  "id": "act", "kind": "navigation", "surface": "toolbox",
+                  "action": {"function": "onClick", "function_source": "function onClick() {}"}
+                }
+              ]
+            }
+        """.trimIndent()
+        val e = manifestOf(json).entries.single()
+
+        assertEquals("onClick", e.action!!.function)
+        assertEquals("function onClick() {}", e.action!!.functionSource)
+    }
+
+    @Test
+    fun `导航入口缺 surface 会被跳过并记警告`() {
+        val json = """
+            {
+              "toolpkg_id": "demo.pkg",
+              "main": "main.js",
+              "entries": [
+                {"id": "nav", "kind": "navigation", "screen": "ui/nav.js"}
+              ]
+            }
+        """.trimIndent()
+        val parsed = ManifestParser.parse(json).getOrThrow()
+        val mapped = ManifestMapper.map(parsed)
+
+        assertTrue("没有 surface 就不知道该挂哪", mapped.manifest.entries.isEmpty())
+        assertTrue(mapped.warnings.any { it.field.contains("surface") })
+    }
+
+    @Test
+    fun `导航入口 route 与 action 都没有会被跳过`() {
+        val json = """
+            {
+              "toolpkg_id": "demo.pkg",
+              "main": "main.js",
+              "entries": [
+                {"id": "nav", "kind": "navigation", "surface": "toolbox"}
+              ]
+            }
+        """.trimIndent()
+        val parsed = ManifestParser.parse(json).getOrThrow()
+        val mapped = ManifestMapper.map(parsed)
+
+        assertTrue("点了没反应的入口不该进列表", mapped.manifest.entries.isEmpty())
+        assertTrue(mapped.warnings.any { it.message.contains("route") || it.message.contains("action") })
+    }
+
+    @Test
+    fun `params 不被消费所以不建模`() {
+        // Operit 的 registerUiRoute 载荷里有 params，但它的解析器只读
+        // id/screen/route/runtime/title/keepAlive —— params 不被宿主消费。
+        // 这里显式锁住「写进来也不会产生字段」，避免以后有人以为它生效了。
+        val json = """
+            {
+              "toolpkg_id": "demo.pkg",
+              "main": "main.js",
+              "entries": [
+                {"id": "p", "kind": "ui_route", "screen": "ui/p.js", "params": {"x": 1}}
+              ]
+            }
+        """.trimIndent()
+        val m = manifestOf(json)
+        assertEquals(1, m.entries.size)
+        assertTrue("params 是透明字段", m.entries[0].hasTarget)
     }
 }

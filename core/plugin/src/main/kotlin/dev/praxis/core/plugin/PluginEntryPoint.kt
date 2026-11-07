@@ -3,53 +3,47 @@ package dev.praxis.core.plugin
 /**
  * 插件入口。
  *
- * ## 字段来自 Operit 的运行时注册载荷，不是清单
+ * ## 字段来自 Operit 的运行时注册载荷
  *
- * 真实插件不在清单里声明入口，而是在 main 脚本里注册。以
- * examples/sidebar_sillytavern/src/main.ts 为例：
+ * 真实插件在 main 脚本里注册（见 examples/sidebar_sillytavern/src/main.ts），
+ * 宿主侧由 ToolPkgMainRegistrationScriptParser 解析。四个注册面的必填项：
  *
- *     ToolPkg.registerUiRoute({
- *       id: "sillytavern_dashboard",
- *       route: "toolpkg:com.operit.sidebar_sillytavern:ui:sillytavern_dashboard",
- *       runtime: "compose_dsl", screen: module, params: {}, keepAlive: true,
- *       title: { zh: "酒馆", en: "SillyTavern" },
- *     })
- *     ToolPkg.registerNavigationEntry({
- *       id: "sillytavern_dashboard_sidebar",
- *       route: "toolpkg:...:ui:sillytavern_dashboard",
- *       surface: "main_sidebar_plugins",
- *       title: { zh: "酒馆", en: "SillyTavern" },
- *       icon: Icons.Chat, order: 122,
- *     })
+ * | 注册函数 | 必填 | 本类对应 |
+ * |---|---|---|
+ * | registerUiRoute | id + screen（route 可省，按规则生成） | kind = UiRoute |
+ * | registerNavigationEntry | id + surface +（route 或 action） | kind = Navigation |
+ * | registerToolPkgDesktopWidget | id + route | kind = DesktopWidget |
+ * | registerToolPkgToolboxUiModule | id + screen | kind = Toolbox |
  *
- * 宿主侧对应的模型是 ToolPkgParser 里的 ToolPkgUiRouteRuntime 与
- * ToolPkgNavigationEntryRuntime。本类把两者合成一个视图 —— 一个入口
- * 要么只是一个路由（UiRoute），要么同时挂到某个 surface 上（Navigation）。
+ * ## 为什么 routeId 可空
  *
- * ## 为什么 Praxis 还要一条清单声明通道
+ * 导航项允许「不跳页面，点一下执行一个脚本函数」（action）。那种入口没有路由，
+ * Operit 也不给它生成 —— 校验规则就是 route 与 action **二选一**。
  *
- * 运行时捕获要求先跑包的 main 脚本。Praxis 的 Compose DSL 渲染尚未接上，
- * 包可能跑不起来 —— 那时如果只依赖捕获，用户会看到「装了包但入口页是空的」。
+ * ## 为什么没有 params
  *
- * 所以清单 entries 是声明式补充：能跑就以捕获为准，跑不起来还能列出来。
- * 两条来源字段名一致（screen / surface / route / keepAlive），
- * 只是清单里没有函数值，所以 screen 写的是脚本路径。
+ * registerUiRoute 的载荷里确实有 params（示例里写的是空对象），但 Operit 的
+ * 解析器只读 id/screen/route/runtime/title/keepAlive —— params 不被宿主消费。
+ * 照着示例猜一个字段进来，等于给以后的人一个「写了也没用」的坑，所以不建模。
  */
 data class PluginEntryPoint(
     /** 包内唯一。同包重名只保留第一个。 */
     val id: String,
-    /** Operit 的路由标识：toolpkg:包id:ui:入口id。 */
-    val routeId: String,
     val kind: Kind,
     /**
-     * 挂载面。Operit 目前有两个：toolbox 与 main_sidebar_plugins。
-     * 只有 Navigation 才有；纯路由（UiRoute）为 null。
+     * 路由标识：toolpkg:包id:ui:入口id。
+     * 纯 action 入口为 null（那种入口不跳页面）。
+     */
+    val routeId: String? = null,
+    /**
+     * 挂载面。Operit 目前有 toolbox 与 main_sidebar_plugins。
+     * 只有 Navigation 必填；其余为 null。
      */
     val surface: String? = null,
     /** 渲染运行时。当前只有 compose_dsl。 */
     val runtime: String = RUNTIME_COMPOSE_DSL,
-    /** 页面脚本相对包根的路径（运行时捕获时是模块句柄）。 */
-    val screen: String,
+    /** 页面脚本相对包根的路径。纯 action 入口为空。 */
+    val screen: String = "",
     val title: LocalizedText,
     val description: LocalizedText = LocalizedText.EMPTY,
     /** 图标名，来自宿主提供的图标集（Operit 的 Icons.Chat 等）。 */
@@ -57,9 +51,11 @@ data class PluginEntryPoint(
     val order: Int = 0,
     /** 离开页面是否保留运行时。 */
     val keepAlive: Boolean = false,
+    /** 点一下执行的脚本函数；与 [routeId] 二选一。 */
+    val action: PluginActionHook? = null,
 ) {
     enum class Kind(val storage: String, val label: String) {
-        /** registerToolPkgNavigationEntry：侧边栏/工具箱里的一个导航项。 */
+        /** registerToolPkgNavigationEntry：挂在某个 surface 上的导航项。 */
         Navigation("navigation", "导航入口"),
 
         /** registerToolPkgUiRoute：一个可跳转的页面。 */
@@ -81,6 +77,17 @@ data class PluginEntryPoint(
         }
     }
 
+    /** 有跳转目标或可执行动作，才算一个能用的入口。 */
+    val hasTarget: Boolean get() = routeId != null || action != null
+
+    /** 给用户看的目标描述：页面脚本，或「执行 fn()」。 */
+    fun targetLabel(): String = when {
+        action != null -> "执行 " + action.function + "()"
+        screen.isNotBlank() -> screen
+        routeId != null -> routeId
+        else -> ""
+    }
+
     companion object {
         const val RUNTIME_COMPOSE_DSL: String = "compose_dsl"
 
@@ -89,6 +96,22 @@ data class PluginEntryPoint(
             "toolpkg:" + packageId + ":ui:" + entryId
     }
 }
+
+/**
+ * 导航项的动作钩子（对齐 Operit 的 ToolPkgNavigationActionHookRuntime）。
+ *
+ * 载荷有两种写法，Operit 两种都收：
+ *
+ *     action: "onClick"
+ *     function_source: "function onClick() { ... }"
+ *
+ *     action: { function: "onClick", function_source: "..." }
+ */
+data class PluginActionHook(
+    val function: String,
+    /** 函数源码（可选）。有它才能在没预先定义函数的包里执行。 */
+    val functionSource: String? = null,
+)
 
 /** Operit 的挂载面常量。 */
 object EntrySurfaces {
@@ -108,8 +131,7 @@ object EntrySurfaces {
  * 已装插件的一个入口（聚合视图）。
  *
  * 带插件名与可用性：「兼容插件入口」是跨插件的页面，用户看的是
- * 「有哪些入口可用」，每条都必须说清来自谁 —— 否则两个包都叫「设置」时，
- * 用户点进去才发现不是想要的那个。
+ * 「有哪些入口可用」，每条都必须说清来自谁。
  */
 data class InstalledEntryPoint(
     val pluginId: String,

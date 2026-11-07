@@ -180,38 +180,44 @@ object ManifestMapper {
 
         // ── 插件入口（对齐 Operit 的运行时注册载荷）──────────────
         //
-        // 真实插件在 main 脚本里注册入口（registerUiRoute /
-        // registerNavigationEntry），**不在清单里** —— 见
-        // examples/sidebar_sillytavern/src/main.ts。
+        // 必填项按 ToolPkgMainRegistrationScriptParser 的校验来：
+        //   UiRoute        : id + screen（route 可省，按规则生成）
+        //   Navigation     : id + surface +（route 或 action）
+        //   Toolbox        : id + screen
+        //   DesktopWidget  : id + route
         //
-        // 这里解析的是清单里的声明式副本，字段名与那份载荷保持一致：
-        // route / surface / runtime / screen / keepAlive / icon / order。
-        // 能跑包时以运行时捕获为准（那才是包的真实意图）；这条通道保证
-        // 包跑不起来时入口仍然可见，而不是一片空白。
+        // 之前我一律要求 screen，于是「点一下执行函数」的导航项（只有 action）
+        // 会被当成坏数据跳过 —— 那类入口在包里是合法的。
         val entryPoints =
             (fields.listOfMappings("entries") + fields.listOfMappings("ui_entries"))
                 .mapIndexedNotNull { index, item ->
                     val entryId = item.text("id").trim()
-                    val screenPath = item.text("screen").trim()
-                        .ifEmpty { item.text("entry").trim() }
                     val kindText = item.text("kind").trim()
                     val kind = if (kindText.isEmpty()) {
                         PluginEntryPoint.Kind.UiRoute
                     } else {
                         PluginEntryPoint.Kind.fromStorage(kindText)
                     }
+                    val screenPath = item.text("screen").trim()
+                        .ifEmpty { item.text("entry").trim() }
+                    val routeText = item.text("route").trim()
+                        .ifEmpty { item.text("route_id").trim() }
+                    val surfaceText = item.text("surface").trim()
+                    val action = parseEntryAction(item)
+                    // 只有页面类入口才按规则生成路由：action 入口不该有路由，
+                    // 否则页面上会显示一个点不开的跳转目标。
+                    val routeId = when {
+                        routeText.isNotEmpty() -> routeText
+                        kind == PluginEntryPoint.Kind.UiRoute && entryId.isNotEmpty() ->
+                            PluginEntryPoint.routeIdOf(id, entryId)
+                        else -> null
+                    }
+                    val screenMissing = screenPath.isNotEmpty() && !entryExists(screenPath)
                     when {
                         entryId.isEmpty() -> {
                             problems += ManifestProblem.Warning(
                                 field = "entries[" + index + "].id",
                                 message = "入口缺少 id，已跳过",
-                            )
-                            null
-                        }
-                        screenPath.isEmpty() -> {
-                            problems += ManifestProblem.Warning(
-                                field = "entries[" + index + "].screen",
-                                message = "入口「" + entryId + "」缺少 screen，已跳过",
                             )
                             null
                         }
@@ -222,21 +228,52 @@ object ManifestMapper {
                             )
                             null
                         }
-                        !entryExists(screenPath) -> {
-                            // 入口脚本不存在不致命：整包仍可装载，只是这个入口点了没反应。
+                        // 脚本不存在不致命：整包仍可装载，只是这个入口点了没反应。
+                        screenMissing -> {
                             problems += ManifestProblem.Warning(
                                 field = "entries[" + index + "].screen",
                                 message = "入口「" + entryId + "」的脚本「" + screenPath + "」不存在，该入口将不可用",
                             )
                             null
                         }
+                        kind == PluginEntryPoint.Kind.Navigation &&
+                            surfaceText.isEmpty() -> {
+                            problems += ManifestProblem.Warning(
+                                field = "entries[" + index + "].surface",
+                                message = "导航入口「" + entryId + "」缺少 surface，已跳过",
+                            )
+                            null
+                        }
+                        kind == PluginEntryPoint.Kind.Navigation &&
+                            routeId == null && action == null -> {
+                            problems += ManifestProblem.Warning(
+                                field = "entries[" + index + "]",
+                                message = "导航入口「" + entryId + "」既没有 route 也没有 action，已跳过",
+                            )
+                            null
+                        }
+                        (kind == PluginEntryPoint.Kind.UiRoute ||
+                            kind == PluginEntryPoint.Kind.Toolbox) &&
+                            screenPath.isEmpty() -> {
+                            problems += ManifestProblem.Warning(
+                                field = "entries[" + index + "].screen",
+                                message = "入口「" + entryId + "」缺少 screen，已跳过",
+                            )
+                            null
+                        }
+                        kind == PluginEntryPoint.Kind.DesktopWidget &&
+                            routeId == null && screenPath.isEmpty() -> {
+                            problems += ManifestProblem.Warning(
+                                field = "entries[" + index + "].route",
+                                message = "桌面组件「" + entryId + "」既没有 route 也没有 screen，已跳过",
+                            )
+                            null
+                        }
                         else -> PluginEntryPoint(
                             id = entryId,
-                            // route 缺省时按 Operit 的规则生成。
-                            routeId = item.text("route").trim()
-                                .ifEmpty { PluginEntryPoint.routeIdOf(id, entryId) },
                             kind = kind,
-                            surface = item.text("surface").trim().takeIf { it.isNotEmpty() },
+                            routeId = routeId,
+                            surface = surfaceText.takeIf { it.isNotEmpty() },
                             runtime = item.text("runtime").trim()
                                 .ifEmpty { PluginEntryPoint.RUNTIME_COMPOSE_DSL },
                             screen = screenPath,
@@ -251,6 +288,7 @@ object ManifestMapper {
                             // 清单里更常见 snake_case。
                             keepAlive = item["keepAlive"]?.asBooleanOrNull()
                                 ?: (item["keep_alive"]?.asBooleanOrNull() ?: false),
+                            action = action,
                         )
                     }
                 }
@@ -286,6 +324,41 @@ object ManifestMapper {
 
     private fun Map<String, ManifestValue>.text(key: String): String =
         this[key]?.asText().orEmpty()
+
+    /**
+     * 解析导航项的 action 钩子。
+     *
+     * 载荷有两种写法（Operit 两种都收）：
+     *
+     *     action: "onClick"
+     *     function_source: "..."
+     *
+     *     action: { function: "onClick", function_source: "..." }
+     */
+    private fun parseEntryAction(item: Map<String, ManifestValue>): PluginActionHook? {
+        val declaration = item["action"] ?: return null
+        val siblingSource = item.text("function_source").trim().takeIf { it.isNotEmpty() }
+        val hook = when (declaration) {
+            is ManifestValue.Text -> {
+                val name = declaration.value.trim()
+                if (name.isEmpty()) null else PluginActionHook(name, siblingSource)
+            }
+            is ManifestValue.Mapping -> {
+                val name = declaration.entries.text("function").trim()
+                if (name.isEmpty()) {
+                    null
+                } else {
+                    PluginActionHook(
+                        function = name,
+                        functionSource = declaration.entries.text("function_source")
+                            .trim().takeIf { it.isNotEmpty() },
+                    )
+                }
+            }
+            else -> null
+        }
+        return hook
+    }
 
     /**
      * 取对象数组。

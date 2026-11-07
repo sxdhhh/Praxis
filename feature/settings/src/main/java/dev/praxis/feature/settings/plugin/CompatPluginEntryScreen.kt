@@ -123,7 +123,8 @@ private fun EntryRow(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = point.point.screen,
+                    // 页面入口显示脚本路径；action 入口显示「执行 fn()」。
+                    text = point.point.targetLabel(),
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
