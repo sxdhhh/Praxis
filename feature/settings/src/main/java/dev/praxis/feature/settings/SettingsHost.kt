@@ -455,6 +455,23 @@ private fun SettingsPageBody(
                 )
             }
         }
+        // 兼容插件入口：与扩展包共用同一个仓储，但页面职责不同
+        // （那里装卸包，这里看包声明了哪些 UI 入口）。
+        PraxisRoute.SettingsCompatPluginEntries -> {
+            val repo = pluginRepository
+            if (repo == null) {
+                SettingsUnfinished(
+                    title = SettingsEntry.CompatPluginEntries.title,
+                    reason = PACKAGES_REASON,
+                    modifier = modifier,
+                )
+            } else {
+                dev.praxis.feature.settings.plugin.CompatPluginEntryRoute(
+                    repository = repo,
+                    modifier = modifier,
+                )
+            }
+        }
         PraxisRoute.SettingsLog -> LogScreen(modifier)
         PraxisRoute.SettingsAbout -> AboutScreen(
             versionName = versionName,

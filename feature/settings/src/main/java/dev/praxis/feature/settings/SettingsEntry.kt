@@ -154,6 +154,17 @@ enum class SettingsEntry(
         summary = "工具包与插件",
     ),
 
+    /**
+     * 兼容插件入口（照搬 Operit 的 registerToolPkg* 四个注册面）。
+     *
+     * 紧挨着「扩展包」：一个是装卸，一个是使用，用户按顺序看下来正好。
+     */
+    CompatPluginEntries(
+        route = PraxisRoute.SettingsCompatPluginEntries,
+        title = "兼容插件入口",
+        summary = "插件声明的导航项、页面与工具箱卡片",
+    ),
+
     Log(
         route = PraxisRoute.SettingsLog,
         title = "日志",

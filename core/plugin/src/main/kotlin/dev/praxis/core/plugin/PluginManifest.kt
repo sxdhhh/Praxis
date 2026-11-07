@@ -47,6 +47,15 @@ data class PluginManifest(
     val subpackages: List<PluginSubpackage> = emptyList(),
     val resources: List<PluginResource> = emptyList(),
     val wasmModules: List<PluginWasmModule> = emptyList(),
+    /**
+     * 插件入口（照搬 Operit 的 registerToolPkgNavigationEntry /
+     * registerToolPkgUiRoute / registerToolPkgToolboxUiModule /
+     * registerToolPkgDesktopWidget）。
+     *
+     * 见 [PluginEntryPoint]：它是「有哪些 UI 入口」的声明，
+     * 不需要执行包脚本就能读出来。
+     */
+    val entries: List<PluginEntryPoint> = emptyList(),
 ) {
     /** 界面上给用户看的名字。显示名缺失时回落 id（而不是「未命名」）。 */
     val title: String get() = displayName.resolveZh().ifBlank { id }

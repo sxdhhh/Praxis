@@ -178,6 +178,69 @@ object ManifestMapper {
             }
         }
 
+        // ── 插件入口（Operit 的 registerToolPkg* 四个注册面） ──────
+        //
+        // 兼容 entries 与 ui_entries 两个键名：前者是 Praxis 的写法，
+        // 后者是给已经按 UI 语义写清单的包留的口子。
+        val entryPoints =
+            (fields.listOfMappings("entries") + fields.listOfMappings("ui_entries"))
+                .mapIndexedNotNull { index, item ->
+                    val entryId = item.text("id").trim()
+                    val entryPath = item.text("entry").trim()
+                    val kindText = item.text("kind").trim()
+                    val kind = if (kindText.isEmpty()) {
+                        PluginEntryPoint.Kind.Navigation
+                    } else {
+                        PluginEntryPoint.Kind.fromStorage(kindText)
+                    }
+                    when {
+                        entryId.isEmpty() -> {
+                            problems += ManifestProblem.Warning(
+                                field = "entries[" + index + "].id",
+                                message = "入口缺少 id，已跳过",
+                            )
+                            null
+                        }
+                        entryPath.isEmpty() -> {
+                            problems += ManifestProblem.Warning(
+                                field = "entries[" + index + "].entry",
+                                message = "入口「" + entryId + "」缺少 entry，已跳过",
+                            )
+                            null
+                        }
+                        kind == null -> {
+                            problems += ManifestProblem.Warning(
+                                field = "entries[" + index + "].kind",
+                                message = "未知的入口类型「" + kindText + "」，已跳过",
+                            )
+                            null
+                        }
+                        !entryExists(entryPath) -> {
+                            // 入口脚本不存在不致命：整包仍可装载，只是这个入口点了没反应。
+                            // 标出来让用户知道「是包的问题」，而不是以为界面坏了。
+                            problems += ManifestProblem.Warning(
+                                field = "entries[" + index + "].entry",
+                                message = "入口「" + entryId + "」的脚本「" + entryPath + "」不存在，该入口将不可用",
+                            )
+                            null
+                        }
+                        else -> PluginEntryPoint(
+                            id = entryId,
+                            kind = kind,
+                            title = LocalizedTextCodec.parse(item["title"], "entries[" + index + "].title"),
+                            description = LocalizedTextCodec.parse(
+                                item["description"],
+                                "entries[" + index + "].description",
+                            ),
+                            icon = item.text("icon").trim().takeIf { it.isNotEmpty() },
+                            entry = entryPath,
+                            order = item.text("order").trim().toIntOrNull() ?: 0,
+                        )
+                    }
+                }
+                // 同包内重名只留第一个：列表 key 用它，重复会让动画错位。
+                .distinctBy { it.id }
+
         val manifest = PluginManifest(
             schemaVersion = fields.text("schema_version").trim().toIntOrNull() ?: 1,
             id = id,
@@ -197,6 +260,7 @@ object ManifestMapper {
             subpackages = subpackages,
             resources = resources,
             wasmModules = wasmModules,
+            entries = entryPoints,
         )
 
         return ManifestMapping(manifest, problems)

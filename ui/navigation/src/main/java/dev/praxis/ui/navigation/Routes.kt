@@ -148,6 +148,20 @@ sealed interface PraxisRoute : NavKey {
     @Serializable
     data object SettingsPackages : PraxisRoute
 
+    /**
+     * 兼容插件入口。
+     *
+     * ## 为什么不并进「扩展包」
+     *
+     * Operit 的包可以注册 UI 入口（导航项 / 页面 / 工具箱卡片 / 桌面组件）。
+     * 那是「使用某个包提供的界面」，而扩展包页是「装卸与开关」——
+     * 两件事的目标不同，混在一页会让两边都读不清。
+     *
+     * 所以单独一个目的地：这一页只回答「有哪些入口、来自谁」。
+     */
+    @Serializable
+    data object SettingsCompatPluginEntries : PraxisRoute
+
     @Serializable
     data object SettingsLog : PraxisRoute
 
