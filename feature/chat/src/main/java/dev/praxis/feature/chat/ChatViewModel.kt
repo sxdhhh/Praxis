@@ -1963,9 +1963,25 @@ class ChatViewModel(
             summary = null,
         )
 
-        val full = layered + history.toList()
+        // ## 合并成单条 system（2026-11-07）
+        //
+        // 原来每层各发一条 system（用户规则 / 人格 / 技能 / 记忆 / 摘要）。
+        // 很多 OpenAI 兼容网关只保留其中**一条**；若保留的是最后一条，
+        // 用户写的规则就整条失效 —— 表现正是「自定义系统提示词全都不生效」。
+        //
+        // flatten() 保留各层原顺序与标题，合成一条发出去，
+        // 行为不再取决于网关怎么处理多条 system。
+        val systemFlat = SystemPromptBuilder.flatten(layered)
+        val full = systemFlat + history.toList()
         val withSummary = CompactionApplier.apply(full, compacted)
-        return ContextAssembler.assemble(withSummary)
+        // 预算按模型真实上下文换算（contextLimit 是 token，按 1 token 约 1.5 字符估），
+        // 不再写死一个与模型能力无关的常数。
+        val maxChars = if (config.contextLimit > 0) {
+            (config.contextLimit * 1.5).toInt()
+        } else {
+            dev.praxis.core.ai.AiContextBudget.DEFAULT_MAX_CHARS
+        }
+        return ContextAssembler.assemble(withSummary, maxChars = maxChars)
     }
 
     // `recallMemoryBlock()` 已删除（2026-11-05）。

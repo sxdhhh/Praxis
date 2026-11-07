@@ -132,42 +132,37 @@ class MessageContentGuardTest {
         assertEquals("没有溢出存储时不该截断", text, dao.inserted.single().content)
     }
 
-    /** 超长且有溢出存储：库里截断 + 定位符，溢出文件里是**全文**。 */
+    /**
+     * 超长正文**整段入库**（2026-11-07，用户要求去掉所有省略）。
+     *
+     * 旧行为是落盘 + 截断 + 附定位符，库里只剩前 256K，
+     * 那也是「用户看不见后半段」的来源之一。
+     */
     @Test
-    fun oversizedIsTruncatedAndSpilled() = runTest {
-        val st = store()
-        val (r, dao) = repo(st)
+    fun oversizedIsStoredInFull() = runTest {
+        val (r, dao) = repo(store())
         val tail = "这是结尾，不能被丢掉"
         val text = "x".repeat(ChatRepository.MAX_STORED_CHARS + 500) + tail
 
         r.appendMessage("s1", role = "user", content = text)
 
         val stored = dao.inserted.single().content
-        assertTrue("库里不该超过上限（加提示文本的余量）", stored.length < text.length)
-        assertTrue("应带溢出提示", stored.contains(ChatRepository.SPILL_NOTICE_PREFIX))
-
-        // 定位符必须真的能取回全文 —— 否则提示就是一句空话。
-        val locator = stored.substringAfter("定位符 ").substringBefore("，")
-        assertNotNull("应解析出定位符", locator)
-        val spilled = File(tmp.root, "spill").listFiles()?.singleOrNull()
-        assertNotNull("溢出文件应存在", spilled)
-        assertEquals("溢出文件里应是全文", text, spilled!!.readText())
+        assertEquals("超长正文必须整段入库", text, stored)
+        assertTrue("不该出现截断提示", !stored.contains(ChatRepository.SPILL_NOTICE_PREFIX))
+        assertTrue("结尾必须还在", stored.endsWith(tail))
     }
 
-    /** 流式写入超限：只截断不落盘（热路径不能每帧写文件）。 */
+    /** 流式写入同样不截断：正文就是用户最终要看到的东西。 */
     @Test
-    fun streamingWriteIsTruncatedWithoutSpilling() = runTest {
-        val st = store()
-        val (r, dao) = repo(st)
+    fun streamingWriteIsStoredInFull() = runTest {
+        val (r, dao) = repo(store())
         val text = "y".repeat(ChatRepository.MAX_STORED_CHARS + 100)
 
         r.updateMessageContent(42L, text)
 
         val stored = dao.updated[42L]
         assertNotNull(stored)
-        assertTrue("流式写入也必须截断", stored!!.length <= ChatRepository.MAX_STORED_CHARS + 100)
-        assertTrue("应带截断标记", stored.contains(ChatRepository.SPILL_NOTICE_PREFIX))
-        val spillDir = File(tmp.root, "spill")
-        assertTrue("流式路径不该落盘", !spillDir.exists() || spillDir.listFiles().isNullOrEmpty())
+        assertEquals("流式写入必须整段保留", text, stored)
+        assertTrue("不该带截断标记", !stored!!.contains(ChatRepository.SPILL_NOTICE_PREFIX))
     }
 }

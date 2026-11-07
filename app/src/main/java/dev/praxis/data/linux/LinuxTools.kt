@@ -136,17 +136,10 @@ class LinuxExecTool(
             if (result.output.isBlank()) {
                 appendLine("[无输出]")
             } else {
-                // 截断而不是全塞：一次 nmap 全端口扫描轻易几十万字符，
-                // 灌进上下文会直接把后续几轮挤爆。
-                if (result.output.length > LinuxToolPort.MAX_OUTPUT_CHARS) {
-                    appendLine(result.output.take(LinuxToolPort.MAX_OUTPUT_CHARS))
-                    appendLine(
-                        "[输出已截断：共 ${result.output.length} 字符，" +
-                            "只保留前 ${LinuxToolPort.MAX_OUTPUT_CHARS}]",
-                    )
-                } else {
-                    append(result.output)
-                }
+                // 不再截断（2026-11-07，用户要求）：一次 nmap 的报告可能几十万
+                // 字符，但那正是这次任务的产出。砍掉中段等于让模型基于残表判断，
+                // 而它和用户都不知道少了什么。
+                append(result.output)
             }
             appendLine()
             append("退出码：${result.exitCode}")

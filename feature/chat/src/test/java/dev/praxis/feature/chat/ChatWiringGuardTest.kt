@@ -503,10 +503,20 @@ class ChatWiringGuardTest {
      * 全是包列表 —— 丢掉尾部等于丢掉了唯一的线索。
      */
     @Test
-    fun spill_savesInsteadOfTruncating() {
+    fun toolOutput_isPassedThroughVerbatim() {
+        // 2026-11-07 起契约变了：工具输出**原样**进上下文。
+        //
+        // 历史是三步：先「超限静默丢弃」→ 再「落盘 + 定位符」→ 现在
+        // 「不省略」。三者防的都是同一件事：输出悄悄变短，模型基于残表判断。
+        //
+        // 所以这条护栏改成守「透传」：不能再按字符数截，也不要再套一层
+        // 落盘改写（那同样会让模型看到的东西与实际输出不一致）。
         val impl = read("app/src/main/java/dev/praxis/data/linux/LinuxToolPortImpl.kt")
-        assertTrue("执行路径没有接溢出存储", impl.contains("SpillPolicy.shouldSpill"))
-        assertTrue("没有落盘调用", impl.contains("spillStore.saveText"))
+        assertTrue("输出应原样透传", impl.contains("val output = raw"))
+        assertTrue(
+            "不该再按字符数截断",
+            !impl.contains("take(LinuxToolPort.MAX_OUTPUT_CHARS)"),
+        )
     }
 
     /**

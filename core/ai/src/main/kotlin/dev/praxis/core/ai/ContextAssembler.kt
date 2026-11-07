@@ -29,7 +29,12 @@ object ContextAssembler {
     fun assemble(
         messages: List<ChatMessage>,
         maxChars: Int = AiContextBudget.DEFAULT_MAX_CHARS,
-        compact: Boolean = true,
+        // ## 默认不压缩（2026-11-07，用户要求「去掉所有省略」）
+        //
+        // 压缩曾经逐条削短正文，代价是模型看到的和用户写的不是一回事。
+        // 现在默认只做「整条丢弃最旧消息」这一件事；需要逐条压缩的调用方
+        // 必须显式传 true，别指望它悄悄发生。
+        compact: Boolean = false,
     ): List<ChatMessage> {
         if (messages.isEmpty()) return messages
 

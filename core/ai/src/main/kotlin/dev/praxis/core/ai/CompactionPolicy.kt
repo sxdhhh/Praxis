@@ -30,10 +30,19 @@ object CompactionPolicy {
      *
      * 长度不超过 `TEXT_HEAD + TEXT_TAIL` 时原样返回，不加任何标记。
      */
-    fun compactText(text: String): String = compact(text, TEXT_HEAD, TEXT_TAIL)
+    // ## 不再截断（2026-11-07，用户要求）
+    //
+    // 旧实现把普通文本砍成「前 200 + 后 80」、工具返回砍成「前 140 + 后 56」，
+    // 中段换成 " …[省略 N 字符]… "。用户看到的就是「输入太长会被省略」，
+    // 而模型拿到的是残句 —— 它基于半截内容作答，用户却以为自己说全了。
+    //
+    // 现在原样返回。真的装不下时由 AiContextBudget 整条丢弃最旧的消息
+    // （丢整条，用户看得见少了哪一句），而不是把每条都削成残句。
+    fun compactText(text: String): String = text
 
     /** 压缩工具返回体。规则同上，只是阈值更紧。 */
-    fun compactToolResult(text: String): String = compact(text, TOOL_HEAD, TOOL_TAIL)
+    // 工具返回同样不截断：一段报错的价值往往就在最后几行。
+    fun compactToolResult(text: String): String = text
 
     /**
      * 压缩工具调用参数。
@@ -43,6 +52,7 @@ object CompactionPolicy {
      */
     fun compactArguments(argumentsJson: String): String = argumentsJson
 
+    @Suppress("unused")
     private fun compact(text: String, head: Int, tail: Int): String {
         if (text.length <= head + tail) return text
 

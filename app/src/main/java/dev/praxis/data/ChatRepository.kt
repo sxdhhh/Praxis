@@ -94,24 +94,14 @@ class ChatRepository(
      * 漏一个就重新打开 CursorWindow 那个洞。
      */
     private suspend fun guardContent(text: String): String {
-        if (text.length <= MAX_STORED_CHARS) return text
-
-        // 没有溢出存储时保持原样：宁可留风险，也不静默丢内容。
-        val store = spillStore ?: return text
-        val spilled = store.saveText(text) ?: return text
-
-        return buildString {
-            append(text, 0, MAX_STORED_CHARS)
-            append("\n\n")
-            append(SPILL_NOTICE_PREFIX)
-            append("（共 ")
-            append(text.length)
-            append(" 字符，此处保留前 ")
-            append(MAX_STORED_CHARS)
-            append("）；定位符 ")
-            append(spilled.locator)
-            append("，可用 read_spill 取回全文。")
-        }
+        // ## 不再截断（2026-11-07，用户要求「去掉所有省略」）
+        //
+        // 这里原来会把超过 MAX_STORED_CHARS（256K）的正文落盘、截断、再附定位符。
+        // 那是「用户看不见后半段」的另一个来源：库里只剩前半。
+        //
+        // 现在原样入库。真正需要防的是**读取时**一次性把几 MB 拉进 CursorWindow，
+        // 那属于读侧的活儿，不该用「写入时砍掉」来代偿 —— 砍掉的字节再也拿不回来。
+        return text
     }
 
     /**
@@ -301,13 +291,8 @@ class ChatRepository(
      * 需要模型单轮吐出 256K 字符（约 8.5 万 token），实际上不会走到。
      */
     suspend fun updateMessageContent(messageId: Long, content: String) {
-        val stored = if (content.length <= MAX_STORED_CHARS) {
-            content
-        } else {
-            content.take(MAX_STORED_CHARS) +
-                "\n\n" + SPILL_NOTICE_PREFIX + "（流式正文超出上限，已截断）"
-        }
-        messageDao.updateContent(messageId, stored)
+        // 不截断：流式正文就是用户最终要看到的东西，砍掉的部分再也找不回来。
+        messageDao.updateContent(messageId, content)
     }
 
     /**

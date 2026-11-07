@@ -190,19 +190,9 @@ class LinuxToolPortImpl(
         // 字符全是包列表。丢掉尾部等于丢掉了唯一的线索。
         //
         // 现在改成：全文落盘 + 给模型定位符与首尾片段。
-        val output = if (dev.praxis.core.linux.SpillPolicy.shouldSpill(raw)) {
-            val spilled = spillStore.saveText(raw)
-            if (spilled != null) {
-                spilled.toModelText()
-            } else {
-                // 落盘失败：只能截断，但**必须说明**，不能像旧实现那样无声丢弃。
-                raw.take(LinuxToolPort.MAX_OUTPUT_CHARS) +
-                    "\n\n[输出过长且溢出保存失败，以上为前 " +
-                    "${LinuxToolPort.MAX_OUTPUT_CHARS} 字符]"
-            }
-        } else {
-            raw
-        }
+        // 不再落盘、不再截断（2026-11-07，用户要求「去掉所有省略」）。
+        // 工具输出原样交给模型 —— 哪怕很长，那也是这次执行的真实产出。
+        val output = raw
 
         return LinuxExecResult(
             exitCode = exit,

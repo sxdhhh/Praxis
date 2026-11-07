@@ -138,15 +138,28 @@ class AiContextBudgetTest {
     // --- ContextAssembler ---------------------------------------------------
 
     @Test
-    fun `assembler compacts long text before dropping`() {
-        // 关键顺序：先压缩后丢弃。单条超大文本压缩后能留下，
-        // 若先丢弃就会整条扔掉，白白损失一整轮对话。
+    fun `assembler keeps long text verbatim instead of shrinking it`() {
+        // 2026-11-07：默认不再逐条压缩。
+        //
+        // 单条超预算的 user 消息是「最后一条 user」，会被 pin 住 —— 保留原文，
+        // 不改成残句。装不下这件事交给调用方按模型真实上下文决定，
+        // 而不是把用户刚打的字削掉一半（用户会以为系统看全了）。
         val huge = user("H".repeat(10_000))
         val out = ContextAssembler.assemble(listOf(huge), maxChars = 2_000)
 
         assertEquals(1, out.size)
-        assertTrue("压缩后必须装得下", AiContextBudget.costOf(out[0]) <= 2_000)
-        assertTrue("必须保留首部", out[0].text.startsWith("HHH"))
+        assertEquals("正文必须原样保留", 10_000, out[0].text.length)
+        assertTrue(out[0].text.startsWith("HHH"))
+    }
+
+    @Test
+    fun `compact true no longer shortens content either`() {
+        // 即便显式要求压缩，CompactionPolicy 现在也是恒等 —— 不截断这件事
+        // 不该因为一个参数的默认值而变。
+        val huge = user("H".repeat(10_000))
+        val out = ContextAssembler.assemble(listOf(huge), maxChars = 2_000, compact = true)
+
+        assertEquals(10_000, out.first().text.length)
     }
 
     @Test
@@ -178,9 +191,9 @@ class AiContextBudgetTest {
         )
         val out = ContextAssembler.assemble(listOf(user("q"), result), maxChars = 10_000)
 
+        // 2026-11-07：压缩默认关闭，工具结果必须原样保留。
         val r = out.first { it.role == ChatRole.Tool }.toolResult!!
-        assertTrue("工具结果应被压到 TOOL_HEAD+TOOL_TAIL 量级",
-            r.content.length <= CompactionPolicy.TOOL_HEAD + CompactionPolicy.TOOL_TAIL + 40)
+        assertEquals("工具结果不该被改写", 5000, r.content.length)
     }
 
     @Test
