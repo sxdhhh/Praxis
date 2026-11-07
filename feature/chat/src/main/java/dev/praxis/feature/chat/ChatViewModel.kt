@@ -4064,7 +4064,9 @@ class ChatViewModel(
             // 摘要进历史：它本来就是「上下文的一部分」，删掉它会让模型
             // 忘记之前压缩过的内容。用 Assistant 送进去 —— `ChatRole` 里
             // 没有 Summary（那是 UI 概念，core:ai 不需要知道）。
-            BubbleRole.Summary -> ChatRole.System
+                        // 摘要走 Assistant 而不是 System：buildLayers 只产出一条 system，
+            // 摘要若是 System 就会多出第二条，多数网关只留一条时会被挤掉。
+            BubbleRole.Summary -> ChatRole.Assistant
         }
         if (historyRole != null) {
             // 同 `removeBubble`：history 里的用户消息可能带 reply 标签前缀，
@@ -4556,7 +4558,8 @@ class ChatViewModel(
                 BubbleRole.Assistant -> ChatRole.Assistant
                 BubbleRole.Tool -> ChatRole.Tool
                 // 摘要在 history 里是 Assistant 身份（`ChatRole` 没有 Summary）。
-                BubbleRole.Summary -> ChatRole.System
+                                // 摘要走 Assistant 而不是 System：与 summaryMessage 与回放分支一致。
+                BubbleRole.Summary -> ChatRole.Assistant
                 else -> null
             }
             // 删之前校验 role：两套结构若已错位（不该发生，但真发生时

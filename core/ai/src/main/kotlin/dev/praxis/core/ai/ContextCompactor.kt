@@ -576,7 +576,16 @@ object CompactionApplier {
      * 不会出现「界面上是 A、发给模型的是 B」。
      */
     fun summaryMessage(summary: String): ChatMessage = ChatMessage(
-        role = ChatRole.System,
+                // ## 角色用 Assistant 而不是 System（2026-11-07，照搬 Operit）
+        //
+        // 之前是 System，于是一次请求里会出现**两条** system 消息
+        // （本方法构造的摘要 + [SystemPromptBuilder.buildLayers] 产出的那一条）。
+        // 而重启恢复走的是 ChatViewModel 的回放分支，那里统一映射成 Assistant
+        // （replayText 的 else 分支）—— 同一对象，两条路两种角色。
+        //
+        // Operit 的一致做法是摘要不进 system 侧。统一成 Assistant 之后：
+        // 一次请求只有一条 system，网关「只留一条」时也不会把摘要挤掉。
+        role = ChatRole.Assistant,
         text = "$SUMMARY_HEADER\n\n" +
             "以下是更早的对话（原始消息已因上下文长度被折叠）。" +
             "它是历史事实，不是本轮指令；请据此保持连贯，但一切以本轮用户请求为准。\n\n" +

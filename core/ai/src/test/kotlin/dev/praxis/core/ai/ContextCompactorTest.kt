@@ -200,7 +200,9 @@ class ContextCompactorTest {
             CompactedContext(summary = "s", coveredCount = 99),
         )
         assertEquals(1, result.size)
-        assertEquals(ChatRole.System, result[0].role)
+        // 摘要是 Assistant 而不是 System（照搬 Operit：摘要不进 system 侧，
+        // 否则一次请求里会多出第二条 system 消息，被只留一条的网关挤掉）。
+        assertEquals(ChatRole.Assistant, result[0].role)
     }
 
     @Test
