@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import dev.praxis.core.plugin.ActivationReport
 import dev.praxis.core.plugin.InstalledEntryPoint
 import dev.praxis.core.plugin.PluginEntryPoint
 import dev.praxis.core.plugin.PluginRepository
@@ -43,6 +44,8 @@ fun CompatPluginEntryRoute(
      * collectEntryPoints 里定死了（运行时整体优先）。
      */
     capturedEntries: Map<String, List<PluginEntryPoint>> = emptyMap(),
+    /** 启动装载失败的包。空表示全都装上了。 */
+    activationFailures: List<ActivationReport.Failure> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     if (repository == null) {
@@ -67,6 +70,7 @@ fun CompatPluginEntryRoute(
 
     CompatPluginEntryScreen(
         points = points,
+        activationFailures = activationFailures,
         onOpen = { point ->
             navigator.push(
                 PraxisRoute.PluginEntry(

@@ -4,6 +4,7 @@ import dev.praxis.core.tool.ToolRegistry
 import dev.praxis.core.tool.ToolResult
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -147,5 +148,20 @@ class PluginActivationTest {
 
         assertEquals(listOf("good"), report.loaded)
         assertEquals(listOf("bad"), report.failed.map { it.packageId })
+    }
+
+    @Test
+    fun 装载结果可以被观察() = runTest {
+        val activation = PluginActivation(
+            FakeSource(listOf(plugin("a")), mapOf("a" to archive())),
+            PluginRuntimeHost(ToolRegistry(), FakeRuntime()),
+        )
+
+        // 还没跑过时是 null：界面据此区分「还没装载」与「装载完了但一个都没有」。
+        assertNull(activation.report.value)
+
+        activation.activateAll()
+
+        assertEquals(listOf("a"), activation.report.value!!.loaded)
     }
 }

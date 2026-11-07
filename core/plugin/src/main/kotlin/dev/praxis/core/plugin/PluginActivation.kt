@@ -1,5 +1,9 @@
 package dev.praxis.core.plugin
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 /**
  * 装载时需要的包来源。
  *
@@ -59,6 +63,18 @@ class PluginActivation(
     private val host: PluginRuntimeHost,
 ) {
 
+    /**
+     * 最近一次装载结果。null 表示还没跑过。
+     *
+     * ## 为什么是 StateFlow 而不是返回值就够了
+     *
+     * 装载发生在应用启动时，入口列表页可能先组合出来。静态返回值的做法是
+     * 「先读一次快照」—— 装载完成时页面已经渲染过了，用户看到的是空列表，
+     * 要等下一次重组才更新。界面必须能观察到「装完了」这个事件。
+     */
+    private val _report = MutableStateFlow<ActivationReport?>(null)
+    val report: StateFlow<ActivationReport?> = _report.asStateFlow()
+
     suspend fun activateAll(): ActivationReport {
         val loaded = mutableListOf<String>()
         val failed = mutableListOf<ActivationReport.Failure>()
@@ -107,6 +123,8 @@ class PluginActivation(
             }
         }
 
-        return ActivationReport(loaded = loaded, failed = failed, skipped = skipped)
+        val report = ActivationReport(loaded = loaded, failed = failed, skipped = skipped)
+        _report.value = report
+        return report
     }
 }

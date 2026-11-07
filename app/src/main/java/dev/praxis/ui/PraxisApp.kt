@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -200,6 +201,14 @@ fun PraxisApp(
     androidx.compose.runtime.LaunchedEffect(Unit) {
         pluginActivation.activateAll()
     }
+
+    // 装载完成后重新取一次捕获到的入口。
+    //
+    // 静态快照会让列表停在启动那一刻：装载是异步的，页面可能先组合出来。
+    // 用 activationReport 作为 remember 的 key，装完就重算。
+    val activationReport by pluginActivation.report.collectAsState()
+    val capturedEntries = remember(activationReport) { pluginHost.capturedEntries() }
+    val activationFailures = remember(activationReport) { activationReport?.failed.orEmpty() }
     val memoryStore: dev.praxis.core.memory.MemoryStore = org.koin.compose.koinInject()
     val workflowEngine: dev.praxis.core.workflow.WorkflowEngine = org.koin.compose.koinInject()
     val skillRegistry: dev.praxis.core.plugin.SkillRegistry = org.koin.compose.koinInject()
@@ -988,7 +997,8 @@ fun PraxisApp(
                     }
                 },
                 pluginRuntime = pluginRuntime,
-                capturedEntries = pluginHost.capturedEntries(),
+                capturedEntries = capturedEntries,
+                activationFailures = activationFailures,
                 capabilities = capabilities,
                 onRequestCapability = { capability ->
                     val launched = capabilityRequester.request(

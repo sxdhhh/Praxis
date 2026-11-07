@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.praxis.core.plugin.ActivationReport
 import dev.praxis.core.plugin.EntrySurfaces
 import dev.praxis.core.plugin.InstalledEntryPoint
 import dev.praxis.feature.settings.common.SettingsList
@@ -56,6 +57,8 @@ fun CompatPluginEntryScreen(
     points: List<InstalledEntryPoint>,
     /** 点开一条入口。由接线层决定跳到哪个路由。 */
     onOpen: (InstalledEntryPoint) -> Unit,
+    /** 启动装载失败的包（含原因）。空表示都装上了。 */
+    activationFailures: List<ActivationReport.Failure> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     SettingsList(
@@ -64,6 +67,30 @@ fun CompatPluginEntryScreen(
     ) {
         item(key = "__title__") {
             SmallTitle("兼容插件入口（${points.size}）")
+        }
+
+        // 装载失败必须说出来：用户装了包却「什么都没出现」时，
+        // 这是唯一能让他判断「包坏了」还是「没启用」的地方。
+        if (activationFailures.isNotEmpty()) {
+            item(key = "__failures__") {
+                Card(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "有 ${activationFailures.size} 个包装载失败",
+                            style = MiuixTheme.textStyles.body1,
+                            color = MiuixTheme.colorScheme.error,
+                        )
+                        activationFailures.forEach { failure ->
+                            Text(
+                                text = failure.packageId + "：" + failure.errors.joinToString("；"),
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         if (points.isEmpty()) {

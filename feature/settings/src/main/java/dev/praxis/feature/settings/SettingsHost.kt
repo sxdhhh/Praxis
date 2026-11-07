@@ -107,6 +107,8 @@ fun SettingsHost(
     pluginRuntime: dev.praxis.core.plugin.PluginScriptRuntime? = null,
     /** 运行时捕获到的入口（包 id → 入口）。合并规则见 collectEntryPoints。 */
     capturedEntries: Map<String, List<dev.praxis.core.plugin.PluginEntryPoint>> = emptyMap(),
+    /** 启动装载失败的包（含原因）。空表示没有失败。 */
+    activationFailures: List<dev.praxis.core.plugin.ActivationReport.Failure> = emptyList(),
     /**
      * Linux 环境的执行端口（proot / tar / 进程）。
      *
@@ -191,6 +193,7 @@ fun SettingsHost(
             route = route,
             pluginRuntime = pluginRuntime,
             capturedEntries = capturedEntries,
+            activationFailures = activationFailures,
             repository = repository,
             versionName = versionName,
             versionCode = versionCode,
@@ -484,6 +487,7 @@ private fun SettingsPageBody(
                 dev.praxis.feature.settings.plugin.CompatPluginEntryRoute(
                     repository = repo,
                     capturedEntries = capturedEntries,
+                    activationFailures = activationFailures,
                     modifier = modifier,
                 )
             }
