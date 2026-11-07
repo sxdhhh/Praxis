@@ -178,18 +178,25 @@ object ManifestMapper {
             }
         }
 
-        // ── 插件入口（Operit 的 registerToolPkg* 四个注册面） ──────
+        // ── 插件入口（对齐 Operit 的运行时注册载荷）──────────────
         //
-        // 兼容 entries 与 ui_entries 两个键名：前者是 Praxis 的写法，
-        // 后者是给已经按 UI 语义写清单的包留的口子。
+        // 真实插件在 main 脚本里注册入口（registerUiRoute /
+        // registerNavigationEntry），**不在清单里** —— 见
+        // examples/sidebar_sillytavern/src/main.ts。
+        //
+        // 这里解析的是清单里的声明式副本，字段名与那份载荷保持一致：
+        // route / surface / runtime / screen / keepAlive / icon / order。
+        // 能跑包时以运行时捕获为准（那才是包的真实意图）；这条通道保证
+        // 包跑不起来时入口仍然可见，而不是一片空白。
         val entryPoints =
             (fields.listOfMappings("entries") + fields.listOfMappings("ui_entries"))
                 .mapIndexedNotNull { index, item ->
                     val entryId = item.text("id").trim()
-                    val entryPath = item.text("entry").trim()
+                    val screenPath = item.text("screen").trim()
+                        .ifEmpty { item.text("entry").trim() }
                     val kindText = item.text("kind").trim()
                     val kind = if (kindText.isEmpty()) {
-                        PluginEntryPoint.Kind.Navigation
+                        PluginEntryPoint.Kind.UiRoute
                     } else {
                         PluginEntryPoint.Kind.fromStorage(kindText)
                     }
@@ -201,10 +208,10 @@ object ManifestMapper {
                             )
                             null
                         }
-                        entryPath.isEmpty() -> {
+                        screenPath.isEmpty() -> {
                             problems += ManifestProblem.Warning(
-                                field = "entries[" + index + "].entry",
-                                message = "入口「" + entryId + "」缺少 entry，已跳过",
+                                field = "entries[" + index + "].screen",
+                                message = "入口「" + entryId + "」缺少 screen，已跳过",
                             )
                             null
                         }
@@ -215,26 +222,35 @@ object ManifestMapper {
                             )
                             null
                         }
-                        !entryExists(entryPath) -> {
+                        !entryExists(screenPath) -> {
                             // 入口脚本不存在不致命：整包仍可装载，只是这个入口点了没反应。
-                            // 标出来让用户知道「是包的问题」，而不是以为界面坏了。
                             problems += ManifestProblem.Warning(
-                                field = "entries[" + index + "].entry",
-                                message = "入口「" + entryId + "」的脚本「" + entryPath + "」不存在，该入口将不可用",
+                                field = "entries[" + index + "].screen",
+                                message = "入口「" + entryId + "」的脚本「" + screenPath + "」不存在，该入口将不可用",
                             )
                             null
                         }
                         else -> PluginEntryPoint(
                             id = entryId,
+                            // route 缺省时按 Operit 的规则生成。
+                            routeId = item.text("route").trim()
+                                .ifEmpty { PluginEntryPoint.routeIdOf(id, entryId) },
                             kind = kind,
+                            surface = item.text("surface").trim().takeIf { it.isNotEmpty() },
+                            runtime = item.text("runtime").trim()
+                                .ifEmpty { PluginEntryPoint.RUNTIME_COMPOSE_DSL },
+                            screen = screenPath,
                             title = LocalizedTextCodec.parse(item["title"], "entries[" + index + "].title"),
                             description = LocalizedTextCodec.parse(
                                 item["description"],
                                 "entries[" + index + "].description",
                             ),
                             icon = item.text("icon").trim().takeIf { it.isNotEmpty() },
-                            entry = entryPath,
                             order = item.text("order").trim().toIntOrNull() ?: 0,
+                            // 两种写法都收：Operit 的载荷是 camelCase，
+                            // 清单里更常见 snake_case。
+                            keepAlive = item["keepAlive"]?.asBooleanOrNull()
+                                ?: (item["keep_alive"]?.asBooleanOrNull() ?: false),
                         )
                     }
                 }

@@ -1,46 +1,74 @@
 package dev.praxis.core.plugin
 
 /**
- * 插件声明的「入口」。
+ * 插件入口。
  *
- * ## 照搬的是 Operit 的四个注册面
+ * ## 字段来自 Operit 的运行时注册载荷，不是清单
  *
- * Operit 的包在 registerToolPkg() 里可以注册四类 UI 产物
- * （见 ToolPkgCommonPluginConstants 里的常量名）：
+ * 真实插件不在清单里声明入口，而是在 main 脚本里注册。以
+ * examples/sidebar_sillytavern/src/main.ts 为例：
  *
- * | Operit 注册函数 | 产物 | 本文件的 Kind |
- * |---|---|---|
- * | registerToolPkgNavigationEntry | 侧边栏 / 设置里的一个导航项 | Navigation |
- * | registerToolPkgUiRoute | 一个完整页面 | UiRoute |
- * | registerToolPkgToolboxUiModule | 工具箱里的一张卡片 | Toolbox |
- * | registerToolPkgDesktopWidget | 桌面小组件 | DesktopWidget |
+ *     ToolPkg.registerUiRoute({
+ *       id: "sillytavern_dashboard",
+ *       route: "toolpkg:com.operit.sidebar_sillytavern:ui:sillytavern_dashboard",
+ *       runtime: "compose_dsl", screen: module, params: {}, keepAlive: true,
+ *       title: { zh: "酒馆", en: "SillyTavern" },
+ *     })
+ *     ToolPkg.registerNavigationEntry({
+ *       id: "sillytavern_dashboard_sidebar",
+ *       route: "toolpkg:...:ui:sillytavern_dashboard",
+ *       surface: "main_sidebar_plugins",
+ *       title: { zh: "酒馆", en: "SillyTavern" },
+ *       icon: Icons.Chat, order: 122,
+ *     })
  *
- * ## 为什么在清单里声明，而不是解析 JS
+ * 宿主侧对应的模型是 ToolPkgParser 里的 ToolPkgUiRouteRuntime 与
+ * ToolPkgNavigationEntryRuntime。本类把两者合成一个视图 —— 一个入口
+ * 要么只是一个路由（UiRoute），要么同时挂到某个 surface 上（Navigation）。
  *
- * Operit 靠执行包的主脚本、捕获那些注册调用来得知入口 —— 那需要先跑一遍
- * 第三方 JS。Praxis 把这一步**声明化**：入口写在清单的 entries 里，
- * 装包时就读得出来，不必为了「知道它有哪些入口」而执行包代码。
+ * ## 为什么 Praxis 还要一条清单声明通道
  *
- * 真正干活仍然是脚本的事（entry 指向包内路径）；这里只回答
- * 「有哪些入口、叫什么、排在哪」。
+ * 运行时捕获要求先跑包的 main 脚本。Praxis 的 Compose DSL 渲染尚未接上，
+ * 包可能跑不起来 —— 那时如果只依赖捕获，用户会看到「装了包但入口页是空的」。
+ *
+ * 所以清单 entries 是声明式补充：能跑就以捕获为准，跑不起来还能列出来。
+ * 两条来源字段名一致（screen / surface / route / keepAlive），
+ * 只是清单里没有函数值，所以 screen 写的是脚本路径。
  */
 data class PluginEntryPoint(
     /** 包内唯一。同包重名只保留第一个。 */
     val id: String,
+    /** Operit 的路由标识：toolpkg:包id:ui:入口id。 */
+    val routeId: String,
     val kind: Kind,
+    /**
+     * 挂载面。Operit 目前有两个：toolbox 与 main_sidebar_plugins。
+     * 只有 Navigation 才有；纯路由（UiRoute）为 null。
+     */
+    val surface: String? = null,
+    /** 渲染运行时。当前只有 compose_dsl。 */
+    val runtime: String = RUNTIME_COMPOSE_DSL,
+    /** 页面脚本相对包根的路径（运行时捕获时是模块句柄）。 */
+    val screen: String,
     val title: LocalizedText,
     val description: LocalizedText = LocalizedText.EMPTY,
-    /** 图标：resources 里声明的 key，或内置图标名。 */
+    /** 图标名，来自宿主提供的图标集（Operit 的 Icons.Chat 等）。 */
     val icon: String? = null,
-    /** 相对包根的脚本路径。 */
-    val entry: String,
-    /** 排序权重，小的在前；同值按包 id、入口 id 排。 */
     val order: Int = 0,
+    /** 离开页面是否保留运行时。 */
+    val keepAlive: Boolean = false,
 ) {
     enum class Kind(val storage: String, val label: String) {
+        /** registerToolPkgNavigationEntry：侧边栏/工具箱里的一个导航项。 */
         Navigation("navigation", "导航入口"),
+
+        /** registerToolPkgUiRoute：一个可跳转的页面。 */
         UiRoute("ui_route", "页面"),
+
+        /** registerToolPkgToolboxUiModule：工具箱卡片（旧接口）。 */
         Toolbox("toolbox", "工具箱"),
+
+        /** registerToolPkgDesktopWidget：桌面小组件。 */
         DesktopWidget("widget", "桌面组件"),
         ;
 
@@ -52,40 +80,55 @@ data class PluginEntryPoint(
             }
         }
     }
+
+    companion object {
+        const val RUNTIME_COMPOSE_DSL: String = "compose_dsl"
+
+        /** 与 Operit 的 buildToolPkgRouteId 同构。 */
+        fun routeIdOf(packageId: String, entryId: String): String =
+            "toolpkg:" + packageId + ":ui:" + entryId
+    }
+}
+
+/** Operit 的挂载面常量。 */
+object EntrySurfaces {
+    const val TOOLBOX: String = "toolbox"
+    const val MAIN_SIDEBAR_PLUGINS: String = "main_sidebar_plugins"
+
+    /** 给用户看的面名。未知值原样返回 —— 插件作者可能先用了新面。 */
+    fun labelOf(surface: String?): String = when (surface) {
+        TOOLBOX -> "工具箱"
+        MAIN_SIDEBAR_PLUGINS -> "侧边栏"
+        null, "" -> ""
+        else -> surface
+    }
 }
 
 /**
  * 已装插件的一个入口（聚合视图）。
  *
- * ## 为什么要带插件名
- *
- * 「兼容插件入口」这个页面是**跨插件**的：用户看到的是「有哪些入口可用」，
- * 而不是「哪些包装了什么」。所以每条都必须能说清它来自谁 ——
- * 否则两个包都叫「设置」时，用户点进去才发现不是想要的那个。
+ * 带插件名与可用性：「兼容插件入口」是跨插件的页面，用户看的是
+ * 「有哪些入口可用」，每条都必须说清来自谁 —— 否则两个包都叫「设置」时，
+ * 用户点进去才发现不是想要的那个。
  */
 data class InstalledEntryPoint(
     val pluginId: String,
     val pluginTitle: String,
     val point: PluginEntryPoint,
-    /** 包与入口都可用的前提：包已启用且没有致命问题。 */
+    /** 包已启用且无致命问题时才可用。 */
     val enabled: Boolean,
 ) {
     val key: String get() = pluginId + "/" + point.id
     val title: String get() = point.title.resolveZh().ifBlank { point.id }
 
-    /** 同 kind 内排序：先按声明权重，再按包名与入口 id，保证顺序稳定。 */
+    /** 排序：先 order，再包 id、入口 id，保证列表顺序稳定。 */
     companion object {
         val ORDER: Comparator<InstalledEntryPoint> =
             compareBy({ it.point.order }, { it.pluginId }, { it.point.id })
     }
 }
 
-/**
- * 把所有已装插件的入口摊平成一张列表。
- *
- * 摊平后按 [InstalledEntryPoint.ORDER] 排序：Compose 列表用 key 做动画，
- * 顺序不稳定会让每帧都重排。
- */
+/** 把所有已装插件的入口摊平。 */
 fun List<InstalledPlugin>.collectEntryPoints(): List<InstalledEntryPoint> =
     flatMap { plugin ->
         val usable = plugin.enabled && plugin.problems.none { it is ManifestProblem.Fatal }

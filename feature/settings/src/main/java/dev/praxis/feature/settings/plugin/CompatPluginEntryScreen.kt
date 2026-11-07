@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.praxis.core.plugin.EntrySurfaces
 import dev.praxis.core.plugin.InstalledEntryPoint
 import dev.praxis.feature.settings.common.SettingsList
 import top.yukonga.miuix.kmp.basic.Card
@@ -104,14 +105,25 @@ private fun EntryRow(
                     color = MiuixTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.height(4.dp))
+                val subtitle = buildString {
+                    append(point.pluginTitle)
+                    append(" · ")
+                    append(point.point.kind.label)
+                    // 挂载面只在导航类入口上有；它决定入口出现在哪（侧边栏/工具箱）。
+                    val face = EntrySurfaces.labelOf(point.point.surface)
+                    if (face.isNotEmpty()) {
+                        append(" · ")
+                        append(face)
+                    }
+                }
                 Text(
-                    text = point.pluginTitle + " · " + point.point.kind.label,
+                    text = subtitle,
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = point.point.entry,
+                    text = point.point.screen,
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
