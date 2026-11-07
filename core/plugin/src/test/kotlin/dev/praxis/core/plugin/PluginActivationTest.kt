@@ -67,7 +67,7 @@ class PluginActivationTest {
     )
 
     private fun archive() = mapOf(
-        "manifest.json" to """{"id":"a","main":"index.js"}""",
+        "manifest.json" to """{"toolpkg_id":"a","main":"index.js"}""",
         "index.js" to "// main",
     )
 
@@ -138,7 +138,7 @@ class PluginActivationTest {
             plugins = listOf(plugin("bad"), plugin("good")),
             // bad 没有归档，good 正常。
             archives = mapOf("good" to mapOf(
-                "manifest.json" to """{"id":"good","main":"index.js"}""",
+                "manifest.json" to """{"toolpkg_id":"good","main":"index.js"}""",
                 "index.js" to "// main",
             )),
         )
@@ -163,5 +163,25 @@ class PluginActivationTest {
         activation.activateAll()
 
         assertEquals(listOf("a"), activation.report.value!!.loaded)
+    }
+
+    @Test
+    fun 清单缺少_toolpkg_id_时记为失败() = runTest {
+        // 真机教训：清单校验失败不抛异常，只记 problems。
+        // 之前只看异常，于是这种包被当成「装载成功」。
+        val broken = mapOf(
+            "manifest.json" to """{"id":"a","main":"index.js"}""",
+            "index.js" to "// main",
+        )
+        val activation = PluginActivation(
+            FakeSource(listOf(plugin("a")), mapOf("a" to broken)),
+            PluginRuntimeHost(ToolRegistry(), FakeRuntime()),
+        )
+
+        val report = activation.activateAll()
+
+        assertTrue("不该算装载成功", report.loaded.isEmpty())
+        assertEquals(1, report.failed.size)
+        assertTrue('原因要指出清单问题：' + report.failed[0].errors.toString(), report.failed[0].errors.any { it.contains("清单问题") })
     }
 }

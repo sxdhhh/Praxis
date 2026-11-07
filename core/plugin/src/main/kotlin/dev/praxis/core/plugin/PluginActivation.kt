@@ -115,7 +115,24 @@ class PluginActivation(
                 continue
             }
 
-            val outcome = host.load(plugin, contentResult.getOrThrow())
+            val content = contentResult.getOrThrow()
+
+            // 清单有致命问题（缺 toolpkg_id、main 指向不存在的文件）就不要装。
+            //
+            // ## 真机发现（2026-11-07）
+            //
+            // 之前这里只看「读取是否抛异常」，而清单校验失败是**不抛**的 ——
+            // 它被记成 problems。结果一个缺 toolpkg_id 的包会被当成装载成功。
+            val fatal = content.problems.filterIsInstance<ManifestProblem.Fatal>()
+            if (fatal.isNotEmpty()) {
+                failed += ActivationReport.Failure(
+                    packageId = plugin.id,
+                    errors = fatal.map { problem -> "清单问题：" + problem.message },
+                )
+                continue
+            }
+
+            val outcome = host.load(plugin, content)
             if (outcome.errors.isEmpty()) {
                 loaded += plugin.id
             } else {
