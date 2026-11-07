@@ -12,6 +12,8 @@ import dev.praxis.core.plugin.PluginEntryPoint
 import dev.praxis.core.plugin.PluginRepository
 import dev.praxis.core.plugin.collectEntryPoints
 import dev.praxis.feature.settings.home.SettingsUnfinished
+import dev.praxis.ui.navigation.LocalNavigator
+import dev.praxis.ui.navigation.PraxisRoute
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -61,5 +63,19 @@ fun CompatPluginEntryRoute(
         }.collectEntryPoints(capturedEntries)
     }
 
-    CompatPluginEntryScreen(points = points, modifier = modifier)
+    val navigator = LocalNavigator.current
+
+    CompatPluginEntryScreen(
+        points = points,
+        onOpen = { point ->
+            navigator.push(
+                PraxisRoute.PluginEntry(
+                    pluginId = point.pluginId,
+                    entryId = point.point.id,
+                    title = point.title,
+                ),
+            )
+        },
+        modifier = modifier,
+    )
 }

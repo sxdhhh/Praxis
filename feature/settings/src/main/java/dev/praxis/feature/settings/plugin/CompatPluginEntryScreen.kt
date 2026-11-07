@@ -1,5 +1,6 @@
 package dev.praxis.feature.settings.plugin
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -53,6 +54,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 fun CompatPluginEntryScreen(
     points: List<InstalledEntryPoint>,
+    /** 点开一条入口。由接线层决定跳到哪个路由。 */
+    onOpen: (InstalledEntryPoint) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     SettingsList(
@@ -82,7 +85,7 @@ fun CompatPluginEntryScreen(
         }
 
         items(points, key = { it.key }) { point ->
-            EntryRow(point, modifier = Modifier.animateItem())
+            EntryRow(point, onOpen = onOpen, modifier = Modifier.animateItem())
         }
     }
 }
@@ -91,9 +94,16 @@ fun CompatPluginEntryScreen(
 @Composable
 private fun EntryRow(
     point: InstalledEntryPoint,
+    onOpen: (InstalledEntryPoint) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(modifier = modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+    // 停用的包不给点：点了只会得到一个空页面，比不能点更让人困惑。
+    val clickableModifier = if (point.enabled) {
+        modifier.clickable { onOpen(point) }
+    } else {
+        modifier
+    }
+    Card(modifier = clickableModifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,

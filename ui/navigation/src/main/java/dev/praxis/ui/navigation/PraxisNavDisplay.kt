@@ -140,6 +140,8 @@ fun PraxisNavDisplay(
             }
             entry<PraxisRoute.SettingsPackages>(swipeDismiss = swipe) { route -> content(route) }
             entry<PraxisRoute.SettingsCompatPluginEntries>(swipeDismiss = swipe) { route -> content(route) }
+            // 插件页面：内容由第三方脚本决定，手势方向不可预判 → 允许侧滑返回。
+            entry<PraxisRoute.PluginEntry>(swipeDismiss = swipe) { route -> content(route) }
             entry<PraxisRoute.SettingsLog>(swipeDismiss = swipe) { route -> content(route) }
             entry<PraxisRoute.SettingsAbout>(swipeDismiss = swipe) { route -> content(route) }
             // 许可明细是纯列表页，无横向手势 → 允许侧滑返回。
@@ -177,6 +179,8 @@ fun PraxisRoute.title(): String = when (this) {
     PraxisRoute.SettingsTerminal -> "终端设置"
     PraxisRoute.SettingsPackages -> "扩展包"
     PraxisRoute.SettingsCompatPluginEntries -> "兼容插件入口"
+    // 成员属性优先于本扩展函数，不会递归。
+    is PraxisRoute.PluginEntry -> this.title
     PraxisRoute.SettingsLog -> "日志"
     PraxisRoute.SettingsAbout -> "关于"
     PraxisRoute.SettingsOpenSourceLicense -> "开源许可"

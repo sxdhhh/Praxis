@@ -162,6 +162,22 @@ sealed interface PraxisRoute : NavKey {
     @Serializable
     data object SettingsCompatPluginEntries : PraxisRoute
 
+/**
+ * 打开一个插件入口：页面由插件脚本渲染（compose_dsl）。
+ *
+ * ## title 为什么跟着路由走
+ *
+ * 其他路由的标题都从路由**类型**推导（清单改名后旧栈恢复的标题会和内容不符）。
+ * 插件入口是动态的，宿主不知道它叫什么；标题只能来自注册那一刻。
+ * 折中是：只在页面处于栈顶时用它作标题，栈恢复后仍以这里记录的名字显示 ——
+ * 这比显示「插件入口」四个字有用。
+ */
+data class PluginEntry(
+    val pluginId: String,
+    val entryId: String,
+    val title: String,
+) : PraxisRoute
+
     @Serializable
     data object SettingsLog : PraxisRoute
 

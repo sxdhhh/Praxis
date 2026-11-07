@@ -177,6 +177,14 @@ fun PraxisApp(
         org.koin.compose.koinInject()
     val pluginMarket: dev.praxis.core.plugin.MarketApi =
         org.koin.compose.koinInject()
+
+    /**
+     * 插件脚本运行时（WebView 实现）。
+     *
+     * 在这一层取、往下传，与上面几个同样的口径：feature 模块不认识 Koin。
+     */
+    val pluginRuntime: dev.praxis.core.plugin.PluginScriptRuntime =
+        org.koin.compose.koinInject()
     val memoryStore: dev.praxis.core.memory.MemoryStore = org.koin.compose.koinInject()
     val workflowEngine: dev.praxis.core.workflow.WorkflowEngine = org.koin.compose.koinInject()
     val skillRegistry: dev.praxis.core.plugin.SkillRegistry = org.koin.compose.koinInject()
@@ -964,6 +972,7 @@ fun PraxisApp(
                         settingsRepository.setDisabledTools(next)
                     }
                 },
+                pluginRuntime = pluginRuntime,
                 capabilities = capabilities,
                 onRequestCapability = { capability ->
                     val launched = capabilityRequester.request(

@@ -99,6 +99,13 @@ fun SettingsHost(
     /** 工作流引擎。由 :app 注入。 */
     workflowEngine: dev.praxis.core.workflow.WorkflowEngine,
     /**
+     * 插件脚本运行时（WebView 实现）。
+     *
+     * 可空默认值：与 [linuxEnvPort] 同口径 —— 这是新增能力，缺省时入口页明确
+     * 显示「未装配运行时」，而不是让既有调用点全部改签名。
+     */
+    pluginRuntime: dev.praxis.core.plugin.PluginScriptRuntime? = null,
+    /**
      * Linux 环境的执行端口（proot / tar / 进程）。
      *
      * 用可空默认值而不是强制参数：它是新增能力，缺省时页面显示「未装配」
@@ -472,6 +479,13 @@ private fun SettingsPageBody(
                 )
             }
         }
+        // 插件入口：页面由插件脚本的 compose_dsl 渲染。
+        is PraxisRoute.PluginEntry -> dev.praxis.feature.settings.plugin.PluginEntryScreen(
+            pluginId = route.pluginId,
+            entryId = route.entryId,
+            runtime = pluginRuntime,
+            modifier = modifier,
+        )
         PraxisRoute.SettingsLog -> LogScreen(modifier)
         PraxisRoute.SettingsAbout -> AboutScreen(
             versionName = versionName,
