@@ -113,13 +113,12 @@ fun ComposeDslView(
             }
         }
 
+        // miuix 的 TextButton 是 text= 参数 + onClick，不是内容 lambda。
         "TextButton" -> TextButton(
+            text = node.prop("text").orEmpty(),
             onClick = { node.actionId?.let(onAction) },
-            enabled = node.prop("enabled")?.equals("false", ignoreCase = true) != true,
             modifier = padded,
-        ) {
-            Text(text = node.prop("text").orEmpty())
-        }
+        )
 
         "Button" -> Button(
             onClick = { node.actionId?.let(onAction) },

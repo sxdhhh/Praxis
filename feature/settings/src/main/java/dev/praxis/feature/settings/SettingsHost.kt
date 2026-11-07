@@ -187,6 +187,7 @@ fun SettingsHost(
     ) { _ ->
         SettingsPageBody(
             route = route,
+            pluginRuntime = pluginRuntime,
             repository = repository,
             versionName = versionName,
             versionCode = versionCode,
@@ -244,6 +245,8 @@ private fun SettingsPageBody(
     /** 新建记忆空间；null = 不显示「+ 新建空间」。 */
     onCreateMemorySpace: ((String) -> Unit)? = null,
     workflowEngine: dev.praxis.core.workflow.WorkflowEngine,
+    /** 插件脚本运行时。见 [SettingsHost] 上的同名参数。 */
+    pluginRuntime: dev.praxis.core.plugin.PluginScriptRuntime? = null,
     /**
      * 角色卡仓储。
      *
