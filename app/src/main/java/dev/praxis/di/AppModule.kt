@@ -172,6 +172,22 @@ val appModule = module {
     // 装完就是死的，与「不做一个永远转圈的详情页」是同一条取舍。
     single<dev.praxis.core.plugin.MarketApi> { dev.praxis.data.plugin.PluginMarketApi() }
 
+    // 插件脚本运行时（WebView 实现）。
+    //
+    // ## 现在只绑定了，还没接编排
+    //
+    // 「启动时装载全部已启用包」这一步还没写：需要决定在哪个时机跑
+    // （Application 起来？进扩展包页时？），以及失败如何呈现。本轮只把
+    // 运行时做成可注入的，否则它是一段没有人能调用的死代码。
+    //
+    // ## 已知限制
+    //
+    // 见 PraxisWebViewPluginRuntime 的类注释：包内 require 目前不支持
+    // （端口没有「相对路径 → 正文」的能力），所以只装单文件包能跑通。
+    single<dev.praxis.core.plugin.PluginScriptRuntime> {
+        dev.praxis.data.plugin.PraxisWebViewPluginRuntime(androidContext())
+    }
+
     // 导入外部归档（.toolpkg / 目录）：`PluginRepository.install` 用它预检。
     //
     // ## 为什么在这里注册成全局可变字段
