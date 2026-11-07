@@ -110,7 +110,10 @@ class PluginRepository(
      * 缩进但又混了奇怪字符），不能让整个扩展中心打不开 ——
      * 那会让用户连「删掉那个坏包」都做不到。
      */
-    fun scanAll(): List<InstalledPlugin> = storage.listInstalledIds()
+    /** 打开包的归档（PluginSource 需要）。调用方负责 close —— 见 PluginActivation。 */
+    override fun openArchive(packageId: String): PluginArchive? = storage.openArchive(packageId)
+
+    override fun scanAll(): List<InstalledPlugin> = storage.listInstalledIds()
         .mapNotNull { packageId -> loadOne(packageId) }
         // 稳定顺序：启用优先，然后按标题、id。UI 列表不该随目录遍历顺序跳动。
         .sortedWith(
