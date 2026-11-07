@@ -605,10 +605,20 @@ data class ChatState(
      *
      * 多模态下「只发图不写字」是合法且常见的用法（拍张照问「这是什么」）。
      * 旧判据 `input.isNotBlank()` 会让这种消息发不出去 —— 用户选完图发现
+
+     * ## 为什么不排除「生成中」（2026-11-07）
+     *
+     * 原来这里还有一个 `&& !isStreaming`。它让 `sendActionMode` 的
+     * 「生成中 + 有内容 → 加号入队」分支**永远进不去** —— 因为 busy
+     * 必然意味着 isStreaming，canSend 恒为 false，按钮只能停在「停止」。
+     * 用户打完字想排队，按下去却是中断生成，正是反馈里的「排队功能看不到」。
+     *
+     * 直接发的安全性由 `send()` 自己保证（它有 `|| isStreaming` 早退），
+     * 所以这里表达的是「有内容可处理」，交由调用方区分发还是入队。
      * 发送键是灰的，会以为选图失败。
      */
     val canSend: Boolean
-        get() = (input.isNotBlank() || attachments.isNotEmpty()) && !isStreaming
+        get() = input.isNotBlank() || attachments.isNotEmpty()
 
     /** 是否处于「已发出、未收尾」的中间态（决定发送键显示停还是发送）。 */
     val isBusy: Boolean get() = isStreaming || stage != ChatStage.Idle
