@@ -75,7 +75,7 @@ fun CompatPluginEntryRoute(
             navigator.push(
                 PraxisRoute.PluginEntry(
                     pluginId = point.pluginId,
-                    entryId = point.point.id,
+                    entryId = point.point.renderTargetId(),
                     title = point.title,
                 ),
             )

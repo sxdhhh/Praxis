@@ -400,4 +400,43 @@ class PluginEntryPointTest {
         assertEquals(2, points.size)
         assertTrue(points.none { it.point.id == "ghost" })
     }
+
+    // ── 渲染目标解析（2026-11-07 真机发现）──
+
+    @Test
+    fun 导航入口指向它路由里的页面() {
+        // 侧栏那条来自 registerNavigationEntry，自己没有 screen。
+        // 拿它自己的 id 去渲染，真机上的表现是「入口没有可渲染的 screen」。
+        val nav = PluginEntryPoint(
+            id = "demo_sidebar",
+            kind = PluginEntryPoint.Kind.Navigation,
+            surface = EntrySurfaces.MAIN_SIDEBAR_PLUGINS,
+            routeId = "toolpkg:com.demo.panel:ui:demo",
+        )
+
+        assertEquals("demo", nav.renderTargetId())
+    }
+
+    @Test
+    fun 页面入口指向自己() {
+        val route = PluginEntryPoint(
+            id = "demo",
+            kind = PluginEntryPoint.Kind.UiRoute,
+            routeId = "toolpkg:com.demo.panel:ui:demo",
+        )
+
+        assertEquals("demo", route.renderTargetId())
+    }
+
+    @Test
+    fun 没有路由时回落自己的_id() {
+        val action = PluginEntryPoint(
+            id = "quick",
+            kind = PluginEntryPoint.Kind.Navigation,
+            surface = EntrySurfaces.TOOLBOX,
+            action = PluginActionHook(function = "onQuick"),
+        )
+
+        assertEquals("quick", action.renderTargetId())
+    }
 }

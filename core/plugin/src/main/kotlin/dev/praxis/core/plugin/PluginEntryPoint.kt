@@ -154,6 +154,28 @@ data class InstalledEntryPoint(
     val key: String get() = pluginId + "/" + point.id
     val title: String get() = point.title.resolveZh().ifBlank { point.id }
 
+    /**
+     * 打开这条入口时，应该渲染**哪个**入口。
+     *
+     * ## 为什么需要它（2026-11-07 真机发现）
+     *
+     * 侧栏那条入口来自 registerNavigationEntry：它只是一个导航项，
+     * 自己没有 screen，真正的页面在它 route 指向的 UI 入口上。
+     * 直接拿导航项的 id 去渲染，会得到「入口没有可渲染的 screen」。
+     *
+     * 规则：route 形如 toolpkg:<包>:ui:<入口id> 时取最后一段；
+     * 没有 route（自己就是 UI 入口）时用自己的 id。
+     */
+    fun renderTargetId(): String {
+        val route = routeId?.trim().orEmpty()
+        if (route.isEmpty()) return id
+        val marker = ":ui:"
+        val index = route.lastIndexOf(marker)
+        if (index < 0) return id
+        val target = route.substring(index + marker.length).trim()
+        return target.ifEmpty { id }
+    }
+
     /** 排序：先 order，再包 id、入口 id，保证列表顺序稳定。 */
     companion object {
         val ORDER: Comparator<InstalledEntryPoint> =
