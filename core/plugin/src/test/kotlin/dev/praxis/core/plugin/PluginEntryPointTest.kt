@@ -325,4 +325,79 @@ class PluginEntryPointTest {
         assertEquals(1, m.entries.size)
         assertTrue("params 是透明字段", m.entries[0].hasTarget)
     }
+
+    // ── 运行时捕获与清单声明的合并（R3） ──
+
+    private fun runtimePoint(pluginId: String, id: String): PluginEntryPoint = PluginEntryPoint(
+        id = id,
+        kind = PluginEntryPoint.Kind.UiRoute,
+        routeId = PluginEntryPoint.routeIdOf(pluginId, id),
+        screen = "ui/" + id + ".js",
+        title = LocalizedText.ofZh(id),
+    )
+
+    @Test
+    fun `没有捕获时用清单并标注来源`() {
+        val plugin = InstalledPlugin(
+            manifest = manifestOf(sidebarStyle),
+            installPath = "/p/demo",
+            enabled = true,
+        )
+
+        val points = listOf(plugin).collectEntryPoints()
+
+        assertEquals(2, points.size)
+        assertTrue(
+            "没有运行时捕获时，来源应当是清单",
+            points.all { it.origin == EntryOrigin.Manifest },
+        )
+    }
+
+    @Test
+    fun `有捕获时整体以捕获为准`() {
+        val plugin = InstalledPlugin(
+            manifest = manifestOf(sidebarStyle),
+            installPath = "/p/demo",
+            enabled = true,
+        )
+        val captured = mapOf(plugin.id to listOf(runtimePoint(plugin.id, "only_runtime")))
+
+        val points = listOf(plugin).collectEntryPoints(captured)
+
+        // 包一旦跑起来，它注册的东西就是唯一真相：清单里那两条不该再出现。
+        assertEquals("清单条目必须被整体让位", 1, points.size)
+        assertEquals("only_runtime", points[0].point.id)
+        assertEquals(EntryOrigin.Runtime, points[0].origin)
+    }
+
+    @Test
+    fun `捕获到的入口同样受启停影响`() {
+        val plugin = InstalledPlugin(
+            manifest = manifestOf(sidebarStyle),
+            installPath = "/p/demo",
+            enabled = false,
+        )
+        val captured = mapOf(plugin.id to listOf(runtimePoint(plugin.id, "panel")))
+
+        val point = listOf(plugin).collectEntryPoints(captured).single()
+
+        assertEquals(EntryOrigin.Runtime, point.origin)
+        assertFalse("包停用了，入口必须标为不可用", point.enabled)
+    }
+
+    @Test
+    fun `未安装包的捕获被忽略`() {
+        val plugin = InstalledPlugin(
+            manifest = manifestOf(sidebarStyle),
+            installPath = "/p/demo",
+            enabled = true,
+        )
+        // 捕获表里有别的包（例如已卸载但运行时还没释放）——不能出现在列表里。
+        val captured = mapOf("gone.pkg" to listOf(runtimePoint("gone.pkg", "ghost")))
+
+        val points = listOf(plugin).collectEntryPoints(captured)
+
+        assertEquals(2, points.size)
+        assertTrue(points.none { it.point.id == "ghost" })
+    }
 }

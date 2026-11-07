@@ -127,6 +127,15 @@ object EntrySurfaces {
     }
 }
 
+/** 入口的来源。页面上必须能看出来，否则「为什么这条不见了」无从判断。 */
+enum class EntryOrigin(val label: String) {
+    /** 包在 main 脚本里注册的（registerUiRoute 等）——Operit 的真实来源。 */
+    Runtime("运行时"),
+
+    /** 清单 entries 里声明的（Praxis 的声明式通道）。 */
+    Manifest("清单"),
+}
+
 /**
  * 已装插件的一个入口（聚合视图）。
  *
@@ -139,6 +148,8 @@ data class InstalledEntryPoint(
     val point: PluginEntryPoint,
     /** 包已启用且无致命问题时才可用。 */
     val enabled: Boolean,
+    /** 这条入口从哪来。见 [EntryOrigin]。 */
+    val origin: EntryOrigin = EntryOrigin.Manifest,
 ) {
     val key: String get() = pluginId + "/" + point.id
     val title: String get() = point.title.resolveZh().ifBlank { point.id }
@@ -150,16 +161,43 @@ data class InstalledEntryPoint(
     }
 }
 
-/** 把所有已装插件的入口摊平。 */
-fun List<InstalledPlugin>.collectEntryPoints(): List<InstalledEntryPoint> =
+/**
+ * 把所有已装插件的入口摊平。
+ *
+ * ## 两条来源的优先级：**运行时整体优先**
+ *
+ * | 情况 | 采用 |
+ * |---|---|
+ * | 该包有运行时捕获 | 只用捕获结果，清单 entries 一律不采用 |
+ * | 没有捕获 | 用清单 entries |
+ *
+ * ## 为什么不逐条混合
+ *
+ * Operit 的入口**只存在于运行时注册**，清单里根本没有这个字段 —— 也就是说
+ * 包一旦跑起来，它注册的东西就是唯一真相。逐条混合会带来两个具体问题：
+ *
+ *  1. 同一个页面可能被声明一次、注册一次（id 不同），列表里出现两条；
+ *  2. 清单里写废的条目会在运行时成功之后继续显示，而它早已不存在。
+ *
+ * 所以判据是「这个包跑起来了没有」，而不是「这条 id 撞没撞上」。
+ *
+ * @param captured 包 id → 运行时捕获到的入口（见 PluginRuntimeHost.capturedEntries）
+ */
+fun List<InstalledPlugin>.collectEntryPoints(
+    captured: Map<String, List<PluginEntryPoint>> = emptyMap(),
+): List<InstalledEntryPoint> =
     flatMap { plugin ->
         val usable = plugin.enabled && plugin.problems.none { it is ManifestProblem.Fatal }
-        plugin.manifest.entries.map { entry ->
+        val runtime = captured[plugin.id].orEmpty()
+        val source = if (runtime.isNotEmpty()) runtime else plugin.manifest.entries
+        val origin = if (runtime.isNotEmpty()) EntryOrigin.Runtime else EntryOrigin.Manifest
+        source.map { entry ->
             InstalledEntryPoint(
                 pluginId = plugin.id,
                 pluginTitle = plugin.title,
                 point = entry,
                 enabled = usable,
+                origin = origin,
             )
         }
     }.sortedWith(InstalledEntryPoint.ORDER)

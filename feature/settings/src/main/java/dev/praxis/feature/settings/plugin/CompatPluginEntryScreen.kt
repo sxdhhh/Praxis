@@ -115,6 +115,10 @@ private fun EntryRow(
                         append(" · ")
                         append(face)
                     }
+                    // 来源必须看得见：运行时捕获与清单声明是两条通道，
+                    // 出问题时第一步就是问「这条是包自己报的，还是清单里写的」。
+                    append(" · ")
+                    append(point.origin.label)
                 }
                 Text(
                     text = subtitle,

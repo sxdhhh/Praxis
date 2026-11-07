@@ -8,6 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dev.praxis.core.plugin.InstalledEntryPoint
+import dev.praxis.core.plugin.PluginEntryPoint
 import dev.praxis.core.plugin.PluginRepository
 import dev.praxis.core.plugin.collectEntryPoints
 import dev.praxis.feature.settings.home.SettingsUnfinished
@@ -31,6 +32,15 @@ import kotlinx.coroutines.withContext
 @Composable
 fun CompatPluginEntryRoute(
     repository: PluginRepository?,
+    /**
+     * 运行时捕获到的入口（包 id → 入口）。
+     *
+     * 目前恒为空：Praxis 还没有 PluginScriptRuntime 的 WebView 实现，
+     * 所以包跑不起来，只有清单声明这一条来源。等运行时接上，
+     * 这里传 host.capturedEntries() 即可 —— 合并规则已经在
+     * collectEntryPoints 里定死了（运行时整体优先）。
+     */
+    capturedEntries: Map<String, List<PluginEntryPoint>> = emptyMap(),
     modifier: Modifier = Modifier,
 ) {
     if (repository == null) {
@@ -48,7 +58,7 @@ fun CompatPluginEntryRoute(
         points = withContext(Dispatchers.IO) {
             // 读包目录失败不该让页面崩：显示空列表 + 用户可以去扩展包页看详情。
             runCatching { repository.scanAll() }.getOrDefault(emptyList())
-        }.collectEntryPoints()
+        }.collectEntryPoints(capturedEntries)
     }
 
     CompatPluginEntryScreen(points = points, modifier = modifier)
