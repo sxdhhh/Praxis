@@ -105,9 +105,16 @@ object LinuxDiskUsage {
                     // `/` 的统计把 `/usr` 算两遍，且可能绕环（`a -> ..`）。
                     // `isDirectory` 在 Java 里**会**跟随链接，所以要先判链接。
                     if (java.nio.file.Files.isSymbolicLink(child.toPath())) {
-                        // 链接本身占几十字节，按文件计入（与 `du -L` 的行为对齐：
+                        // 链接本身占几十字节，按文件计入（与 du 一致：
                         // 不算目标，只算链接自身的大小）。
-                        bytes += child.length()
+                        //
+                        // ## 为什么不能用 File.length()
+                        //
+                        // File.length() 会**跟随**链接：对 bin -> usr/bin 这种
+                        // 指向目录的链接，Linux 上返回的是目标目录的 size
+                        // （常见 4096），于是体积凭空多出几 KB，用户拿 du 一对
+                        // 就发现对不上。必须读 lstat 的 st_size。
+                        bytes += symlinkSize(child.toPath())
                         files++
                         continue
                     }
@@ -230,6 +237,20 @@ object LinuxDiskUsage {
             ?: file.absolutePath.hashCode().toLong()
         seen.add(key)
     }.getOrDefault(true)
+
+    /**
+     * 读符号链接**自身**的大小（lstat），不跟随目标。
+     *
+     * 读不到时返回 0：这只会在「刚列出来、读之前被删掉」这一瞬间发生，
+     * 那种情况下 0 就是正确答案，不是兜底。
+     */
+    private fun symlinkSize(path: java.nio.file.Path): Long = runCatching {
+        java.nio.file.Files.readAttributes(
+            path,
+            java.nio.file.attribute.BasicFileAttributes::class.java,
+            java.nio.file.LinkOption.NOFOLLOW_LINKS,
+        ).size()
+    }.getOrDefault(0L)
 
     /**
      * 读 Unix 的 (st_dev, st_ino) 并混编成一个 Long。

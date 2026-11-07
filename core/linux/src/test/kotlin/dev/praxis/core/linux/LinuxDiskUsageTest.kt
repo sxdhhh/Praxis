@@ -86,9 +86,23 @@ class LinuxDiskUsageTest {
 
         val usage = LinuxDiskUsage.diskUsage(root)
 
-        // 无论链接是否建成，`usr/bin/tool` 的 500 字节只该算一次。
-        // 若实现跟随了链接，这里会得到 1000。
-        assertEquals("不应把符号链接目标算两遍", 500L, usage.bytes)
+        // 链接自身按 lstat 的 size 计入（Linux 上等于目标路径长度，十几字节），
+        // 但**目标内容不能再算一遍**。
+        //
+        // 若实现跟随了链接，这里会多出目标目录的 size（常见 4096），
+        // 断言会以 4596 vs 520 这类差值失败，而不是静默通过。
+        val linkBytes = if (ok) {
+            runCatching {
+                java.nio.file.Files.readAttributes(
+                    link.toPath(),
+                    java.nio.file.attribute.BasicFileAttributes::class.java,
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS,
+                ).size()
+            }.getOrDefault(0L)
+        } else {
+            0L
+        }
+        assertEquals("不应把符号链接目标算两遍", 500L + linkBytes, usage.bytes)
         if (ok) {
             // 链接自身按文件计入（Linux 上符号链接 size = 目标路径长度）。
             assertTrue("链接本身应被计入文件数", usage.fileCount >= 1)
