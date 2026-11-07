@@ -14,6 +14,12 @@ import org.junit.Test
  * 抽成纯函数之后，字段映射与容错都能在这里锁住 —— 否则插件注册出问题时
  * 设备上只有一句「没反应」，无从排查。
  *
+ * ## 这里只解析 UI 入口
+ *
+ * 工具不来自注册阶段：文档 §3.2.3 写明工具属于子包，由脚本开头的 METADATA
+ * 块静态声明（见 [ScriptMetadataParser]）。早先这里解析过一段 tools[]，
+ * 那是照「总该有个 registerTool」的直觉写的；文档查清后已删除。
+ *
  * JSON 形状由 [PluginRuntimeBootstrapScript] 决定，所以这些用例同时也是
  * 引导脚本的契约测试。
  */
@@ -21,7 +27,6 @@ class PluginRegistrationCodecTest {
 
     private val sample = """
         {
-          "tools": [],
           "uiRoutes": [
             {
               "id": "dashboard",
@@ -134,46 +139,9 @@ class PluginRegistrationCodecTest {
     }
 
     @Test
-    fun 工具定义会被解析() {
-        val json = """
-            {
-              "tools": [
-                {
-                  "name": "windows_list",
-                  "description": "列出窗口",
-                  "parameters": "{\"type\":\"object\",\"properties\":{}}",
-                  "entry_function": "listWindows"
-                },
-                {"description": "缺名字"}
-              ]
-            }
-        """.trimIndent()
-        val r = PluginRegistrationCodec.parse("a", json)
-
-        assertEquals(1, r.tools.size)
-        assertEquals("windows_list", r.tools[0].name)
-        assertEquals("listWindows", r.tools[0].entryFunction)
-        assertTrue(r.tools[0].parametersJson.contains("properties"))
-        // 缺名字的那条要留原因，而不是静默丢。
-        assertTrue(r.errors.any { it.contains("tools[1]") })
-    }
-
-    @Test
-    fun 无参工具的_schema_用规范空对象() {
-        val json = """
-            {"tools": [{"name": "ping"}]}
-        """.trimIndent()
-        val r = PluginRegistrationCodec.parse("a", json)
-
-        assertEquals(PluginToolDeclaration.EMPTY_SCHEMA, r.tools.single().parametersJson)
-        assertEquals("ping", r.tools.single().entryFunction)
-    }
-
-    @Test
     fun 非法_JSON_返回问题而不是抛异常() {
         val r = PluginRegistrationCodec.parse("a", "not a json")
 
-        assertTrue(r.tools.isEmpty())
         assertTrue(r.entries.isEmpty())
         assertEquals(1, r.errors.size)
     }

@@ -417,4 +417,25 @@ class PluginRuntimeHostTest {
         assertEquals("export default 1", runtime.lastReadFile?.invoke("./dist/ui/x.js"))
         assertNull("读不到就该给 null，而不是空串", runtime.lastReadFile?.invoke("dist/missing.js"))
     }
+
+    // ── 工具来自子包 METADATA（R7）──
+
+    @Test
+    fun 子包元数据声明的工具会被注册() = runTest {
+        val registry = ToolRegistry()
+        val host = PluginRuntimeHost(registry, FakeRuntime())
+        val pkg = plugin(subpackages = listOf(PluginSubpackage(id = "win", entry = "win.js")))
+        val script = """
+/*
+METADATA
+{ "name": "win", "tools": [ { "name": "hello", "description": "问候" } ] }
+*/
+"""
+
+        host.load(pkg, content(subpackages = mapOf("win" to script)))
+
+        // 注册名带子包前缀（文档 §3.2.3）：多子包同名函数不加前缀会互相覆盖。
+        assertNotNull("METADATA 声明的工具必须注册", registry.find("win:hello"))
+        assertEquals(listOf("win:hello"), host.toolsOf("com.a.pkg"))
+    }
 }

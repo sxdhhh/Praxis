@@ -10,10 +10,18 @@ package dev.praxis.core.plugin
  * （见 [PluginRuntimeBootstrapScript]）：
  *
  *     {
- *       "tools":     [ { name, description, parameters, entryFunction } ],
  *       "uiRoutes":  [ { id, route, runtime, title, keepAlive, hasScreen } ],
  *       "navEntries":[ { id, route, surface, title, icon, order, action } ]
  *     }
+ *
+ * ## 这里为什么没有 tools
+ *
+ * 工具**不来自注册阶段**：文档 §3.2.3 写明工具属于子包，由脚本开头的
+ * METADATA 块静态声明（见 [ScriptMetadataParser]）。registerToolPkg() 只
+ * 声明 UI 与钩子 —— §3.2.5 的示例里一个工具都没有。
+ *
+ * 早先这里解析过一段 tools[]，那是照着「总该有个 registerTool」的直觉写的；
+ * 文档查清后已删除，免得留着一条永远不会被填的通道。
  *
  * ## 为什么把这一步单独抽出来
  *
@@ -30,14 +38,10 @@ object PluginRegistrationCodec {
 
     /** 解析结果。 */
     data class Result(
-        val tools: List<PluginToolDeclaration> = emptyList(),
         val entries: List<PluginEntryPoint> = emptyList(),
         /** 逐条问题（缺必填、类型不对等）。空表示全部解析成功。 */
         val errors: List<String> = emptyList(),
     )
-
-    /** 无参工具的规范 schema。与 [PluginToolDeclaration.EMPTY_SCHEMA] 同源。 */
-    private const val EMPTY_SCHEMA = PluginToolDeclaration.EMPTY_SCHEMA
 
     fun parse(packageId: String, rawJson: String): Result {
         val root = ManifestParser.parse(rawJson).getOrNull()
@@ -45,22 +49,6 @@ object PluginRegistrationCodec {
         val fields = root.asMapping()
 
         val errors = mutableListOf<String>()
-        val tools = fields.listOfMappings("tools").mapIndexedNotNull { index, item ->
-            val name = item.text("name").trim()
-            if (name.isEmpty()) {
-                errors += "tools[" + index + "] 缺少 name，已跳过"
-                null
-            } else {
-                PluginToolDeclaration(
-                    name = name,
-                    description = item.text("description").trim(),
-                    // 参数 schema 是脚本侧 JSON.stringify 过的字符串；
-                    // 空串表示无参，用规范 schema 而不是留空。
-                    parametersJson = item.text("parameters").trim().ifEmpty { EMPTY_SCHEMA },
-                    entryFunction = item.text("entry_function").trim().ifEmpty { name },
-                )
-            }
-        }
 
         val routes = fields.listOfMappings("uiRoutes").mapIndexedNotNull { index, item ->
             val id = item.text("id").trim()
@@ -112,7 +100,6 @@ object PluginRegistrationCodec {
         }
 
         return Result(
-            tools = tools,
             entries = routes + navEntries,
             errors = errors,
         )

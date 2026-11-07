@@ -221,6 +221,30 @@ class PluginRuntimeHost(
             readFile = { raw -> PluginArchive.normalizePath(raw)?.let { content.textFiles[it] } },
         )
 
+        // ## 工具来自子包脚本的 METADATA（2026-11-08，R7）
+        //
+        // 文档 §3.2.3：工具属于子包，注册名 <subpackage_id>:<tool_name>，
+        // 由脚本开头的 METADATA 块**静态声明**。registerToolPkg() 只声明
+        // UI 与钩子（§3.2.5 的示例里一个工具都没有）。
+        //
+        // 之前 Praxis 假设存在一个 registerTool 运行时 API —— 它并不存在，
+        // 所以 registeredTools 一直是空的，模型看不到任何插件工具。
+        val metadataErrors = mutableListOf<String>()
+        val metadataTools = enabledSubpackages.flatMap { (subId, source) ->
+            val parsed = ScriptMetadataParser.parse(source.text)
+            when {
+                // 没有 METADATA 不算错误：不是每个子包都提供工具。
+                parsed == null -> emptyList()
+                parsed.isFailure -> {
+                    metadataErrors += "子包 " + subId + " 的 METADATA 解析失败：" +
+                        (parsed.exceptionOrNull()?.message ?: "未知原因")
+                    emptyList()
+                }
+                else -> ScriptMetadataParser.toToolDeclarations(subId, parsed.getOrThrow())
+            }
+        }
+        val allTools = metadataTools + outcome.tools
+
         // ## 入口先记账，工具后注册（2026-11-08）
         //
         // 旧实现在 tools 为空时直接 return —— 而 sidebar_sillytavern 那类包
@@ -232,9 +256,9 @@ class PluginRuntimeHost(
             registeredEntries[plugin.id] = outcome.entryPoints.toList()
         }
 
-        if (outcome.tools.isNotEmpty()) {
+        if (allTools.isNotEmpty()) {
             // 转成 Tool 并注册（允许替换：更新场景）。
-            val toolObjects = outcome.tools.map { declaration ->
+            val toolObjects = allTools.map { declaration ->
                 PluginBackedTool(
                     packageId = plugin.id,
                     declaration = declaration,
@@ -242,15 +266,21 @@ class PluginRuntimeHost(
                 )
             }
             registry.registerOrReplaceAll(toolObjects)
-            registeredTools[plugin.id] = outcome.tools.map { it.name }.toMutableList()
+            registeredTools[plugin.id] = allTools.map { it.name }.toMutableList()
         }
 
         // 只要脚本真的产出过东西（工具或入口），就算已装载 ——
         // 卸载时要据此释放运行时。只注册入口的包同样持有运行上下文。
-        if (outcome.tools.isNotEmpty() || outcome.entryPoints.isNotEmpty()) {
+        if (allTools.isNotEmpty() || outcome.entryPoints.isNotEmpty()) {
             loadedPackageIds.add(plugin.id)
         }
-        return outcome
+
+        // 返回的 outcome 要反映**实际注册了什么**：调用方据此展示
+        // 「这个包提供了几个工具」，报旧值会让界面与注册表对不上。
+        return outcome.copy(
+            tools = allTools,
+            errors = outcome.errors + metadataErrors,
+        )
     }
 
     /**

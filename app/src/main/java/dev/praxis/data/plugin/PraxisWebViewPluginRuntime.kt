@@ -102,8 +102,10 @@ class PraxisWebViewPluginRuntime(
             val parsed = PluginRegistrationCodec.parse(packageId, rawJson)
             errors += parsed.errors
 
+            // 工具不从这里来：子包 METADATA 才是来源，由 PluginRuntimeHost
+            // 在装载时合并进去（见 PluginRuntimeHost.load）。
             PluginLoadOutcome(
-                tools = parsed.tools,
+                tools = emptyList(),
                 errors = errors,
                 entryPoints = parsed.entries,
             )
