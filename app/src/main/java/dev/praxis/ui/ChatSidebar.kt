@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Alignment
+import dev.praxis.core.plugin.InstalledEntryPoint
 import dev.praxis.ui.widgets.SidebarActionButton
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -84,6 +85,14 @@ fun ChatSidebar(
     progress: Animatable<Float, AnimationVector1D>,
     onDismiss: () -> Unit,
     chatPersistence: ChatPersistence,
+    /**
+     * 挂到侧栏的插件入口（surface = main_sidebar_plugins）。
+     *
+     * 默认空列表：预览与测试不必构造插件环境；真机路径由 PraxisApp 传入。
+     */
+    pluginEntries: List<InstalledEntryPoint> = emptyList(),
+    /** 点开一条插件入口。缺省不做事（预览用）。 */
+    onOpenPluginEntry: (InstalledEntryPoint) -> Unit = {},
     currentSessionId: String,
     onOpenSession: (String) -> Unit,
     /**
@@ -452,6 +461,24 @@ fun ChatSidebar(
                             },
                         )
                     }
+                }
+            }
+            // 插件入口：Operit 的 main_sidebar_plugins 面。
+            //
+            // 放在会话之后：侧栏的第一职责仍是切会话，插件是附加能力。
+            if (pluginEntries.isNotEmpty()) {
+                item(key = "__plugin_label__") {
+                    SidebarSectionLabel(
+                        text = "插件（${pluginEntries.size}）",
+                        expanded = true,
+                        onToggle = {},
+                    )
+                }
+                items(pluginEntries, key = { "__plugin_" + it.key }) { point ->
+                    SidebarActionButton(
+                        text = point.title,
+                        onClick = { onOpenPluginEntry(point) },
+                    )
                 }
             }
         }

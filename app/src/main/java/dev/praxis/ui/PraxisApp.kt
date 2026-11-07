@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.praxis.core.data.settings.SettingsRepository
+import dev.praxis.core.plugin.collectEntryPoints
 import dev.praxis.feature.settings.capability.MemoryRoute
 import dev.praxis.feature.settings.home.SettingsHomeScreen
 import dev.praxis.feature.terminal.TerminalScreen
@@ -209,6 +210,23 @@ fun PraxisApp(
     val activationReport by pluginActivation.report.collectAsState()
     val capturedEntries = remember(activationReport) { pluginHost.capturedEntries() }
     val activationFailures = remember(activationReport) { activationReport?.failed.orEmpty() }
+
+    // 挂到侧栏的插件入口（surface = main_sidebar_plugins）。
+    //
+    // 与「兼容插件入口」页同一份来源与合并规则（运行时整体优先）。
+    // 扫描要读目录，放 IO；capturedEntries 变化（装完包）会重跑。
+    var sidebarPluginEntries by remember(capturedEntries) {
+        mutableStateOf(emptyList<dev.praxis.core.plugin.InstalledEntryPoint>())
+    }
+    androidx.compose.runtime.LaunchedEffect(capturedEntries) {
+        sidebarPluginEntries = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { pluginRepository.scanAll() }.getOrDefault(emptyList())
+        }.collectEntryPoints(capturedEntries)
+            .filter { point ->
+                point.enabled &&
+                    point.point.surface == dev.praxis.core.plugin.EntrySurfaces.MAIN_SIDEBAR_PLUGINS
+            }
+    }
     val memoryStore: dev.praxis.core.memory.MemoryStore = org.koin.compose.koinInject()
     val workflowEngine: dev.praxis.core.workflow.WorkflowEngine = org.koin.compose.koinInject()
     val skillRegistry: dev.praxis.core.plugin.SkillRegistry = org.koin.compose.koinInject()
@@ -729,6 +747,17 @@ fun PraxisApp(
                         progress = sidebarProgress,
                         onDismiss = { sidebarOpen = false },
                         chatPersistence = chatPersistence,
+                        pluginEntries = sidebarPluginEntries,
+                        onOpenPluginEntry = { point ->
+                            sidebarOpen = false
+                            navigator.push(
+                                PraxisRoute.PluginEntry(
+                                    pluginId = point.pluginId,
+                                    entryId = point.point.id,
+                                    title = point.title,
+                                ),
+                            )
+                        },
                         currentSessionId = sessionId,
                         onOpenSession = { newId ->
                             sessionId = newId
