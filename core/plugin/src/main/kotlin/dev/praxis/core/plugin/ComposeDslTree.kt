@@ -23,12 +23,36 @@ data class ComposeDslNode(
     val type: String,
     /** 只含标量属性（字符串化后的值）。 */
     val props: Map<String, String> = emptyMap(),
+    /**
+     * modifier 里的标量（padding / fillMaxWidth / width …）。
+     *
+     * ## 为什么要单独留一层
+     *
+     * modifier 是嵌套对象，其余嵌套 props 我仍然丢弃 —— 但布局信息全在它里面：
+     * 丢掉就等于「所有组件都按默认尺寸画」，而用户看到的是「我写的 padding 没生效」。
+     *
+     * 只取一层的标量：再深的结构（例如 modifier 里再嵌 modifier）目前没有真实用例，
+     * 真遇到时解析器会把它当结构体丢掉，而不是猜。
+     */
+    val modifier: Map<String, String> = emptyMap(),
     val children: List<ComposeDslNode> = emptyList(),
     /** 具名插槽：slot 名 → 节点列表。 */
     val slots: Map<String, List<ComposeDslNode>> = emptyMap(),
 ) {
     /** 取一个标量属性。 */
     fun prop(name: String): String? = props[name]
+
+    /** 四周内边距（dp）。没写或不是整数时返回 null。 */
+    val paddingDp: Int?
+        get() = modifier["padding"]?.trim()?.toIntOrNull()
+
+    /** Column/Row 的间距（dp）。 */
+    val spacingDp: Int?
+        get() = prop("spacing")?.trim()?.toIntOrNull()
+
+    /** 是否撑满宽度。只认 true/false 两种字面量。 */
+    val fillMaxWidth: Boolean
+        get() = modifier["fillMaxWidth"]?.trim()?.equals("true", ignoreCase = true) == true
 
     /** 动作 id（三种写法都认，与 Operit 的 extractActionId 一致）。 */
     val actionId: String?
@@ -79,10 +103,20 @@ object ComposeDslParser {
         if (type.isEmpty()) return null
 
         val props = mutableMapOf<String, String>()
+        var modifier: Map<String, String> = emptyMap()
         (entries["props"] as? ManifestValue.Mapping)?.entries?.forEach { (key, raw) ->
-            when (raw) {
-                is ManifestValue.Mapping -> Unit // 结构体丢弃：见类注释
-                is ManifestValue.Items -> Unit
+            when {
+                key == "modifier" && raw is ManifestValue.Mapping -> {
+                    modifier = raw.entries.mapNotNull { (modifierKey, modifierValue) ->
+                        when (modifierValue) {
+                            is ManifestValue.Mapping -> null
+                            is ManifestValue.Items -> null
+                            else -> modifierKey to modifierValue.asText()
+                        }
+                    }.toMap()
+                }
+                raw is ManifestValue.Mapping -> Unit // 其余结构体丢弃：见类注释
+                raw is ManifestValue.Items -> Unit
                 else -> props[key] = raw.asText()
             }
         }
@@ -103,7 +137,13 @@ object ComposeDslParser {
             if (nodes.isNotEmpty()) slots[name] = nodes
         }
 
-        return ComposeDslNode(type = type, props = props, children = children, slots = slots)
+        return ComposeDslNode(
+            type = type,
+            props = props,
+            modifier = modifier,
+            children = children,
+            slots = slots,
+        )
     }
 
     private fun scalarMap(value: ManifestValue?): Map<String, String> {

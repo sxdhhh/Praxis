@@ -77,16 +77,17 @@ class ComposeDslParserTest {
     }
 
     @Test
-    fun 结构体_props_被丢弃() {
-        // modifier 是嵌套对象。硬转成字符串会让渲染器拿到无法解释的文本，
-        // 所以丢弃 —— 标量属性照常保留。
+    fun modifier_单独保留其余结构体丢弃() {
+        // 布局信息全在 modifier 里（padding / fillMaxWidth）：丢掉等于
+        // 「所有组件按默认尺寸画」，用户看到的是「我写的 padding 没生效」。
+        // 其余嵌套对象仍丢弃 —— 硬转成字符串只会让渲染器拿到无法解释的文本。
         val raw = """
             {
               "tree": {
                 "type": "Text",
                 "props": {
                   "text": "x",
-                  "modifier": { "padding": 8 },
+                  "modifier": { "padding": 8, "fillMaxWidth": true, "inner": { "a": 1 } },
                   "list": [1, 2]
                 }
               }
@@ -96,8 +97,34 @@ class ComposeDslParserTest {
         val node = ComposeDslParser.parse(raw).getOrThrow().tree
 
         assertEquals("x", node.prop("text"))
-        assertNull("嵌套对象不该进来", node.prop("modifier"))
+        assertNull("modifier 不该混进标量表", node.prop("modifier"))
         assertNull("数组不该进来", node.prop("list"))
+        assertEquals(8, node.paddingDp)
+        assertTrue(node.fillMaxWidth)
+        assertNull("modifier 里更深的结构体丢弃，不猜", node.modifier["inner"])
+    }
+
+    @Test
+    fun 间距与内边距取值() {
+        val raw = """
+            {
+              "tree": {
+                "type": "Column",
+                "props": { "spacing": "12" },
+                "children": [
+                  { "type": "Text", "props": { "text": "a", "modifier": { "padding": "4" } } }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val node = ComposeDslParser.parse(raw).getOrThrow().tree
+
+        assertEquals(12, node.spacingDp)
+        assertEquals(4, node.children[0].paddingDp)
+        // 没写就是 null，不是 0：渲染器据此决定「不加 padding」，
+        // 而不是加一个 0dp 的修饰符把默认值覆盖掉。
+        assertNull(node.paddingDp)
     }
 
     @Test
