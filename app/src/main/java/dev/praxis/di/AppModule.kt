@@ -500,6 +500,59 @@ val appModule = module {
                         },
                     ),
                 )
+
+                // ── 让 AI 改持久配置 + 列出模型（文档 §5.6）──
+                val imageModelsRoot = java.io.File(androidContext().filesDir, "models")
+                val soc = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    android.os.Build.SOC_MODEL
+                } else {
+                    android.os.Build.HARDWARE
+                }
+                val imageGenDefaultsPort: suspend () -> dev.praxis.core.imagegen.ImageGenDefaults = {
+                    dev.praxis.core.imagegen.ImageGenDefaultsCodec
+                        .decode(settings.imageGenDefaultsJson.first())
+                        ?.getOrNull()
+                        ?: dev.praxis.core.imagegen.ImageGenDefaults()
+                }
+                val imageGenTargetPort: suspend () -> dev.praxis.core.imagegen.ImageGenTarget? = {
+                    dev.praxis.core.imagegen.ImageGenTargetCodec
+                        .decode(settings.imageGenTargetJson.first())
+                        ?.getOrNull()
+                }
+                val installedModelIds: suspend () -> Set<String> = {
+                    dev.praxis.core.imagegen.ImageModelCatalog.builtin(soc)
+                        .filter { model ->
+                            dev.praxis.core.imagegen.ImageModelCatalog
+                                .isInstalled(imageModelsRoot, model)
+                        }
+                        .map { model -> model.id }
+                        .toSet()
+                }
+
+                register(
+                    dev.praxis.tool.SetImageGenConfigTool(
+                        readDefaults = imageGenDefaultsPort,
+                        writeDefaults = { updated ->
+                            settings.setImageGenDefaultsJson(
+                                dev.praxis.core.imagegen.ImageGenDefaultsCodec.encode(updated),
+                            )
+                        },
+                        readTarget = imageGenTargetPort,
+                        writeTarget = { updated ->
+                            settings.setImageGenTargetJson(
+                                dev.praxis.core.imagegen.ImageGenTargetCodec.encode(updated),
+                            )
+                        },
+                        installedModelIds = installedModelIds,
+                    ),
+                )
+                register(
+                    dev.praxis.tool.ListImageGenModelsTool(
+                        localModels = { dev.praxis.core.imagegen.ImageModelCatalog.builtin(soc) },
+                        installedIds = installedModelIds,
+                        readTarget = imageGenTargetPort,
+                    ),
+                )
             }
 
             // ## Linux 容器工具（AI 可调用 Kali）
