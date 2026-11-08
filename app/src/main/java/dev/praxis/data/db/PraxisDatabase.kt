@@ -1,6 +1,5 @@
 package dev.praxis.data.db
 
-import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
@@ -49,22 +48,6 @@ import dev.praxis.core.data.gateway.GatewayProviderEntity
     ],
     version = 14,
     exportSchema = true,
-    // v11 -> v12：只新增两张表，没有任何列变更 —— 用自动迁移让 Room
-    // 从 v11 的导出 schema 自己生成建表 SQL。手写 SQL 只要有一处列顺序或
-    // NOT NULL 与实体对不上，运行期打开数据库就会报 identity hash 不匹配，
-    // 而那种错误在编译期完全看不出来。
-    // v12 -> v13：新增 gateway_model（结构化模型条目）。同样是只加表、无列变更，
-    // 继续走自动迁移 —— 手写建表 SQL 与实体对不上时，运行期打开数据库才会报
-    // identity hash 不匹配，编译期看不出来。
-    autoMigrations = [
-        // 一步到位 11 -> 13，不分两段。
-        //
-        // 分两段（11->12、12->13）会要求 12.json 也在 schema 目录里，而那个文件
-        // 只有在真正构建过 v12 时才会生成 —— 我们连着两次提交、CI 只构建最终状态，
-        // 12.json 永远不会出现，KSP 直接报「required for migration was not found」。
-        // 一步到位只需要已存在的 11.json，Room 自己算两次的表差集。
-        AutoMigration(from = 11, to = 13),
-    ],
 )
 abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.CharacterDatabase {
 
@@ -504,6 +487,56 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
                         "`tokens` INTEGER NOT NULL, " +
                         "`cacheRead` INTEGER NOT NULL, " +
                         "PRIMARY KEY(`day`, `model`, `providerId`))",
+                )
+            }
+        }
+
+        /**
+         * v11 -> v12：新增 `gateway_account` 与 `gateway_provider` 两张表。
+         *
+         * ## 为什么它从「自动迁移」改成了手写（2026-11-09）
+         *
+         * 原来是一条 `AutoMigration(11, 13)` 一步到位。那时没问题：当前版本就是 13。
+         * 这次把版本升到 14 之后，KSP 直接报：
+         *
+         * ```
+         * Schema '13.json' required for migration was not found at the schema out folder
+         * ```
+         *
+         * 原因：自动迁移是「拿起点 schema 算出终点」，而 13 已经不是当前版本了，
+         * Room 不会再去生成 13.json，也就没东西可算。
+         *
+         * 于是改成全程手写：11->12、12->13、13->14 各一条。手写链**完全不依赖 schema 文件**，
+         * 也就不会再被「某个中间版本的 json 不在仓库里」卡住。
+         *
+         * 风险仍在「与实体逐列对齐」：列名、类型、NOT NULL、主键都要逐字对上，
+         * 否则运行期打开库时报 identity hash 不匹配（编译期看不出来）。
+         */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `gateway_account` (" +
+                        "`id` TEXT NOT NULL, " +
+                        "`providerId` TEXT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`baseUrlOverride` TEXT, " +
+                        "`enabled` INTEGER NOT NULL, " +
+                        "`priority` INTEGER NOT NULL, " +
+                        "`maxConcurrent` INTEGER NOT NULL, " +
+                        "`credentialsCipher` TEXT NOT NULL, " +
+                        "`expiringAt` INTEGER, " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `gateway_provider` (" +
+                        "`id` TEXT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`baseUrl` TEXT NOT NULL, " +
+                        "`modelsJson` TEXT NOT NULL, " +
+                        "`mappingsJson` TEXT NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))",
                 )
             }
         }

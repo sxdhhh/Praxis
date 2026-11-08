@@ -85,6 +85,10 @@ val appModule = module {
                 // `autoMigrations = [AutoMigration(11, 13)]` 只覆盖「从 11 直冲 13」的设备；
                 // Room 不会自动拆成 11->12、12->13。装过 v12 那一版的设备因此打不开库，
                 // 表现是「界面加载约 3 秒后崩溃」（第一条查询才去开库）。
+                // v11 -> v12：两张网关表。原先靠 AutoMigration(11,13) 一步到位，
+                // 版本升到 14 后 KSP 要求 13.json（Room 不再生成非当前版本的 schema），
+                // 于是改成全程手写链，不再依赖任何 schema 文件。
+                PraxisDatabase.MIGRATION_11_12,
                 PraxisDatabase.MIGRATION_12_13,
                 // v13 -> v14：请求记录 + 日聚合（报表与 token 预算的数据源）。
                 // 同样是手写 DDL（11->13 的自动迁移不覆盖 13->14），见迁移的 KDoc。
