@@ -53,9 +53,19 @@ fun GatewayImportScreen(
     onImportFromClipboard: () -> Unit,
     onConfirmImport: () -> Unit,
     onDismissDialog: () -> Unit,
+    /** 导出是否进行中（写盘是阻塞的，与导入共用同一套弹窗观感）。 */
+    exportBusy: Boolean = false,
+    /** 导出结果：路径 + 写了几个文件 + 未包含项。 */
+    exportText: String? = null,
+    /** 导出失败时的文案。 */
+    exportError: String? = null,
+    /** 触发导出；true = 含凭证（先弹确认）。 */
+    onExport: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val dialogVisible: MutableState<Boolean> = remember { mutableStateOf(false) }
+    // 含凭证导出要先确认一次：它是唯一会把明文密钥写到磁盘的路径。
+    val exportConfirmVisible: MutableState<Boolean> = remember { mutableStateOf(false) }
     var lastReport by remember { mutableStateOf<GatewayImportReport?>(null) }
     if (report != null && report !== lastReport) {
         lastReport = report
@@ -88,14 +98,41 @@ fun GatewayImportScreen(
             SettingsSectionHeader(
                 icon = Icons.Outlined.Description,
                 title = "导出",
-                subtitle = "还没做，先如实说明",
+                subtitle = "把 Praxis 这边的账号与映射交回网关",
             )
         }
 
-        item(key = "__export_note__") {
+        item(key = "__export_config_only__") {
+            GatewayCard {
+                MiuixNavigationItemWidget(
+                    title = "导出（仅配置）",
+                    description = "凭证写成 ***，可以放心传到别的设备",
+                    onClick = { onExport(false) },
+                )
+            }
+        }
+
+        item(key = "__export_with_secrets__") {
+            GatewayCard {
+                MiuixNavigationItemWidget(
+                    title = "导出（含凭证）",
+                    description = "明文密钥，文件名带 -secrets；导出前会再确认一次",
+                    onClick = { exportConfirmVisible.value = true },
+                )
+            }
+        }
+
+        item(key = "__export_hint__") {
             GatewayCard {
                 Text(
-                    text = "导出与备份包尚未实现（P1 剩余部分）。",
+                    text = "导出到应用私有外部目录 exports/（Android/data/<包名>/files/exports），" +
+                        "卸载应用会一起清掉。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Text(
+                    text = "路由/重试/超时配置与网关 Key 暂时导不出去（Praxis 还没做），" +
+                        "导出结果里会逐条列出未包含项。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
@@ -158,6 +195,53 @@ fun GatewayImportScreen(
             },
         )
     }
+
+    // 含凭证导出的二次确认：这是唯一会把明文密钥写到磁盘的路径。
+    MiuixConfirmDialog(
+        showState = exportConfirmVisible,
+        title = "含凭证导出",
+        message = "接下来写出的账号文件里是明文密钥，文件名会带 -secrets。" +
+            "请不要通过聊天工具转发。确定继续？",
+        confirmText = "导出",
+        dismissText = "取消",
+        destructive = true,
+        onConfirm = {
+            exportConfirmVisible.value = false
+            onExport(true)
+        },
+    )
+
+    if (exportText != null) {
+        // key 用内容：两次导出结果不同时重建弹窗，而不是沿用上一次的可见状态。
+        val visible = remember(exportText) { mutableStateOf(true) }
+        MiuixConfirmDialog(
+            showState = visible,
+            title = "导出完成",
+            message = exportText,
+            confirmText = "知道了",
+            dismissText = "关闭",
+            destructive = false,
+            onConfirm = { visible.value = false },
+        )
+    }
+
+    if (exportError != null) {
+        val visible = remember(exportError) { mutableStateOf(true) }
+        MiuixConfirmDialog(
+            showState = visible,
+            title = "导出失败",
+            message = exportError,
+            confirmText = "知道了",
+            dismissText = "关闭",
+            destructive = false,
+            onConfirm = { visible.value = false },
+        )
+    }
+
+    MiuixBlockingLoadingDialog(
+        visible = exportBusy,
+        text = "正在导出…",
+    )
 }
 
 /**

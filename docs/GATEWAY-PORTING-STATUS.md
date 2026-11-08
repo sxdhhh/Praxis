@@ -25,13 +25,24 @@ Praxis 还没有这些家的地址与协议实现，要等 P5 的 Rust 内核。
 
 ## 三、验证与 CI 记录
 
-最近一次全绿（提交 1d3ff73，含本文件上一版之后的所有改动）：
+最近一次全绿（提交 **58cbd54**，2026-11-08，含本文件上一版之后的全部改动）：
 
 ```
-build   success
-verify  success
-test suites: 108   tests: 1143   failed: 9
+build   success   (Build + Locate APK + Upload APK 全过)
+verify  success   (Lint 也过；测试步骤除既有的 core:plugin 债外全绿)
+test suites: 111   tests: 1160   failed: 9
 ```
+
+失败的 9 条与历史完全一致，仍全是既有的 core:plugin 债：
+
+```
+FAILED  dev.praxis.core.plugin.PluginRepositoryTest:   21 tests, 6 failures
+FAILED  dev.praxis.core.plugin.PluginLoadOrderTest:    10 tests, 2 failures
+FAILED  dev.praxis.core.plugin.ExtensionSnapshotTest:   9 tests, 1 failures
+```
+
+> 因此「路由页 5 例 + 错误映射 6 例」这 11 条**已确认通过**（套件 108→111、用例 1143→1160，
+> 失败数不变）。此前交接时 verify 仍在跑，属于未确认状态。
 
 | | 网关动工前 | 现在 | 差 |
 |---|---|---|---|
@@ -67,7 +78,9 @@ test suites: 108   tests: 1143   failed: 9
 ## 五、明确未实现（不是忘了，是还没到）
 
 1. **内置家（21 家）**：没有地址与协议实现，导入时会被跳过并写明理由。依赖 P5 的 Rust 内核 + JNI
-2. **导出**：导出界面与「保存到本机」都没有（解析与序列化层已就绪）
+2. **导出**：**逻辑层已完成**（`GatewayExportPlanner` 计划 + `GatewayExportWriter` 落盘，15 条单测）；
+   **界面与接线还没做** —— 现在只能靠代码调用，用户点不到。计划层已如实处理两处缺口：
+   路由/重试/超时配置 Praxis 尚未持久化（note 里写明）、`apiKeys` 未包含（P6 才有网关 Key）
 3. **添加账号三级流程 + H5 容器**：目前只能靠粘贴导入，不能手动新建
 4. **模型页自动填网关模型清单**：现在要手动敲模型名
 5. **路由页 / 模型管理页**：候选队列可视化（谁被跳过、为什么）还没有

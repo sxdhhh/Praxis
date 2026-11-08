@@ -289,6 +289,10 @@ fun PraxisApp(
     }
     var gatewayImportResult by remember { mutableStateOf<String?>(null) }
     var gatewayImportError by remember { mutableStateOf<String?>(null) }
+    // 导出：两条粒度（仅配置 / 含凭证）。结果里带路径与「未包含项」，出错单独一条。
+    var gatewayExportBusy by remember { mutableStateOf(false) }
+    var gatewayExportText by remember { mutableStateOf<String?>(null) }
+    var gatewayExportError by remember { mutableStateOf<String?>(null) }
 
     var gatewayAccountRows by remember {
         mutableStateOf<List<dev.praxis.core.gateway.GatewayAccountRow>>(emptyList())
@@ -1166,6 +1170,9 @@ fun PraxisApp(
                     } else {
                         null
                     },
+                gatewayExportBusy = gatewayExportBusy,
+                gatewayExportText = gatewayExportText,
+                gatewayExportError = gatewayExportError,
                 onImportFromClipboard = {
                     gatewayImportError = null
                     gatewayImportResult = null
@@ -1238,6 +1245,90 @@ fun PraxisApp(
                             )
                             gatewayRowsRefresh += 1
                         }
+                    }
+                },
+                onExportGateway = { includeSecrets ->
+                    gatewayExportError = null
+                    gatewayExportText = null
+                    gatewayExportBusy = true
+                    coroutineScope.launch {
+                        val result = runCatching {
+                            val rows = gatewayAccountStore.all()
+                            val accounts = rows.map { row ->
+                                if (!includeSecrets) {
+                                    // 「仅配置」粒度不碰凭证：连解密都不做。
+                                    dev.praxis.core.gateway.GatewayAccountFile(
+                                        format = dev.praxis.core.gateway.ACCOUNT_FORMAT,
+                                        id = row.id,
+                                        provider = row.providerId,
+                                        name = row.name,
+                                        baseUrl = row.baseUrlOverride,
+                                    )
+                                } else {
+                                    val credential = gatewayAccountStore.credentialOf(row.id).getOrElse { error ->
+                                        // 不写「解不开就跳过」：那会导出一份看起来完整、其实缺凭证的备份。
+                                        throw IllegalStateException(
+                                            "账号「" + row.name + "」的凭证解不开：" + (error.message ?: "未说明原因"),
+                                        )
+                                    }
+                                    when (credential) {
+                                        is dev.praxis.core.gateway.GatewayCredential.ApiKey ->
+                                            dev.praxis.core.gateway.GatewayAccountFile(
+                                                format = dev.praxis.core.gateway.ACCOUNT_FORMAT,
+                                                id = row.id,
+                                                provider = row.providerId,
+                                                name = row.name,
+                                                baseUrl = row.baseUrlOverride,
+                                                apiKey = credential.apiKey,
+                                            )
+                                        is dev.praxis.core.gateway.GatewayCredential.OAuth ->
+                                            dev.praxis.core.gateway.GatewayAccountFile(
+                                                format = dev.praxis.core.gateway.ACCOUNT_FORMAT,
+                                                id = row.id,
+                                                provider = row.providerId,
+                                                name = row.name,
+                                                baseUrl = row.baseUrlOverride,
+                                                accessToken = credential.accessToken,
+                                                refreshToken = credential.refreshToken,
+                                            )
+                                    }
+                                }
+                            }
+                            val plan = dev.praxis.core.gateway.GatewayExportPlanner.build(
+                                accounts = accounts,
+                                // 路由/重试/超时 Praxis 还没持久化 —— 传 null，由计划层把这条写进 notes。
+                                routing = null,
+                                modelRules = gatewayModelRulesJson?.let {
+                                    kotlinx.serialization.json.Json.parseToJsonElement(it)
+                                },
+                                includeSecrets = includeSecrets,
+                                date = java.time.LocalDate.now()
+                                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd")),
+                            )
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                dev.praxis.core.gateway.GatewayExportWriter.write(
+                                    java.io.File(
+                                        appContext.getExternalFilesDir(null) ?: appContext.filesDir,
+                                        "exports",
+                                    ),
+                                    plan,
+                                )
+                            }
+                        }
+                        gatewayExportBusy = false
+                        result.fold(
+                            onSuccess = { written ->
+                                val head = "已导出 " + written.writtenPaths.size + " 个文件到 " + written.rootPath
+                                gatewayExportText = if (written.notes.isEmpty()) {
+                                    head
+                                } else {
+                                    head + "\n\n未包含：\n· " + written.notes.joinToString("\n· ")
+                                }
+                            },
+                            onFailure = { error ->
+                                gatewayExportError = "导出失败：" + (error.message ?: "未说明原因")
+                            },
+                        )
                     }
                 },
                 onDismissGatewayImport = {

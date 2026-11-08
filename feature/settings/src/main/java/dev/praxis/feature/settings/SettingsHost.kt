@@ -98,6 +98,14 @@ fun SettingsHost(
     onConfirmGatewayImport: () -> Unit = {},
     /** 关掉导入页的对话框/结果。 */
     onDismissGatewayImport: () -> Unit = {},
+    /** 导出进行中（写盘阻塞）。 */
+    gatewayExportBusy: Boolean = false,
+    /** 导出结果（路径 + 文件数 + 未包含项）。 */
+    gatewayExportText: String? = null,
+    /** 导出失败文案。 */
+    gatewayExportError: String? = null,
+    /** 触发导出；true = 含凭证。 */
+    onExportGateway: (Boolean) -> Unit = {},
     repository: SettingsRepository,
     versionName: String,
     versionCode: Int,
@@ -240,6 +248,10 @@ fun SettingsHost(
             onImportFromClipboard = onImportFromClipboard,
             onConfirmGatewayImport = onConfirmGatewayImport,
             onDismissGatewayImport = onDismissGatewayImport,
+            gatewayExportBusy = gatewayExportBusy,
+            gatewayExportText = gatewayExportText,
+            gatewayExportError = gatewayExportError,
+            onExportGateway = onExportGateway,
             pluginRuntime = pluginRuntime,
             capturedEntries = capturedEntries,
             activationFailures = activationFailures,
@@ -360,6 +372,10 @@ private fun SettingsPageBody(
     onImportFromClipboard: () -> Unit = {},
     onConfirmGatewayImport: () -> Unit = {},
     onDismissGatewayImport: () -> Unit = {},
+    gatewayExportBusy: Boolean = false,
+    gatewayExportText: String? = null,
+    gatewayExportError: String? = null,
+    onExportGateway: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     when (route) {
@@ -580,6 +596,10 @@ private fun SettingsPageBody(
             onImportFromClipboard = onImportFromClipboard,
             onConfirmImport = onConfirmGatewayImport,
             onDismissDialog = onDismissGatewayImport,
+            exportBusy = gatewayExportBusy,
+            exportText = gatewayExportText,
+            exportError = gatewayExportError,
+            onExport = onExportGateway,
             modifier = modifier,
         )
         PraxisRoute.SettingsGatewayAccounts -> dev.praxis.feature.gateway.GatewayAccountsScreen(
