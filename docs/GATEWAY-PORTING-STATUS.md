@@ -64,6 +64,16 @@ test suites: 116   tests: 1230   failed: 9
 ```
 
 较 7b0163c：套件 +3、用例 +55 —— 正好是 `core:imagegen` 的三套（18+17+20）。
+
+总开关落地后（提交 **87328ae**，2026-11-08）：
+
+```
+build   success
+verify  success
+test suites: 117   tests: 1234   failed: 9
+```
+
+较 4d61367：套件 +1、用例 +4（`GatewayGateTest`），CI 上逐条 PASSED。
 `GenerateImageToolTest`（10 条）在「Unit tests (:app, per class)」那步执行并通过
 （10 条 STARTED 之后直接 BUILD SUCCESSFUL、无 FAILED），但它**不进汇总行** ——
 因为「Summarize JVM test results」排在 per-class 那两步之前（既有管线顺序，非本次引入）。
@@ -110,7 +120,10 @@ test suites: 116   tests: 1230   failed: 9
 3. **添加账号三级流程 + H5 容器**：目前只能靠粘贴导入，不能手动新建
 4. **模型页自动填网关模型清单**：现在要手动敲模型名
 5. **路由页 / 模型管理页**：候选队列可视化（谁被跳过、为什么）还没有
-6. **gateway_enabled 总开关**：文档 11 末尾要求「关掉 = 今天的行为」，目前没有这个闸
+6. ~~gateway_enabled 总开关~~ **已完成**（提交 87328ae）：`GatewayGate`（纯函数，4 例单测）
+   决定「非网关档案不受影响 / 网关档案 + 开 = 走网关 / 网关档案 + 关 = GatewayDisabled」，
+   概览页顶部有开关（`MiuixSwitchWidget`）。关掉时**明确报错而不回落** ——
+   网关档案上没有 baseUrl/apiKey，回落等于拿空地址发请求
 7. **core:ai 补三类错误**（QuotaLimited / ContentBlocked / TokenExpired）：因此 413 与内容拦截落不到正确分类
 8. **token 预算限流**：7.2 只实现了每账号与每家的 RPM，token 预算需要 P3 的请求记录表
 9. **P3 及之后**：协议编码器、报表、日志并入、系统设置、代理、云同步、Rust 内核、签到框架、AGPL 转换
@@ -153,5 +166,5 @@ test suites: 116   tests: 1230   failed: 9
 1. 模型页自动填网关模型清单（数据已齐：gateway_model + provider 的 modelsJson + mappings 的 alias）
 2. 路由页：候选队列可视化，把 RoutePlan.skipped 的原因展示出来
 3. core:ai 补三类错误，让 413 与内容拦截落到正确分类
-4. gateway_enabled 总开关（文档 11 要求的回滚闸）
+4. ~~gateway_enabled 总开关~~（已完成，见 §五-6）
 5. ~~导出~~（已完成，见 §五-2）
