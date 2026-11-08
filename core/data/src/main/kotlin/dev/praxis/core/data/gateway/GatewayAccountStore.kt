@@ -157,8 +157,7 @@ class GatewayAccountStore(
      */
     suspend fun nativeModels(): List<NativeModel> = providerDao.all().flatMap { provider ->
         provider.modelsJson
-            .split('
-')
+            .split('\n')
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .map { NativeModel(provider = provider.id, id = it) }
