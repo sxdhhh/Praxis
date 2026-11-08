@@ -30,6 +30,7 @@ dependencies {
     // 扩展包页（装/卸包 + 市场）。只用到 core:plugin 的纯 JVM 契约与解析器，
     // 文件与网络实现仍在 :app（feature 不碰 Android 文件系统）。
     implementation(project(":core:plugin"))
+    implementation(project(":feature:gateway"))
 
     implementation(libs.androidx.core.ktx)
     // LinuxEnvViewModel 继承 ViewModel（viewModelScope 做「装环境/起会话」的长任务），

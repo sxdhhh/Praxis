@@ -335,6 +335,7 @@ dependencies {
     implementation(project(":ui:icons"))
     implementation(project(":feature:chat"))
     implementation(project(":feature:settings"))
+    implementation(project(":feature:gateway"))
     // Linux 环境页的纯逻辑（proot 参数 / 镜像表 / SSH·FRP 脚本）。
     // :app 不直接用这些类型，但 ProotEnvPort 需要它们；feature:settings 那边
     // 用的是 implementation 依赖，所以 :app 也要显式声明。

@@ -139,6 +139,7 @@ fun PraxisNavDisplay(
                 content(route)
             }
             entry<PraxisRoute.SettingsPackages>(swipeDismiss = swipe) { route -> content(route) }
+            entry<PraxisRoute.SettingsGateway>(swipeDismiss = swipe) { route -> content(route) }
             entry<PraxisRoute.SettingsCompatPluginEntries>(swipeDismiss = swipe) { route -> content(route) }
             // 插件页面：内容由第三方脚本决定，手势方向不可预判 → 允许侧滑返回。
             entry<PraxisRoute.PluginEntry>(swipeDismiss = swipe) { route -> content(route) }
@@ -178,6 +179,7 @@ fun PraxisRoute.title(): String = when (this) {
     PraxisRoute.SettingsLinux -> "Linux 环境"
     PraxisRoute.SettingsTerminal -> "终端设置"
     PraxisRoute.SettingsPackages -> "扩展包"
+    PraxisRoute.SettingsGateway -> "网关"
     PraxisRoute.SettingsCompatPluginEntries -> "兼容插件入口"
     // when (this) 的 is 分支不会智能转换 this，必须显式取出来：
     // 直接写 this.title 会去找 PraxisRoute 上的成员 title，编译不过。

@@ -72,6 +72,7 @@ fun SettingsHomeScreen(modifier: Modifier = Modifier) {
         item {
             SettingsCard(
                 SettingsEntry.Model,
+                SettingsEntry.Gateway,
                 SettingsEntry.FunctionModel,
                 SettingsEntry.SystemPrompt,
             ) { navigator.push(it.route) }

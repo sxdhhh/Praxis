@@ -495,6 +495,7 @@ private fun SettingsPageBody(
             }
         }
         // 插件入口：页面由插件脚本的 compose_dsl 渲染。
+        PraxisRoute.SettingsGateway -> dev.praxis.feature.gateway.GatewayRoute(modifier = modifier)
         is PraxisRoute.PluginEntry -> dev.praxis.feature.settings.plugin.PluginEntryScreen(
             pluginId = route.pluginId,
             entryId = route.entryId,

@@ -49,6 +49,18 @@ enum class SettingsEntry(
         summary = "服务商、密钥、参数与上下文",
     ),
 
+    /**
+     * 网关。
+     *
+     * 紧跟「模型」：它决定「请求怎么发出去」，与模型配置是同一件事的两半，
+     * 排在一起用户才能顺着读下来。
+     */
+    Gateway(
+        route = PraxisRoute.SettingsGateway,
+        title = "网关",
+        summary = "账号池、路由策略与请求统计",
+    ),
+
     FunctionModel(
         route = PraxisRoute.SettingsFunctionModel,
         title = "功能模型",

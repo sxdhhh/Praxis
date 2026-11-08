@@ -160,7 +160,14 @@ sealed interface PraxisRoute : NavKey {
      * 所以单独一个目的地：这一页只回答「有哪些入口、来自谁」。
      */
     @Serializable
-    data object SettingsCompatPluginEntries : PraxisRoute
+    /**
+ * 网关（移植自 Agent2API）。
+ *
+ * 按 docs/PORTING-GATEWAY.md 决定一：不新增 Tab，入口放在设置页。
+ */
+data object SettingsGateway : PraxisRoute
+
+data object SettingsCompatPluginEntries : PraxisRoute
 
 /**
  * 打开一个插件入口：页面由插件脚本渲染（compose_dsl）。

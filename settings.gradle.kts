@@ -85,6 +85,7 @@ include(":ui:provision")
 // ── 功能页 ─────────────────────────────────────────────
 include(":feature:chat")
 include(":feature:settings")
+include(":feature:gateway")
 include(":feature:terminal")
 
 // ── 预览（浏览器实时预览管线）───────────────────────────
