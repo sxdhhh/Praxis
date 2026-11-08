@@ -3,6 +3,7 @@ package dev.praxis.tool
 import dev.praxis.core.imagegen.ImageGenEvent
 import dev.praxis.core.imagegen.ImageGenParams
 import dev.praxis.core.imagegen.ImageGenParamsRules
+import dev.praxis.core.imagegen.ImageGenTarget
 import dev.praxis.core.tool.PermissionTier
 import dev.praxis.core.tool.Tool
 import dev.praxis.core.tool.ToolContext
@@ -12,6 +13,8 @@ import dev.praxis.core.tool.ToolRisk
 import dev.praxis.core.tool.ToolSpec
 import dev.praxis.core.imagegen.EngineAvailability
 import dev.praxis.data.imagegen.ImageGenRunner
+import dev.praxis.data.imagegen.RemoteImageGenerator
+import dev.praxis.data.imagegen.RemoteImageOutcome
 import java.io.IOException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -54,11 +57,15 @@ class GenerateImageTool(
     /** 探活；注入成 lambda 是为了让工具在单测里不必起 HTTP。 */
     private val probe: suspend () -> EngineAvailability,
     /**
-     * 当前选中的本地模型；null = 还没选（或选的是远端目标）。
+     * 当前选中的生图目标；null = 还没选。
      *
      * suspend：目标存在 `imagegen_target`（DataStore），读它是挂起操作。
      */
-    private val modelId: suspend () -> String?,
+    private val target: suspend () -> ImageGenTarget?,
+    /** 远端出图（文档 §5.4）。null = 未装配 —— 那条路会明确报装配问题。 */
+    private val remoteGenerator: RemoteImageGenerator? = null,
+    /** 远端要用的 API Key（跟随当前服务商配置）。 */
+    private val apiKey: suspend () -> String? = { null },
     /** 该模型的可用分辨率档位；空 = 自由画布（不做档位校验）。 */
     private val availableSizes: () -> List<Pair<Int, Int>> = { emptyList() },
     /** 落盘：返回绝对路径。放成 lambda 让工具不碰 Context。 */
@@ -85,22 +92,13 @@ class GenerateImageTool(
         val prompt = args.text("prompt")?.takeIf { it.isNotBlank() }
             ?: return failure("bad_arguments", "prompt 不能为空")
 
-        val model = modelId() ?: return failure(
+        // 目标决定走哪条路（文档 §5.4）：本地引擎或远端的 images 端点。
+        val chosen = target() ?: return failure(
             code = "no_model",
-            message = "还没有选中本地生图模型",
-            hint = "先在「设置 → 本地生图」里下载并选择一个模型",
+            message = "还没有选生图目标",
+            hint = "在「设置 → 本地生图 → 更换目标」里选一个本地模型或服务商模型",
             stage = ToolFailureStage.Execution,
         )
-
-        when (val availability = probe()) {
-            is EngineAvailability.Unavailable -> return failure(
-                code = "engine_start_failed",
-                message = "生图引擎不可用（" + availability.reason.name + "）",
-                hint = availability.detail,
-                stage = ToolFailureStage.Execution,
-            )
-            is EngineAvailability.Available -> Unit
-        }
 
         val count = args.int("count") ?: 1
         if (count !in 1..MAX_COUNT) {
@@ -128,6 +126,33 @@ class GenerateImageTool(
                 hint = "可用尺寸：" + ImageGenParamsRules.formatSizes(availableSizes()),
                 stage = ToolFailureStage.Argument,
             )
+        }
+
+        return when (chosen) {
+            is ImageGenTarget.Local -> runLocal(chosen.modelId, params, count)
+            is ImageGenTarget.Remote -> runRemote(chosen, params, count)
+        }
+    }
+
+    /**
+     * 本地引擎这条路（文档 §3）：先探活，再逐张收 NDJSON。
+     *
+     * 探活放在这里而不是注册时：引擎此刻有没有起来只有运行期知道，
+     * 而「工具在列表里时有时无」比「调用后回一句不可用」难排查得多。
+     */
+    private suspend fun runLocal(
+        modelId: String,
+        params: ImageGenParams,
+        count: Int,
+    ): ToolResult {
+        when (val availability = probe()) {
+            is EngineAvailability.Unavailable -> return failure(
+                code = "engine_start_failed",
+                message = "生图引擎不可用（" + availability.reason.name + "）",
+                hint = availability.detail,
+                stage = ToolFailureStage.Execution,
+            )
+            is EngineAvailability.Available -> Unit
         }
 
         val saved = mutableListOf<SavedImage>()
@@ -165,7 +190,77 @@ class GenerateImageTool(
             saved += SavedImage(path, result.seed, result.width, result.height)
         }
 
-        return ToolResult(content = successJson(model, saved))
+        return ToolResult(content = successJson(modelId, saved))
+    }
+
+    /**
+     * 远端这条路（文档 §5.4）：OpenAI 兼容的 images 端点，**没有进度**。
+     *
+     * 它的结果与本地落到同一种东西 —— 本地文件路径 + 一张图，所以后续链路
+     * （缩略图进气泡）完全不用区分图从哪来。
+     */
+    private suspend fun runRemote(
+        target: ImageGenTarget.Remote,
+        params: ImageGenParams,
+        count: Int,
+    ): ToolResult {
+        val generator = remoteGenerator ?: return failure(
+            code = "remote_not_wired",
+            message = "远端生图没有装配（构建配置问题）",
+            stage = ToolFailureStage.Execution,
+        )
+        val key = apiKey()
+        val saved = mutableListOf<SavedImage>()
+        for (index in 0 until count) {
+            val attempt = params.copy(seed = params.seed?.plus(index.toLong()))
+            when (val outcome = generator.generate(target, key, attempt)) {
+                is RemoteImageOutcome.Failure -> return failure(
+                    code = remoteCodeFor(outcome.kind),
+                    message = "远端生图失败：" + outcome.detail,
+                    hint = remoteHintFor(outcome.kind),
+                    saved = saved,
+                    stage = ToolFailureStage.Execution,
+                )
+                is RemoteImageOutcome.Success -> {
+                    outcome.images.forEach { bytes ->
+                        val path = saveImage(bytes)
+                        // 远端不返回 seed：只回传「请求里带的那个」，没带就是 null。
+                        // 尺寸用请求里的值（那是我们自己定死的，可信）。
+                        saved += SavedImage(
+                            path = path,
+                            seed = attempt.seed,
+                            width = params.width,
+                            height = params.height,
+                        )
+                    }
+                }
+            }
+        }
+        return ToolResult(content = successJson(target.model, saved))
+    }
+
+    /** 远端失败分类 -> 工具错误码（与本地同一套词，见文档 §5.4）。 */
+    private fun remoteCodeFor(kind: dev.praxis.core.ai.AiErrorKind): String = when (kind) {
+        dev.praxis.core.ai.AiErrorKind.QUOTA_LIMITED -> "quota_exceeded"
+        dev.praxis.core.ai.AiErrorKind.RATE_LIMIT -> "quota_exceeded"
+        dev.praxis.core.ai.AiErrorKind.CONTENT_BLOCKED -> "content_blocked"
+        dev.praxis.core.ai.AiErrorKind.AUTH -> "no_api_key"
+        dev.praxis.core.ai.AiErrorKind.TOKEN_EXPIRED -> "no_api_key"
+        dev.praxis.core.ai.AiErrorKind.NETWORK -> "remote_unreachable"
+        dev.praxis.core.ai.AiErrorKind.INVALID_REQUEST -> "invalid_request"
+        else -> "remote_error"
+    }
+
+    private fun remoteHintFor(kind: dev.praxis.core.ai.AiErrorKind): String? = when (kind) {
+        dev.praxis.core.ai.AiErrorKind.AUTH,
+        dev.praxis.core.ai.AiErrorKind.TOKEN_EXPIRED,
+        -> "在设置里检查该服务商的 API Key"
+        dev.praxis.core.ai.AiErrorKind.QUOTA_LIMITED,
+        dev.praxis.core.ai.AiErrorKind.RATE_LIMIT,
+        -> "该服务商额度/速率受限，稍后再试或换一个模型"
+        dev.praxis.core.ai.AiErrorKind.INVALID_REQUEST ->
+            "确认所选模型支持生图（checkpoints 与 chat 模型不是一回事）"
+        else -> null
     }
 
     /** 一次生成成功的回报：首图路径 + 全部图片 + 模型名。 */
@@ -210,7 +305,18 @@ class GenerateImageTool(
     }
 
     /** 一张已落盘的图。 */
-    private data class SavedImage(val path: String, val seed: Long, val width: Int, val height: Int)
+    /**
+     * 一张已落盘的图。
+     *
+     * `seed` 可空：远端 images 端点不返回 seed，我们只知道「请求里带没带」。
+     * 编一个 0 上去会让模型以为那是真实种子，进而用它去复现 —— 复现不出来。
+     */
+    private data class SavedImage(
+        val path: String,
+        val seed: Long?,
+        val width: Int,
+        val height: Int,
+    )
 
     private fun JsonObject.text(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
 

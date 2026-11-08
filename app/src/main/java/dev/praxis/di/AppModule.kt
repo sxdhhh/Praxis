@@ -374,6 +374,10 @@ val appModule = module {
     single { dev.praxis.data.imagegen.EngineLocator() }
     // 生成客户端：按 ImageGenRunner 接口注册，工具只依赖接口。
     single<dev.praxis.data.imagegen.ImageGenRunner> { dev.praxis.data.imagegen.ImageGenClient() }
+    // 远端出图（OpenAI 兼容 /v1/images/generations）。
+    single<dev.praxis.data.imagegen.RemoteImageGenerator> {
+        dev.praxis.data.imagegen.OkHttpRemoteImageGenerator()
+    }
     single {
         dev.praxis.data.imagegen.ImageModelDownloadManager(
             downloader = get(),
@@ -426,14 +430,16 @@ val appModule = module {
                     dev.praxis.tool.GenerateImageTool(
                         runner = get(),
                         probe = { locator.probe() },
-                        // 目标只认本地：远端目标（ImageGenTarget.Remote）走另一条路，
-                        // 本工具暂时只做本地引擎（远端 images 端点是后续工作）。
-                        modelId = {
-                            val decoded = dev.praxis.core.imagegen.ImageGenTargetCodec
+                        // 目标决定走哪条路（文档 §5.4）：本地引擎或远端 images 端点。
+                        // 配置坏了（decode 返回 failure）时这里给 null —— 工具会回「还没选」，
+                        // 而设置页会把「配置坏了」单独提示出来（两边显式不同，不互相掩盖）。
+                        target = {
+                            dev.praxis.core.imagegen.ImageGenTargetCodec
                                 .decode(settings.imageGenTargetJson.first())
                                 ?.getOrNull()
-                            (decoded as? dev.praxis.core.imagegen.ImageGenTarget.Local)?.modelId
                         },
+                        remoteGenerator = get(),
+                        apiKey = { settings.apiKey() },
                         // 档位校验暂时只做全局范围（256~1024）：目录里每个模型只记了一个
                         // 默认尺寸，拿它当「唯一可用档位」会把 512x768 这类合法请求拦掉。
                         availableSizes = { emptyList() },

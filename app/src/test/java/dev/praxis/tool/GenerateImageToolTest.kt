@@ -60,13 +60,14 @@ class GenerateImageToolTest {
     private fun tool(
         runner: ImageGenRunner,
         probe: suspend () -> EngineAvailability = available,
-        modelId: suspend () -> String? = { "anythingv5" },
+        target: suspend () -> dev.praxis.core.imagegen.ImageGenTarget? =
+            { dev.praxis.core.imagegen.ImageGenTarget.Local("anythingv5") },
         sizes: () -> List<Pair<Int, Int>> = { emptyList() },
         saved: MutableList<ByteArray> = mutableListOf(),
     ) = GenerateImageTool(
         runner = runner,
         probe = probe,
-        modelId = modelId,
+        target = target,
         availableSizes = sizes,
         saveImage = { bytes -> saved += bytes; "/tmp/img" + saved.size + ".jpg" },
     )
@@ -91,7 +92,7 @@ class GenerateImageToolTest {
 
     @Test
     fun `没有选模型时返回 no_model 且标 Execution`() = runTest {
-        val result = tool(FakeRunner(), modelId = { null }).execute("{\"prompt\":\"猫\"}", context)
+        val result = tool(FakeRunner(), target = { null }).execute("{\"prompt\":\"猫\"}", context)
         assertTrue(result.isError)
         assertEquals("no_model", json(result.content)["error"]!!.jsonPrimitive.content)
         assertEquals(ToolFailureStage.Execution, result.stage)
