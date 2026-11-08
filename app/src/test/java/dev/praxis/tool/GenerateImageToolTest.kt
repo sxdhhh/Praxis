@@ -51,7 +51,11 @@ class GenerateImageToolTest {
         }
     }
 
-    private val available = { EngineAvailability.Available(dev.praxis.core.imagegen.EngineHealth("{}", true)) }
+    // 显式标注 suspend + 父类型：`{ ... }` 会被推断成 `() -> Available`，
+    // 赋给 `suspend () -> EngineAvailability` 的默认值不成立（CI 抓到的编译错）。
+    private val available: suspend () -> EngineAvailability = {
+        EngineAvailability.Available(dev.praxis.core.imagegen.EngineHealth("{}", true))
+    }
 
     private fun tool(
         runner: ImageGenRunner,
