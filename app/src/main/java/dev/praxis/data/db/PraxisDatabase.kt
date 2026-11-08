@@ -52,8 +52,13 @@ import dev.praxis.core.data.gateway.GatewayProviderEntity
     // 继续走自动迁移 —— 手写建表 SQL 与实体对不上时，运行期打开数据库才会报
     // identity hash 不匹配，编译期看不出来。
     autoMigrations = [
-        AutoMigration(from = 11, to = 12),
-        AutoMigration(from = 12, to = 13),
+        // 一步到位 11 -> 13，不分两段。
+        //
+        // 分两段（11->12、12->13）会要求 12.json 也在 schema 目录里，而那个文件
+        // 只有在真正构建过 v12 时才会生成 —— 我们连着两次提交、CI 只构建最终状态，
+        // 12.json 永远不会出现，KSP 直接报「required for migration was not found」。
+        // 一步到位只需要已存在的 11.json，Room 自己算两次的表差集。
+        AutoMigration(from = 11, to = 13),
     ],
 )
 abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.CharacterDatabase {

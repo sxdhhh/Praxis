@@ -48,8 +48,12 @@ object GatewayStatusText {
         val remaining = (untilMillis ?: return null) - nowMillis
         if (remaining <= 0L) return null
 
+        // 一分钟以内单独说：向上取整之后，只要 remaining > 0 结果就恒 >= 1，
+        // 所以这个判断必须放在取整之前，否则它是一段永远走不到的死代码
+        // （这一点是测试抓出来的：原来那条「不足一分钟」的用例直接红了）。
+        if (remaining < 60_000L) return "不到 1 分钟"
+
         val minutes = (remaining + 59_999L) / 60_000L
-        if (minutes < 1L) return "不到 1 分钟"
         if (minutes < 60L) return "还有 " + minutes + " 分钟"
 
         val hours = (minutes + 59L) / 60L
