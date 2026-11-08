@@ -267,6 +267,19 @@ fun PraxisApp(
     //
     // 分两步：先预检（只解析、不写库），把四段报告给用户看；确认之后才写。
     // 顺序不能反 —— 写完了再报，用户就没得选了。
+    // 模型规则（映射/禁用）。存的是原文，这里解码；解不开要能被看见，不能当没配过。
+    val gatewayModelRulesJson by settingsRepository.gatewayModelRulesJson.collectAsState(
+        initial = null,
+    )
+    val gatewayModelRulesParse = remember(gatewayModelRulesJson) {
+        gatewayModelRulesJson?.let {
+            dev.praxis.core.gateway.GatewayModelRulesCodec.parse(it)
+        }
+    }
+    val gatewayModelRules = gatewayModelRulesParse
+        ?.getOrElse { dev.praxis.core.gateway.GatewayModelRules() }
+        ?: dev.praxis.core.gateway.GatewayModelRules()
+
     var gatewayImportBusy by remember { mutableStateOf(false) }
     var gatewayImportReport by remember {
         mutableStateOf<dev.praxis.core.gateway.GatewayImportReport?>(null)
@@ -513,7 +526,7 @@ fun PraxisApp(
                             store = gatewayAccountStore,
                             // modelRules 的持久化还没接（导入导出界面在 P1 剩余部分），
                             // 所以映射为空；原生承载走 provider 表里各家声明的模型清单。
-                            modelRules = { dev.praxis.core.gateway.GatewayModelRules() },
+                            modelRules = { gatewayModelRules },
                             state = gatewayRouteState,
                         ),
                     ),
@@ -1109,7 +1122,12 @@ fun PraxisApp(
                 gatewayImportBusy = gatewayImportBusy,
                 gatewayImportReport = gatewayImportReport,
                 gatewayImportResult = gatewayImportResult,
-                gatewayImportError = gatewayImportError,
+                gatewayImportError = gatewayImportError
+                    ?: if (gatewayModelRulesParse?.isFailure == true) {
+                        "已保存的模型规则是坏 JSON，映射不会生效；重新导入一份覆盖它"
+                    } else {
+                        null
+                    },
                 onImportFromClipboard = {
                     gatewayImportError = null
                     gatewayImportResult = null
@@ -1120,6 +1138,21 @@ fun PraxisApp(
                         ?.toString()
                     if (text.isNullOrBlank()) {
                         gatewayImportError = "剪贴板里没有文本。请先在网关面板导出账号文件并复制内容。"
+                    } else if (dev.praxis.core.gateway.GatewayImporter.parse(text).isFailure &&
+                        dev.praxis.core.gateway.GatewayModelRulesCodec.parse(text).isSuccess
+                    ) {
+                        // 不是账号文件，但能当 modelRules 解析 —— 存下来。
+                        val rules = dev.praxis.core.gateway.GatewayModelRulesCodec
+                            .parse(text).getOrThrow()
+                        coroutineScope.launch {
+                            settingsRepository.setGatewayModelRulesJson(
+                                dev.praxis.core.gateway.GatewayModelRulesCodec.encode(rules),
+                            )
+                            gatewayImportResult = "已保存模型规则：映射 " +
+                                rules.mappings.size + " 条、禁用 " +
+                                rules.disabled.size + " 条、自定义 " +
+                                rules.custom.size + " 条"
+                        }
                     } else {
                         gatewayImportBusy = true
                         coroutineScope.launch {

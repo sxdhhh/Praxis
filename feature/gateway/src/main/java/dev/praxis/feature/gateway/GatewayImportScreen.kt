@@ -105,6 +105,12 @@ fun GatewayImportScreen(
         item(key = "__import_hint__") {
             GatewayCard {
                 Text(
+                    text = "同一处也能粘 modelRules（带 mappings 的那段 JSON），会自动识别并存下来；" +
+                        "存进去之后「模型映射」立即生效。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Text(
                     text = "提示：内置家的账号暂时会被跳过（理由会写在报告里）—— " +
                         "Praxis 还没有这些家的地址，要等上游实现接进来。自定义家可以正常导入。",
                     style = MiuixTheme.textStyles.footnote1,

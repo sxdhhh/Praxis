@@ -628,6 +628,15 @@ class SettingsRepository(
     val systemPrompt: Flow<String> = dataStore.data.map { it[KEY_SYSTEM_PROMPT] ?: "" }
 
     /**
+     * 网关 modelRules 的原始 JSON；null = 从没配过。
+     *
+     * 与「配了但是空对象」是两件事：前者等于没配映射，后者是用户明确清空过。
+     */
+    val gatewayModelRulesJson: Flow<String?> = dataStore.data.map { it[KEY_GATEWAY_MODEL_RULES] }
+
+    suspend fun setGatewayModelRulesJson(text: String) = put(KEY_GATEWAY_MODEL_RULES, text)
+
+    /**
      * 用户改写过的**内置人格**（覆盖 Praxis 出厂那段）。空串 = 用出厂人格。
      *
      * ## 为什么要单独一个键，而不是并进 [setSystemPrompt]
@@ -1308,6 +1317,14 @@ private val KEY_REQUEST_LIMIT_RPM = intPreferencesKey("model_request_limit_rpm")
 private val KEY_MAX_CONCURRENT = intPreferencesKey("model_max_concurrent")
 /** 用户自定义系统提示词（原文，不 trim）。 */
 private val KEY_SYSTEM_PROMPT = stringPreferencesKey("system_prompt")
+
+/**
+ * 网关 modelRules 的原始 JSON（文档 8.3）。
+ *
+ * 存原文而不是解析后的对象：解析失败时必须让调用方**看见**「存进去的东西是坏的」，
+ * 而 Flow<GatewayModelRules> 没地方放错误 —— 那会逼出一种「坏了就当没有」的兜底。
+ */
+private val KEY_GATEWAY_MODEL_RULES = stringPreferencesKey("gateway_model_rules")
 
 /**
  * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。
