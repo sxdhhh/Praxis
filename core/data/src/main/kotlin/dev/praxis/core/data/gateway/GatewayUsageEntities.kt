@@ -1,0 +1,105 @@
+package dev.praxis.core.data.gateway
+
+import androidx.room.Dao
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+import androidx.room.Query
+import androidx.room.Insert
+
+/**
+ * 一条网关请求记录（文档 6.1 的 `gateway_request`）。
+ *
+ * ## 为什么字段这么多而这一轮没人写
+ *
+ * 它是**报表与 token 预算的数据源**（P3）。表结构与字段一次定死，
+ * 后面接写入时不用再改 schema（改一次就是一次迁移）。
+ *
+ * ## `isTest` 为什么会存在
+ *
+ * 模型连通性测试会**真打上游**。如果它进报表，人工样本会把趋势读歪 ——
+ * 用户会看到「今天用量突然翻倍」，其实是他自己点了两次测试。
+ */
+@Entity(tableName = "gateway_request")
+data class GatewayRequestEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    /** 请求时刻（毫秒）。 */
+    val ts: Long,
+    /** 对外模型名。 */
+    val model: String,
+    /** 真正发给上游的名字；映射过的才有值。 */
+    val upstreamModel: String? = null,
+    val providerId: String? = null,
+    val accountId: String? = null,
+    /** HTTP 状态；0 = 没拿到响应（网络层失败）。 */
+    val status: Int,
+    val error: String? = null,
+    /** 试了几个组合（失败换号会累加）。 */
+    val attempts: Int = 1,
+    /**
+     * 上游给的 token 用量。
+     *
+     * **失败请求一律 0**（文档 §5.7：上游错误时 usage 常缺失，留着半截会让
+     * 「失败暴增」看起来像「用量暴增」）。
+     */
+    val promptTokens: Int = 0,
+    val completionTokens: Int = 0,
+    val cacheReadTokens: Int = 0,
+    val credit: Double? = null,
+    val durationMs: Long = 0,
+    val firstResponseMs: Long? = null,
+    val client: String? = null,
+    /** 测试请求不入报表。 */
+    val isTest: Boolean = false,
+)
+
+/**
+ * 日聚合（文档 6.1 的 `gateway_daily`）。
+ *
+ * ## 为什么要它
+ *
+ * 报表要「今日 / 近 7 天 / 近 30 天」。每次扫全表在手机上代价太高，
+ * 所以留一张按天预聚合的表。
+ *
+ * ## `day` 必须是**本地时区**的 yyyy-MM-dd
+ *
+ * 网关 #329 的真实事故：容器没设 TZ，UTC+8 用户的「今天」实际是昨天 08:00 到今天 08:00。
+ * 所以聚合键由 `GatewayDailyKey.of(...)` 生成（有单测），不在这里拼字符串。
+ */
+@Entity(tableName = "gateway_daily", primaryKeys = ["day", "model", "providerId"])
+data class GatewayDailyEntity(
+    /** 本地时区的 yyyy-MM-dd。 */
+    val day: String,
+    val model: String,
+    /** 空串表示未知来源（Room 的主键不能为 null）。 */
+    val providerId: String,
+    val requests: Int,
+    val failures: Int,
+    val tokens: Long,
+    val cacheRead: Long,
+)
+
+/** 请求记录与日聚合的读写。 */
+@Dao
+interface GatewayUsageDao {
+
+    @Insert
+    suspend fun insertRequest(entity: GatewayRequestEntity): Long
+
+    @Query("SELECT COUNT(*) FROM gateway_request WHERE ts >= :sinceMillis AND isTest = 0")
+    suspend fun countSince(sinceMillis: Long): Int
+
+    @Query("SELECT SUM(promptTokens + completionTokens) FROM gateway_request WHERE ts >= :sinceMillis AND isTest = 0")
+    suspend fun tokensSince(sinceMillis: Long): Long?
+
+    @Query("DELETE FROM gateway_request WHERE ts < :beforeMillis")
+    suspend fun purgeRequestsBefore(beforeMillis: Long): Int
+
+    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun upsertDaily(entity: GatewayDailyEntity)
+
+    @Query("SELECT * FROM gateway_daily WHERE day >= :sinceDay ORDER BY day DESC")
+    suspend fun dailySince(sinceDay: String): List<GatewayDailyEntity>
+
+    @Query("DELETE FROM gateway_daily WHERE day < :beforeDay")
+    suspend fun purgeDailyBefore(beforeDay: String): Int
+}

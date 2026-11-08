@@ -9,7 +9,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import dev.praxis.core.data.character.CharacterCardEntity
 import dev.praxis.core.data.character.PromptTagEntity
 import dev.praxis.core.data.gateway.GatewayAccountEntity
+import dev.praxis.core.data.gateway.GatewayDailyEntity
 import dev.praxis.core.data.gateway.GatewayModelEntity
+import dev.praxis.core.data.gateway.GatewayRequestEntity
 import dev.praxis.core.data.gateway.GatewayProviderEntity
 
 /**
@@ -41,8 +43,11 @@ import dev.praxis.core.data.gateway.GatewayProviderEntity
         GatewayAccountEntity::class,
         GatewayProviderEntity::class,
         GatewayModelEntity::class,
+        // v14：请求记录 + 日聚合（文档 6.1）。报表与 token 预算的数据源。
+        GatewayRequestEntity::class,
+        GatewayDailyEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = true,
     // v11 -> v12：只新增两张表，没有任何列变更 —— 用自动迁移让 Room
     // 从 v11 的导出 schema 自己生成建表 SQL。手写 SQL 只要有一处列顺序或
@@ -75,6 +80,9 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
     abstract fun gatewayAccountDao(): dev.praxis.core.data.gateway.GatewayAccountDao
     abstract fun gatewayProviderDao(): dev.praxis.core.data.gateway.GatewayProviderDao
     abstract fun gatewayModelDao(): dev.praxis.core.data.gateway.GatewayModelDao
+
+    /** 请求记录与日聚合（P3 报表 / token 预算）。 */
+    abstract fun gatewayUsageDao(): dev.praxis.core.data.gateway.GatewayUsageDao
 
     /**
      * 事务入口。
@@ -441,6 +449,62 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `sessions` ADD COLUMN `contextUsed` INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE `sessions` ADD COLUMN `contextLimit` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * v13 -> v14：新增 `gateway_request`（请求记录）与 `gateway_daily`（日聚合）。
+         *
+         * ## 为什么又是手写，而不是 AutoMigration
+         *
+         * 与 12->13 同一个原因：`autoMigrations` 里那一条是 `11 -> 13`，Room 不会替
+         * 停在 13 的设备补出 13->14；而要改用两段 AutoMigration，又要求 `13.json`
+         * 在 schema 目录里，它只在真正构建过 v13 时才生成。
+         *
+         * ## 两张表都**只加不改**
+         *
+         * 没有列变更、没有数据搬迁，所以手写 DDL 的风险只在「与实体逐列对齐」。
+         * 对齐规则同 12->13：列名、类型、NOT NULL、主键逐字对齐实体定义。
+         *
+         * ## 真机升级要单独验
+         *
+         * 迁移正确性只有真机切换版本才暴露（Room 打开库时按 identity hash 校验）。
+         * 上次 12->13 就是这样发现问题的 —— 所以这一条上线前必须在真机上跑一次
+         * 「旧版本 -> 新版本」的升级，而不只是全新安装。
+         */
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `gateway_request` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`ts` INTEGER NOT NULL, " +
+                        "`model` TEXT NOT NULL, " +
+                        "`upstreamModel` TEXT, " +
+                        "`providerId` TEXT, " +
+                        "`accountId` TEXT, " +
+                        "`status` INTEGER NOT NULL, " +
+                        "`error` TEXT, " +
+                        "`attempts` INTEGER NOT NULL, " +
+                        "`promptTokens` INTEGER NOT NULL, " +
+                        "`completionTokens` INTEGER NOT NULL, " +
+                        "`cacheReadTokens` INTEGER NOT NULL, " +
+                        "`credit` REAL, " +
+                        "`durationMs` INTEGER NOT NULL, " +
+                        "`firstResponseMs` INTEGER, " +
+                        "`client` TEXT, " +
+                        "`isTest` INTEGER NOT NULL)",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `gateway_daily` (" +
+                        "`day` TEXT NOT NULL, " +
+                        "`model` TEXT NOT NULL, " +
+                        "`providerId` TEXT NOT NULL, " +
+                        "`requests` INTEGER NOT NULL, " +
+                        "`failures` INTEGER NOT NULL, " +
+                        "`tokens` INTEGER NOT NULL, " +
+                        "`cacheRead` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`day`, `model`, `providerId`))",
+                )
             }
         }
 

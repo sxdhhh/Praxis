@@ -86,9 +86,13 @@ val appModule = module {
                 // Room 不会自动拆成 11->12、12->13。装过 v12 那一版的设备因此打不开库，
                 // 表现是「界面加载约 3 秒后崩溃」（第一条查询才去开库）。
                 PraxisDatabase.MIGRATION_12_13,
+                // v13 -> v14：请求记录 + 日聚合（报表与 token 预算的数据源）。
+                // 同样是手写 DDL（11->13 的自动迁移不覆盖 13->14），见迁移的 KDoc。
+                PraxisDatabase.MIGRATION_13_14,
             )
             .build()
     }
+    single { get<PraxisDatabase>().gatewayUsageDao() }
     single<SessionDao> { get<PraxisDatabase>().sessionDao() }
     single<dev.praxis.data.db.MessageDao> { get<PraxisDatabase>().messageDao() }
     single<dev.praxis.data.db.MemoryDao> { get<PraxisDatabase>().memoryDao() }
