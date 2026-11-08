@@ -3,6 +3,7 @@ package dev.praxis.tool
 import dev.praxis.core.imagegen.ImageGenEvent
 import dev.praxis.core.imagegen.ImageGenParams
 import dev.praxis.core.imagegen.ImageGenParamsRules
+import dev.praxis.core.imagegen.ImageGenProgress
 import dev.praxis.core.imagegen.ImageGenTarget
 import dev.praxis.core.tool.PermissionTier
 import dev.praxis.core.tool.Tool
