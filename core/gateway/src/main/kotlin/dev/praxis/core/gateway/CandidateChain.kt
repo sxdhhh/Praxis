@@ -82,7 +82,7 @@ object CandidateChain {
             return CandidateChainResult(emptyList(), emptyList())
         }
 
-        val matchedMappings = mappings.filter { it.enabled && it.alias.equalsIgnoreCase(requested) }
+        val matchedMappings = mappings.filter { it.enabled && it.alias.equals(requested, ignoreCase = true) }
         if (matchedMappings.isNotEmpty()) {
             val unresolved = mutableListOf<ModelMapping>()
             val candidates = mutableListOf<ModelCandidate>()
@@ -103,7 +103,7 @@ object CandidateChain {
 
         // 原生承载：可能多家都有同名模型，按传入顺序全部成为候选。
         val native = nativeModels
-            .filter { it.id.equalsIgnoreCase(requested) }
+            .filter { it.id.equals(requested, ignoreCase = true) }
             .map { ModelCandidate(provider = it.provider, wireModel = it.id) }
         return CandidateChainResult(native, emptyList())
     }
@@ -142,7 +142,7 @@ object CandidateChain {
             for (j in i + 1 until distinct.size) {
                 val a = distinct[i]
                 val b = distinct[j]
-                if (a != b && a.equalsIgnoreCase(b)) {
+                if (a != b && a.equals(b, ignoreCase = true)) {
                     collisions += CaseCollision(a, b)
                 }
             }
