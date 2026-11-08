@@ -9,6 +9,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.praxis.ui.navigation.LocalNavigator
+import dev.praxis.ui.navigation.PraxisRoute
+import dev.praxis.ui.widgets.MiuixNavigationItemWidget
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
@@ -31,6 +34,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  */
 @Composable
 fun GatewayRoute(modifier: Modifier = Modifier) {
+    val navigator = LocalNavigator.current
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -55,17 +59,16 @@ fun GatewayRoute(modifier: Modifier = Modifier) {
             SmallTitle("账号")
         }
         item(key = "__accounts_card__") {
-            GatewayCard {
-                Text(
-                    text = "还没有账号",
-                    style = MiuixTheme.textStyles.body1,
-                    color = MiuixTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = "账号池与「添加账号」流程在下一阶段（P1）接入。",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 4.dp),
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "账号池",
+                    description = "还没有账号 · 点这里查看",
+                    onClick = { navigator.push(PraxisRoute.SettingsGatewayAccounts) },
                 )
             }
         }
@@ -105,21 +108,6 @@ fun GatewayRoute(modifier: Modifier = Modifier) {
                     )
                 }
             }
-        }
-    }
-}
-
-/** 统一的卡片外壳：水平留白与其它设置页一致，内容统一 16dp 内边距。 */
-@Composable
-private fun GatewayCard(content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .padding(bottom = 12.dp),
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            content()
         }
     }
 }

@@ -167,6 +167,14 @@ sealed interface PraxisRoute : NavKey {
  */
 data object SettingsGateway : PraxisRoute
 
+/**
+ * 网关的账号池（设置 -> 网关 -> 账号）。
+ *
+ * 单独一页而不是塞进概览页：账号列表要支持拖动排序（文档 §9.3），
+ * 嵌在概览页的 LazyColumn 里会出现两层滚动。
+ */
+data object SettingsGatewayAccounts : PraxisRoute
+
 data object SettingsCompatPluginEntries : PraxisRoute
 
 /**

@@ -496,6 +496,14 @@ private fun SettingsPageBody(
         }
         // 插件入口：页面由插件脚本的 compose_dsl 渲染。
         PraxisRoute.SettingsGateway -> dev.praxis.feature.gateway.GatewayRoute(modifier = modifier)
+        // 账号页：账号池的存储层已经就绪，但还没有「添加账号」的界面（P1 剩余部分），
+        // 所以这里传的是真实状态（空列表），不是占位数据。
+        PraxisRoute.SettingsGatewayAccounts -> dev.praxis.feature.gateway.GatewayAccountsScreen(
+            rows = emptyList(),
+            onMove = { _, _ -> },
+            onOpenAccount = { },
+            modifier = modifier,
+        )
         is PraxisRoute.PluginEntry -> dev.praxis.feature.settings.plugin.PluginEntryScreen(
             pluginId = route.pluginId,
             entryId = route.entryId,
