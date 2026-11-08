@@ -274,28 +274,6 @@ fun PraxisApp(
     // 网关总开关（文档 §11 末尾的回滚闸）。默认 true；判定收在 core:gateway 的 GatewayGate。
     val gatewayEnabled by settingsRepository.gatewayEnabled.collectAsState(initial = true)
 
-    // ── 本地生图（设置 → 本地生图）──
-    //
-    // 模型目录与「已安装清单」在这里算一次：它们是文件系统上的事实，不该在 Compose 里
-    // 反复做 IO。装了新模型后重进本页即可看到（下载流程接进来时再改成可刷新的状态）。
-    val imageGenModelsRoot = remember { java.io.File(appContext.filesDir, "models") }
-    val imageGenSocModel = remember {
-        // Build.SOC_MODEL 是 API 31 才有的；低版本用 HARDWARE（同样是芯片型号字符串）。
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            android.os.Build.SOC_MODEL
-        } else {
-            android.os.Build.HARDWARE
-        }
-    }
-    val imageGenInstalledModels = remember(imageGenSocModel) {
-        dev.praxis.core.imagegen.ImageModelCatalog
-            .builtin(imageGenSocModel)
-            .filter { model ->
-                dev.praxis.core.imagegen.ImageModelCatalog.isInstalled(imageGenModelsRoot, model)
-            }
-            .map { model -> model.name }
-    }
-    val imageGenEngineLocator = remember { dev.praxis.data.imagegen.EngineLocator() }
     val gatewayModelRulesParse = remember(gatewayModelRulesJson) {
         gatewayModelRulesJson?.let {
             dev.praxis.core.gateway.GatewayModelRulesCodec.parse(it)
@@ -483,6 +461,29 @@ fun PraxisApp(
     val clipboardManager = remember(appContext) {
         appContext.getSystemService(android.content.ClipboardManager::class.java)
     }
+
+    // ── 本地生图（设置 → 本地生图）──
+    //
+    // 模型目录与「已安装清单」在这里算一次：它们是文件系统上的事实，不该在 Compose 里
+    // 反复做 IO。装了新模型后重进本页即可看到（下载流程接进来时再改成可刷新的状态）。
+    val imageGenModelsRoot = remember { java.io.File(appContext.filesDir, "models") }
+    val imageGenSocModel = remember {
+        // Build.SOC_MODEL 是 API 31 才有的；低版本用 HARDWARE（同样是芯片型号字符串）。
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            android.os.Build.SOC_MODEL
+        } else {
+            android.os.Build.HARDWARE
+        }
+    }
+    val imageGenInstalledModels = remember(imageGenSocModel) {
+        dev.praxis.core.imagegen.ImageModelCatalog
+            .builtin(imageGenSocModel)
+            .filter { model ->
+                dev.praxis.core.imagegen.ImageModelCatalog.isInstalled(imageGenModelsRoot, model)
+            }
+            .map { model -> model.name }
+    }
+    val imageGenEngineLocator = remember { dev.praxis.data.imagegen.EngineLocator() }
 
     // 运行时权限申请。回调不逐条比对结果，统一 refresh() 回读系统真值 ——
     // 多权限、部分授予时逐条比对必错。
