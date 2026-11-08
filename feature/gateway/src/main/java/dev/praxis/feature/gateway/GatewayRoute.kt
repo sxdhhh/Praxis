@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.outlined.AltRoute
 import androidx.compose.material.icons.outlined.Construction
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Restore
@@ -114,6 +115,29 @@ fun GatewayRoute(
                     title = "导入导出",
                     description = "从剪贴板导入账号文件",
                     onClick = { navigator.push(PraxisRoute.SettingsGatewayImport) },
+                )
+            }
+        }
+
+        // ── 路由（文档 9.4）──
+        item(key = "__routing_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.AltRoute,
+                title = "路由",
+                subtitle = "这次会先用谁、谁被跳过",
+            )
+        }
+        item(key = "__routing_card__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "候选队列",
+                    description = "按当前模型展示位次与跳过原因",
+                    onClick = { navigator.push(PraxisRoute.SettingsGatewayRouting) },
                 )
             }
         }

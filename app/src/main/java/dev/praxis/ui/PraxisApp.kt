@@ -319,6 +319,27 @@ fun PraxisApp(
             .map { dev.praxis.core.ai.AiModelOption(id = it, name = it) }
     }
 
+    // 候选队列：按当前模型算一遍选路结果（不发请求，纯计算）。
+    var gatewayQueueEntries by remember {
+        mutableStateOf<List<dev.praxis.core.gateway.GatewayQueueEntry>>(emptyList())
+    }
+    LaunchedEffect(gatewayRowsRefresh, gatewayModelRulesJson, modelSettings.activeModel) {
+        val candidates = dev.praxis.core.gateway.CandidateChain.of(
+            requestedModel = modelSettings.activeModel,
+            nativeModels = gatewayAccountStore.nativeModels(),
+            mappings = gatewayModelRules.toRoutingMappings(),
+            defaultProvider = null,
+        ).candidates
+        val plan = dev.praxis.core.gateway.RoutePlanner.plan(
+            candidates = candidates,
+            accounts = gatewayAccountStore.routingViews(),
+            state = gatewayRouteState,
+            needsImages = false,
+            stickyAccountId = null,
+        )
+        gatewayQueueEntries = dev.praxis.core.gateway.GatewayQueue.of(plan)
+    }
+
     /**
      * 终端会话快照端口。
      *
@@ -1133,6 +1154,9 @@ fun PraxisApp(
                     gatewayRowsRefresh += 1
                 },
                 gatewayModelOptions = gatewayModelOptions,
+                gatewayQueueModelName = modelSettings.activeModel,
+                gatewayQueueEntries = gatewayQueueEntries,
+                gatewayAccountNames = gatewayAccountRows.associate { it.id to it.name },
                 gatewayImportBusy = gatewayImportBusy,
                 gatewayImportReport = gatewayImportReport,
                 gatewayImportResult = gatewayImportResult,

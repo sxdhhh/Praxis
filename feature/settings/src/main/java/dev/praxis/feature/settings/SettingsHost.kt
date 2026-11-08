@@ -76,6 +76,12 @@ fun SettingsHost(
      * 没有默认值：这是会真的改状态的操作，不该有一个「忘了传就静默无效」的默认实现。
      */
     onClearGatewayRuntime: (List<String>) -> Unit,
+    /** 路由页：当前对外模型名。 */
+    gatewayQueueModelName: String = "",
+    /** 路由页：候选队列。 */
+    gatewayQueueEntries: List<dev.praxis.core.gateway.GatewayQueueEntry> = emptyList(),
+    /** 路由页：账号 id 到显示名的映射。 */
+    gatewayAccountNames: Map<String, String> = emptyMap(),
     /** 网关对外模型清单（模型页在选择器里用）。 */
     gatewayModelOptions: List<dev.praxis.core.ai.AiModelOption> = emptyList(),
     /** 导入页的四段报告（预检结果；null = 还没解析）。 */
@@ -227,6 +233,9 @@ fun SettingsHost(
             gatewayImportResult = gatewayImportResult,
             gatewayImportError = gatewayImportError,
             gatewayModelOptions = gatewayModelOptions,
+            gatewayQueueModelName = gatewayQueueModelName,
+            gatewayQueueEntries = gatewayQueueEntries,
+            gatewayAccountNames = gatewayAccountNames,
             gatewayImportBusy = gatewayImportBusy,
             onImportFromClipboard = onImportFromClipboard,
             onConfirmGatewayImport = onConfirmGatewayImport,
@@ -340,6 +349,9 @@ private fun SettingsPageBody(
     gatewayAccountRows: List<dev.praxis.core.gateway.GatewayAccountRow> = emptyList(),
     /** 批量清空运行期状态（见 [SettingsHost] 上的同名参数）。 */
     onClearGatewayRuntime: (List<String>) -> Unit = {},
+    gatewayQueueModelName: String = "",
+    gatewayQueueEntries: List<dev.praxis.core.gateway.GatewayQueueEntry> = emptyList(),
+    gatewayAccountNames: Map<String, String> = emptyMap(),
     gatewayModelOptions: List<dev.praxis.core.ai.AiModelOption> = emptyList(),
     gatewayImportReport: dev.praxis.core.gateway.GatewayImportReport? = null,
     gatewayImportResult: String? = null,
@@ -554,6 +566,12 @@ private fun SettingsPageBody(
         )
         // 账号页：账号池的存储层已经就绪，但还没有「添加账号」的界面（P1 剩余部分），
         // 所以这里传的是真实状态（空列表），不是占位数据。
+        PraxisRoute.SettingsGatewayRouting -> dev.praxis.feature.gateway.GatewayRoutingScreen(
+            modelName = gatewayQueueModelName,
+            entries = gatewayQueueEntries,
+            accountNames = gatewayAccountNames,
+            modifier = modifier,
+        )
         PraxisRoute.SettingsGatewayImport -> dev.praxis.feature.gateway.GatewayImportScreen(
             busy = gatewayImportBusy,
             report = gatewayImportReport,
