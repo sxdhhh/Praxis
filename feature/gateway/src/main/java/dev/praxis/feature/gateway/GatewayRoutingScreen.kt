@@ -2,6 +2,7 @@ package dev.praxis.feature.gateway
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AltRoute
@@ -105,8 +106,10 @@ fun GatewayRoutingScreen(
                             },
                             modifier = Modifier.padding(top = if (index == 0) 0.dp else 6.dp),
                         )
+                        // 先取局部变量：skipReason 是另一个模块里的属性，拿不到智能转换。
+                        val reason = entry.skipReason
                         val detail = when {
-                            entry.skipReason != null -> GatewayQueue.reasonText(entry.skipReason)
+                            reason != null -> GatewayQueue.reasonText(reason)
                             entry.sink -> "垫底：仍可用，但排在最后"
                             else -> null
                         }
