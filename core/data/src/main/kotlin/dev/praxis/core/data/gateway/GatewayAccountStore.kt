@@ -1,5 +1,6 @@
 package dev.praxis.core.data.gateway
 
+import dev.praxis.core.gateway.AccountView
 import dev.praxis.core.gateway.GatewayAccountRow
 import dev.praxis.core.gateway.GatewayCredential
 import dev.praxis.core.gateway.GatewayCredentialCodec
@@ -132,6 +133,16 @@ class GatewayAccountStore(
     }
 
     suspend fun all(): List<GatewayAccountEntity> = accountDao.all()
+
+    /**
+     * 选路要的账号视图。
+     *
+     * hasCredentials 用「能不能解密」来判定：解不开就等同于没有凭证
+     * （文档 12：Keystore 重置时不要整池崩，只让该账号不可用）。
+     */
+    suspend fun routingViews(): List<AccountView> = accountDao.all().map { entity ->
+        entity.toAccountView(hasCredentials = decrypt(entity.credentialsCipher) != null)
+    }
 
     /**
      * 组装界面要的行模型。
