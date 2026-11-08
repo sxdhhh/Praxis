@@ -4,6 +4,8 @@ import androidx.compose.material.icons.outlined.CloudDownload
 import dev.praxis.ui.widgets.MiuixSwitchWidget
 import dev.praxis.ui.widgets.MiuixAnimatedDialog
 import top.yukonga.miuix.kmp.basic.TextField
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize

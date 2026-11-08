@@ -164,11 +164,15 @@ private fun StateCard(state: ImageDownloadState, onCancel: () -> Unit) {
         is ImageDownloadState.Failed -> when (state.reason) {
             ImageDownloadState.Failed.Reason.InsufficientSpace -> "空间不足：" + state.detail
             ImageDownloadState.Failed.Reason.Transport -> "下载失败：" + state.detail
+            // 被「仅 Wi-Fi」这类策略挡下：不是错误，是用户自己定的规矩生效了。
+            ImageDownloadState.Failed.Reason.Blocked -> state.detail
         }
         is ImageDownloadState.Cancelled -> "已取消，残留已清理"
     } ?: return
 
-    val isFailure = state is ImageDownloadState.Failed
+    // 被策略挡下（Blocked）不标红：那不是错误，是用户自己定的规矩生效了。
+    val isFailure = state is ImageDownloadState.Failed &&
+        state.reason != ImageDownloadState.Failed.Reason.Blocked
     Card(
         modifier = Modifier
             .fillMaxWidth()
