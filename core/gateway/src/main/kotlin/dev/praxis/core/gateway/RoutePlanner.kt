@@ -30,6 +30,24 @@ data class AccountView(
     val requestLimitPerMinute: Int = 0,
 )
 
+/**
+ * 每家的运行期限流（文档 7.2 第 6 行：每账号/每家的 RPM）。
+ *
+ * 与账号级限流的区别：同一家有多个账号时，家级配额是它们共用的。
+ * 只做账号级会漏掉这种情况 —— 一家 10 个账号各 5 RPM，实际还是会撞上游的
+ * 家级配额。
+ */
+data class ProviderUsage(
+    val provider: String,
+    val requestsThisMinute: Int,
+    /** 0 = 不限。 */
+    val limitPerMinute: Int = 0,
+) {
+    /** 该家的配额是否已经用满。 */
+    val exhausted: Boolean
+        get() = limitPerMinute > 0 && requestsThisMinute >= limitPerMinute
+}
+
 /** 被过滤掉的原因。枚举而不是字符串：界面要按类分组展示。 */
 enum class SkipReason {
     Disabled,
@@ -108,6 +126,8 @@ object RoutePlanner {
         needsImages: Boolean,
         /** 本会话上次用的账号；null = 没有粘性。 */
         stickyAccountId: String?,
+        /** 各家的运行期用量；空表示没有配置家级限流。 */
+        providerUsages: List<ProviderUsage> = emptyList(),
     ): RoutePlan {
         val skipped = mutableListOf<SkippedAttempt>()
         val usable = mutableListOf<PlannedAttempt>()
@@ -116,7 +136,16 @@ object RoutePlanner {
             accounts
                 .filter { it.providerId == candidate.provider }
                 .forEach { account ->
-                    val reason = blockingReason(account, candidate, state, needsImages)
+                    val providerExhausted = providerUsages
+                        .firstOrNull { it.provider == candidate.provider }
+                        ?.exhausted == true
+                    val reason = blockingReason(
+                        account = account,
+                        candidate = candidate,
+                        state = state,
+                        needsImages = needsImages,
+                        providerExhausted = providerExhausted,
+                    )
                     if (reason == null) {
                         usable += PlannedAttempt(
                             accountId = account.id,
@@ -163,6 +192,7 @@ object RoutePlanner {
         candidate: ModelCandidate,
         state: RouteState,
         needsImages: Boolean,
+        providerExhausted: Boolean,
     ): SkipReason? {
         if (!account.enabled) return SkipReason.Disabled
         if (!account.hasCredentials) return SkipReason.NoCredentials
@@ -185,6 +215,9 @@ object RoutePlanner {
         ) {
             return SkipReason.RateLimited
         }
+
+        // 家级配额用满时，这一家的所有账号都跳过：换号也躲不开共享配额。
+        if (providerExhausted) return SkipReason.RateLimited
 
         return null
     }

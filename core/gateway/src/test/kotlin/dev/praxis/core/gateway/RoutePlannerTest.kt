@@ -196,4 +196,56 @@ class RoutePlannerTest {
         // 不清掉的话下次还钉死在那个账号上（文档 7.3）。
         assertTrue(result.stickyCleared)
     }
+
+    // ── 家级限流（文档 7.2 第 6 行「每账号/每家的 RPM」）──
+
+    @Test
+    fun 家级配额用满时该家所有账号都跳过() {
+        val result = RoutePlanner.plan(
+            candidates = listOf(gptX),
+            accounts = listOf(account(id = "a1"), account(id = "a2")),
+            state = state(),
+            needsImages = false,
+            stickyAccountId = null,
+            providerUsages = listOf(
+                ProviderUsage(provider = "openai", requestsThisMinute = 5, limitPerMinute = 5),
+            ),
+        )
+
+        // 共享配额用满时换号也躲不开 —— 两个账号都得跳过。
+        assertTrue(result.attempts.isEmpty())
+        assertEquals(2, result.skipped.count { it.reason == SkipReason.RateLimited })
+    }
+
+    @Test
+    fun 家级配额未满时照常可用() {
+        val result = RoutePlanner.plan(
+            candidates = listOf(gptX),
+            accounts = listOf(account(id = "a1")),
+            state = state(),
+            needsImages = false,
+            stickyAccountId = null,
+            providerUsages = listOf(
+                ProviderUsage(provider = "openai", requestsThisMinute = 1, limitPerMinute = 5),
+            ),
+        )
+
+        assertEquals(1, result.attempts.size)
+    }
+
+    @Test
+    fun 没有配置家级限流时不影响选路() {
+        val result = RoutePlanner.plan(
+            candidates = listOf(gptX),
+            accounts = listOf(account(id = "a1")),
+            state = state(),
+            needsImages = false,
+            stickyAccountId = null,
+            providerUsages = listOf(
+                ProviderUsage(provider = "anthropic", requestsThisMinute = 99, limitPerMinute = 5),
+            ),
+        )
+
+        assertEquals("限的是别家，不该牵连这一家", 1, result.attempts.size)
+    }
 }
