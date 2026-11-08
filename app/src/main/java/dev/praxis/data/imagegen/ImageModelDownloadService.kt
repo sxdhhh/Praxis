@@ -63,7 +63,9 @@ class ImageModelDownloadService : Service() {
     override fun onCreate() {
         super.onCreate()
         // Koin 里注册的是单例：服务与界面观察同一份状态。
-        manager = org.koin.core.context.GlobalContext.get()
+        // GlobalContext.get() 返回的是 Koin 容器本身，还要再 get<T>() 才拿到实例
+        // （CI 抓到过：只调一次会得到 Assignment type mismatch: actual type is 'Koin'）。
+        manager = org.koin.core.context.GlobalContext.get().get<ImageModelDownloadManager>()
     }
 
     private lateinit var manager: ImageModelDownloadManager
