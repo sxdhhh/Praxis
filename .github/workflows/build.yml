@@ -299,6 +299,7 @@ jobs:
             --no-build-cache \
             :core:ai:test \
             :core:data:test \
+            :core:gateway:test \
             :core:goal:test \
             :core:linux:test \
             :core:memory:test \
