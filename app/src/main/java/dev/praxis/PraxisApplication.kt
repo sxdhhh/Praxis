@@ -5,6 +5,7 @@ import android.content.ComponentCallbacks2
 import dev.praxis.core.data.log.PraxisLogger
 import dev.praxis.core.data.log.PraxisTimberTree
 import dev.praxis.di.appModule
+import dev.praxis.di.gatewayModule
 import dev.praxis.di.networkModule
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
@@ -88,7 +89,7 @@ class PraxisApplication : Application() {
 
         startKoin {
             androidContext(this@PraxisApplication)
-            modules(appModule, networkModule)
+            modules(appModule, networkModule, gatewayModule)
         }
 
         // 自检信号：日志页能看到这一行，说明写入链路完整。

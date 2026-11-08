@@ -238,6 +238,45 @@ fun PraxisApp(
     val workflowEngine: dev.praxis.core.workflow.WorkflowEngine = org.koin.compose.koinInject()
     val skillRegistry: dev.praxis.core.plugin.SkillRegistry = org.koin.compose.koinInject()
 
+    // ── 网关账号池（文档 §10 的接线层）──
+    //
+    // 这里只读账号行给设置页显示，不做导入、不转发请求（那是 P1 的剩余部分）。
+    val gatewayAccountStore: dev.praxis.core.data.gateway.GatewayAccountStore =
+        org.koin.compose.koinInject()
+
+    /**
+     * 选路的运行期状态。
+     *
+     * 目前恒为空：真正转发请求之后才会有人往里写退避/熔断/限额
+     * （GatewayProvider 还没做）。所以账号页现在只会显示「正常」或「已停用」，
+     * 这与事实一致，不是写死的。
+     */
+    val gatewayRouteState = remember {
+        dev.praxis.core.gateway.RouteState(
+            clock = { System.currentTimeMillis() },
+            breaker = dev.praxis.core.gateway.BreakerConfig(
+                enabled = false,
+                failureThreshold = 3,
+                openMillis = 60_000L,
+                successThreshold = 1,
+            ),
+        )
+    }
+
+    var gatewayAccountRows by remember {
+        mutableStateOf<List<dev.praxis.core.gateway.GatewayAccountRow>>(emptyList())
+    }
+    LaunchedEffect(Unit) {
+        gatewayAccountRows = gatewayAccountStore.accountRows(
+            state = gatewayRouteState,
+            // 家名的翻译表要等 P1 的家清单；先用 id 原样显示，不编一个假名字。
+            providerLabelOf = { id -> id },
+            // 「该账号承载哪些上游模型」要等模型条目表接上数据源；
+            // 传空表示还不知道，状态推导据此不判定限额（不是「判定为没限」）。
+            wireModelsOf = { emptyList() },
+        )
+    }
+
     /**
      * 终端会话快照端口。
      *
@@ -1013,6 +1052,7 @@ fun PraxisApp(
             // 分成具体页面（缺一个编不过）。
             else -> dev.praxis.feature.settings.SettingsHost(
                 route = route,
+                gatewayAccountRows = gatewayAccountRows,
                 repository = settingsRepository,
                 versionName = versionName,
                 versionCode = versionCode,

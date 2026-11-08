@@ -323,6 +323,9 @@ ksp {
 dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:data"))
+    // 网关领域模型与纯逻辑。core:data 虽然也用它，但那边是 implementation 依赖，
+    // 不会传递到 :app —— 这里用到 RouteState / GatewayAccountRow，必须自己声明。
+    implementation(project(":core:gateway"))
     implementation(project(":core:ai"))
     implementation(project(":core:tool"))
     implementation(project(":core:memory"))
