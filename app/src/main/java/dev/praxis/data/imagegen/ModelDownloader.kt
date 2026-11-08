@@ -87,14 +87,17 @@ class ModelDownloader(
      */
     fun download(
         plan: ImageDownloadPlan,
-        onProgress: (DownloadProgress) -> Unit,
         /**
          * 每写一块检查一次「要不要停」。
          *
          * 为什么不用协程取消：这里的读是**阻塞 IO**，`Job.cancel()` 打断不了卡在
          * `InputStream.read` 上的线程。用标志位让循环自己退出，才能保证清理真的跑完。
+         *
+         * 注意它排在 [onProgress] **之前**：`download(plan) { ... }` 这种尾随 lambda 写法
+         * 绑的是最后一个参数，所以进度回调必须留在末尾。
          */
         shouldStop: () -> Boolean = { false },
+        onProgress: (DownloadProgress) -> Unit,
     ): DownloadResult {
         // ① 目录 + 预检。先清残留再判空间：否则上次失败的 .part 会让预检自相矛盾地报「不够」。
         if (!plan.targetDir.exists() && !plan.targetDir.mkdirs()) {
