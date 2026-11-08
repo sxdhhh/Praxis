@@ -1266,6 +1266,36 @@ fun PraxisApp(
                 // ── 模型管理页（gateway_model 的写入口）──
                 gatewayModelRows = gatewayModelRows,
                 gatewayModelError = gatewayModelError,
+                // 测试连接：真实请求一次 /v1/models（不消耗生成额度），复用主模型页的 fetcher。
+                onTestGatewayAccount = { baseUrl, apiKey ->
+                    if (baseUrl.isBlank() || apiKey.isBlank()) {
+                        Result.failure<String>(IllegalArgumentException("先填地址与 Key"))
+                    } else {
+                        var clean = baseUrl.trim()
+                        while (clean.endsWith("/")) {
+                            clean = clean.dropLast(1)
+                        }
+                        modelCatalogFetcher
+                            .fetch(
+                                baseUrl = clean,
+                                apiKey = apiKey.trim(),
+                                providerKind =
+                                    dev.praxis.core.ai.ModelCatalogFetcher.ProviderKind.Bearer,
+                            )
+                            .fold(
+                                onSuccess = { models ->
+                                    Result.success("连通 · " + models.size + " 个模型可用")
+                                },
+                                onFailure = { error ->
+                                    Result.failure<String>(
+                                        IllegalStateException(
+                                            error.message ?: "连接失败（地址或 Key 不对）",
+                                        ),
+                                    )
+                                },
+                            )
+                    }
+                },
                 onAddGatewayAccount = { provider, name, baseUrl, apiKey ->
                     val draft = dev.praxis.core.gateway.GatewayAccountDraft(
                         providerId = provider,

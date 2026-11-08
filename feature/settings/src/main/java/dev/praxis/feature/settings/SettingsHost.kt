@@ -113,6 +113,8 @@ fun SettingsHost(
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
     /** 添加账号（null = 未接线，页面不画入口）。 */
     onAddGatewayAccount: (suspend (String, String, String, String) -> Result<String>)? = null,
+    /** 测试连接（地址 / Key）。null = 未接线。 */
+    onTestGatewayAccount: (suspend (String, String) -> Result<String>)? = null,
     gatewayModelError: String? = null,
     onToggleGatewayModel: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onDeleteGatewayModel: (String, String) -> Unit = { _, _ -> },
@@ -292,6 +294,7 @@ fun SettingsHost(
             gatewayModelRows = gatewayModelRows,
             gatewayModelError = gatewayModelError,
             onAddGatewayAccount = onAddGatewayAccount,
+            onTestGatewayAccount = onTestGatewayAccount,
             onToggleGatewayModel = onToggleGatewayModel,
             onDeleteGatewayModel = onDeleteGatewayModel,
             onAddGatewayModel = onAddGatewayModel,
@@ -436,6 +439,8 @@ private fun SettingsPageBody(
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
     /** 添加账号（null = 未接线，页面不画入口）。 */
     onAddGatewayAccount: (suspend (String, String, String, String) -> Result<String>)? = null,
+    /** 测试连接（地址 / Key）。null = 未接线。 */
+    onTestGatewayAccount: (suspend (String, String) -> Result<String>)? = null,
     gatewayModelError: String? = null,
     onToggleGatewayModel: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onDeleteGatewayModel: (String, String) -> Unit = { _, _ -> },
@@ -713,6 +718,7 @@ private fun SettingsPageBody(
         )
         PraxisRoute.SettingsGatewayAccounts -> dev.praxis.feature.gateway.GatewayAccountsScreen(
             onAddAccount = onAddGatewayAccount,
+            onTestConnection = onTestGatewayAccount,
             rows = gatewayAccountRows,
             onMove = { _, _ -> },
             onOpenAccount = { },

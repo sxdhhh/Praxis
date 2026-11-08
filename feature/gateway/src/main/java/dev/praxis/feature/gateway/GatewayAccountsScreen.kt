@@ -72,6 +72,13 @@ fun GatewayAccountsScreen(
      * null = 没接线 —— 那时**不画**「添加账号」入口，而不是画一个点了没反应的按钮。
      */
     onAddAccount: (suspend (providerId: String, name: String, baseUrl: String, apiKey: String) -> Result<String>)? = null,
+    /**
+     * 测试连接（三级流程的最后一级）：真实请求一次 `/v1/models`。
+     *
+     * 与保存分开：拉列表**不消耗生成额度**，用户应该能在保存前确认地址与 Key 是对的。
+     * null = 没接线，弹窗里不画这一行。
+     */
+    onTestConnection: (suspend (baseUrl: String, apiKey: String) -> Result<String>)? = null,
     modifier: Modifier = Modifier,
     nowMillis: Long = System.currentTimeMillis(),
 ) {
@@ -207,6 +214,7 @@ fun GatewayAccountsScreen(
         AddAccountDialog(
             onDismiss = { addVisible = false },
             onSave = onAddAccount,
+            onTest = onTestConnection,
         )
     }
 }
@@ -251,6 +259,7 @@ private fun StatusBadge(status: GatewayAccountStatus) {
 private fun AddAccountDialog(
     onDismiss: () -> Unit,
     onSave: suspend (String, String, String, String) -> Result<String>,
+    onTest: (suspend (String, String) -> Result<String>)?,
 ) {
     var provider by remember { mutableStateOf("custom") }
     var baseUrl by remember { mutableStateOf("") }
@@ -259,6 +268,7 @@ private fun AddAccountDialog(
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
+    var testing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
@@ -315,6 +325,33 @@ private fun AddAccountDialog(
                             MiuixTheme.colorScheme.error
                         } else {
                             MiuixTheme.colorScheme.primary
+                        },
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                if (onTest != null) {
+                    MiuixNavigationItemWidget(
+                        title = if (testing) "正在测试…" else "测试连接",
+                        description = "真实请求一次 /v1/models，不消耗生成额度",
+                        onClick = {
+                            if (testing) return@MiuixNavigationItemWidget
+                            testing = true
+                            message = null
+                            scope.launch {
+                                // 用当前输入框里的值测，而不是已保存的值 —— 用户正是在确认这一组。
+                                val result = onTest(baseUrl, apiKey)
+                                testing = false
+                                result.fold(
+                                    onSuccess = { text ->
+                                        failed = false
+                                        message = text
+                                    },
+                                    onFailure = { error ->
+                                        failed = true
+                                        message = error.message ?: "测试失败"
+                                    },
+                                )
+                            }
                         },
                     )
                 }
