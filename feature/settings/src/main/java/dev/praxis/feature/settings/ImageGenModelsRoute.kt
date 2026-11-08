@@ -70,6 +70,9 @@ fun ImageGenModelsRoute(
                     .padding(horizontal = 12.dp)
                     .padding(bottom = 12.dp),
             ) {
+                // 显式包一层 Column：Card 的 content 作用域来自 AAR，不假设它是 ColumnScope，
+                // 否则两个子节点会叠在同一个位置（视觉 bug，编译期看不出来）。
+                Column {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = model.name,
@@ -117,6 +120,7 @@ fun ImageGenModelsRoute(
                         description = "已经下载的部分会被清掉",
                         onClick = onCancel,
                     )
+                }
                 }
             }
         }

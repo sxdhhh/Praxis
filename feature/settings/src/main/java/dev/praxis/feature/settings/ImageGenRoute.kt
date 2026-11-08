@@ -62,6 +62,10 @@ fun ImageGenRoute(
     modelsRootPath: String,
     modifier: Modifier = Modifier,
 ) {
+    // 组合局部变量只能在组合期读一次、闭包捕获；写进 onClick 的 lambda 里会在点击时越界
+    // 到非组合上下文（CI 报过：@Composable invocations can only happen from ...）。
+    val navigator = dev.praxis.ui.navigation.LocalNavigator.current
+
     var probeTick by remember { mutableStateOf(0) }
     var probe by remember { mutableStateOf<ProbeUi>(ProbeUi.Probing) }
 
@@ -185,8 +189,7 @@ fun ImageGenRoute(
                     title = "模型库",
                     description = "内置清单 · 下载 · 导入",
                     onClick = {
-                        dev.praxis.ui.navigation.LocalNavigator.current
-                            .push(dev.praxis.ui.navigation.PraxisRoute.SettingsImageGenModels)
+                        navigator.push(dev.praxis.ui.navigation.PraxisRoute.SettingsImageGenModels)
                     },
                 )
             }
