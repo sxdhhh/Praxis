@@ -8,6 +8,8 @@ android {
 }
 
 dependencies {
+    // 网关领域模型（AccountView 等）。方向：data -> 领域，无环。
+    implementation(project(":core:gateway"))
     api(project(":core:model"))
 
     implementation(libs.androidx.core.ktx)

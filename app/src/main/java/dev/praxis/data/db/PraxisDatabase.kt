@@ -1,5 +1,6 @@
 package dev.praxis.data.db
 
+import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
@@ -7,6 +8,8 @@ import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
 import dev.praxis.core.data.character.CharacterCardEntity
 import dev.praxis.core.data.character.PromptTagEntity
+import dev.praxis.core.data.gateway.GatewayAccountEntity
+import dev.praxis.core.data.gateway.GatewayProviderEntity
 
 /**
  * 应用数据库。
@@ -34,9 +37,18 @@ import dev.praxis.core.data.character.PromptTagEntity
         MemoryEntity::class,
         CharacterCardEntity::class,
         PromptTagEntity::class,
+        GatewayAccountEntity::class,
+        GatewayProviderEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
+    // v11 -> v12：只新增两张表，没有任何列变更 —— 用自动迁移让 Room
+    // 从 v11 的导出 schema 自己生成建表 SQL。手写 SQL 只要有一处列顺序或
+    // NOT NULL 与实体对不上，运行期打开数据库就会报 identity hash 不匹配，
+    // 而那种错误在编译期完全看不出来。
+    autoMigrations = [
+        AutoMigration(from = 11, to = 12),
+    ],
 )
 abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.CharacterDatabase {
 
@@ -47,6 +59,10 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
     // ── 角色系统（实体与 DAO 定义在 :core:data）───────────────
     override abstract fun characterCardDao(): dev.praxis.core.data.character.CharacterCardDao
     override abstract fun promptTagDao(): dev.praxis.core.data.character.PromptTagDao
+
+    // ── 网关账号池（实体与 DAO 定义在 :core:data）───────────────
+    abstract fun gatewayAccountDao(): dev.praxis.core.data.gateway.GatewayAccountDao
+    abstract fun gatewayProviderDao(): dev.praxis.core.data.gateway.GatewayProviderDao
 
     /**
      * 事务入口。
