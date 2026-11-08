@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.praxis.core.gateway.GatewayAccountRow
 import dev.praxis.core.gateway.GatewayAccountState
 import dev.praxis.core.gateway.GatewayAccountStatus
 import dev.praxis.core.gateway.GatewayStatusText
@@ -17,15 +18,6 @@ import dev.praxis.ui.widgets.MiuixDraggableList
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-
-/** 账号列表的一行。 */
-data class GatewayAccountRow(
-    val id: String,
-    val name: String,
-    /** 家名（界面已翻译好的展示名）。 */
-    val providerLabel: String,
-    val status: GatewayAccountStatus,
-)
 
 /**
  * 账号页（文档 §9.3）。

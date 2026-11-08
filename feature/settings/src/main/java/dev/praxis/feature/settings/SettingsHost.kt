@@ -62,6 +62,14 @@ import dev.praxis.ui.navigation.title
 @Composable
 fun SettingsHost(
     route: PraxisRoute,
+    /**
+     * 网关账号池的行模型（已带好家名与运行期状态）。
+     *
+     * 默认空列表：还没有导入界面时账号池确实是空的。等 :app 把数据库接上
+     * 之后由它传入真实数据 —— 这里不做「读不到就当空」的兜底，空列表是
+     * 调用方的选择，不是这一层替他决定的。
+     */
+    gatewayAccountRows: List<dev.praxis.feature.gateway.GatewayAccountRow> = emptyList(),
     repository: SettingsRepository,
     versionName: String,
     versionCode: Int,
@@ -495,11 +503,14 @@ private fun SettingsPageBody(
             }
         }
         // 插件入口：页面由插件脚本的 compose_dsl 渲染。
-        PraxisRoute.SettingsGateway -> dev.praxis.feature.gateway.GatewayRoute(modifier = modifier)
+        PraxisRoute.SettingsGateway -> dev.praxis.feature.gateway.GatewayRoute(
+            accountCount = gatewayAccountRows.size,
+            modifier = modifier,
+        )
         // 账号页：账号池的存储层已经就绪，但还没有「添加账号」的界面（P1 剩余部分），
         // 所以这里传的是真实状态（空列表），不是占位数据。
         PraxisRoute.SettingsGatewayAccounts -> dev.praxis.feature.gateway.GatewayAccountsScreen(
-            rows = emptyList(),
+            rows = gatewayAccountRows,
             onMove = { _, _ -> },
             onOpenAccount = { },
             modifier = modifier,

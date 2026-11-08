@@ -1,9 +1,11 @@
 package dev.praxis.core.data.gateway
 
+import dev.praxis.core.gateway.GatewayAccountRow
 import dev.praxis.core.gateway.GatewayCredential
 import dev.praxis.core.gateway.GatewayCredentialCodec
 import dev.praxis.core.gateway.GatewayCustomProvider
 import dev.praxis.core.gateway.GatewayImportPlan
+import dev.praxis.core.gateway.RouteState
 import dev.praxis.core.gateway.toCredential
 
 /** 一次导入实际写进去的东西。 */
@@ -130,6 +132,28 @@ class GatewayAccountStore(
     }
 
     suspend fun all(): List<GatewayAccountEntity> = accountDao.all()
+
+    /**
+     * 组装界面要的行模型。
+     *
+     * 家名与「该账号承载哪些上游模型」都由调用方给：前者要查内置家清单
+     * （在 :app 用插件/常量表翻译），后者来自模型条目表。这里不猜、不兜底 ——
+     * 传空列表就等于「还不知道它承载什么」，状态推导会据此不判定限额。
+     */
+    suspend fun accountRows(
+        state: RouteState,
+        providerLabelOf: (String) -> String,
+        wireModelsOf: (String) -> List<String>,
+    ): List<GatewayAccountRow> = accountDao.all().map { entity ->
+        GatewayAccountRow.from(
+            id = entity.id,
+            name = entity.name,
+            providerLabel = providerLabelOf(entity.providerId),
+            enabled = entity.enabled,
+            wireModels = wireModelsOf(entity.id),
+            state = state,
+        )
+    }
 }
 
 /**

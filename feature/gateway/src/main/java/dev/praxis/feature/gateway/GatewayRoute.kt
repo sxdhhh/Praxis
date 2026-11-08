@@ -33,7 +33,11 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 布局与分区不需要改动。
  */
 @Composable
-fun GatewayRoute(modifier: Modifier = Modifier) {
+fun GatewayRoute(
+    /** 账号池里的账号数（:app 从数据库读出来传进来）。 */
+    accountCount: Int = 0,
+    modifier: Modifier = Modifier,
+) {
     val navigator = LocalNavigator.current
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -67,7 +71,11 @@ fun GatewayRoute(modifier: Modifier = Modifier) {
             ) {
                 MiuixNavigationItemWidget(
                     title = "账号池",
-                    description = "还没有账号 · 点这里查看",
+                    description = if (accountCount == 0) {
+                        "还没有账号 · 点这里查看"
+                    } else {
+                        accountCount.toString() + " 个账号 · 点这里管理"
+                    },
                     onClick = { navigator.push(PraxisRoute.SettingsGatewayAccounts) },
                 )
             }

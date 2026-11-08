@@ -187,4 +187,37 @@ class GatewayAccountStoreTest {
         assertTrue(providerDao.rows.isEmpty())
         assertEquals(listOf("custom-xyz"), stored.providersWithoutBaseUrl)
     }
+
+    @Test
+    fun 行模型带上家名与真实状态() = runBlocking {
+        store().applyImport(plan("g1")).getOrThrow()
+        val runtime = dev.praxis.core.gateway.RouteState(
+            clock = { now },
+            breaker = dev.praxis.core.gateway.BreakerConfig(false, 3, 60_000L, 1),
+        )
+
+        val rows = store().accountRows(
+            state = runtime,
+            providerLabelOf = { id -> "家-" + id },
+            wireModelsOf = { listOf("gpt-x") },
+        )
+
+        assertEquals(1, rows.size)
+        assertEquals("家-openai", rows.single().providerLabel)
+        assertEquals(dev.praxis.core.gateway.GatewayAccountState.Normal, rows.single().status.state)
+    }
+
+    @Test
+    fun 不知道承载模型时限额不参与状态() = runBlocking {
+        store().applyImport(plan("h1")).getOrThrow()
+        val runtime = dev.praxis.core.gateway.RouteState(
+            clock = { now },
+            breaker = dev.praxis.core.gateway.BreakerConfig(false, 3, 60_000L, 1),
+        )
+        runtime.markLimit(dev.praxis.core.gateway.CooldownKey("h1", "gpt-x"), null)
+
+        val rows = store().accountRows(runtime, { it }, { emptyList() })
+
+        assertEquals(dev.praxis.core.gateway.GatewayAccountState.Normal, rows.single().status.state)
+    }
 }
