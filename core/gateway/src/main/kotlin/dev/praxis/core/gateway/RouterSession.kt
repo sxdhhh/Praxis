@@ -56,7 +56,12 @@ class RouterSession(
     private val needsImages: Boolean = false,
     private val budget: FailoverBudget = FailoverBudget(),
     private val providerUsages: List<ProviderUsage> = emptyList(),
+    /** 选路策略（文档 §9.4）。默认值 = 移植前的行为（顺序 + 粘性）。 */
+    private val policy: GatewayRoutingPolicy = GatewayRoutingPolicy(),
 ) {
+
+    /** 轮询的单调计数：每个请求转一位（顺序策略下它不被读）。 */
+    private var rotationSeed: Int = 0
 
     private var stickyAccountId: String? = null
     private var failover = FailoverState()
@@ -104,7 +109,11 @@ class RouterSession(
             needsImages = needsImages,
             stickyAccountId = stickyAccountId,
             providerUsages = providerUsages,
+            policy = policy,
+            rotationSeed = rotationSeed,
         )
+        // 每取一次就推进轮询计数：这是「摊开请求」的定义，不是每轮会话一次。
+        rotationSeed += 1
 
         if (plan.stickyCleared) {
             // 文档 7.3：粘性命中但账号不可用时要清掉，否则下次还钉死在那个账号上。

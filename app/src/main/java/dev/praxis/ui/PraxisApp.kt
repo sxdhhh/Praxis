@@ -354,6 +354,17 @@ fun PraxisApp(
         gatewayModelOptions = merged.map { dev.praxis.core.ai.AiModelOption(id = it, name = it) }
     }
 
+    // 选路策略（文档 §9.4）：顺序/轮询 + 粘性。解不开时按默认走，但把「坏了」传下去，
+    // 由路由页明说 —— 静默用默认值会让用户以为自己的设置凭空丢了。
+    val gatewayRoutingPolicyJson by settingsRepository.gatewayRoutingPolicyJson
+        .collectAsState(initial = null)
+    val gatewayRoutingPolicyDecoded = remember(gatewayRoutingPolicyJson) {
+        dev.praxis.core.gateway.GatewayRoutingPolicyCodec.decode(gatewayRoutingPolicyJson)
+    }
+    val gatewayRoutingPolicy = gatewayRoutingPolicyDecoded?.getOrNull()
+        ?: dev.praxis.core.gateway.GatewayRoutingPolicy()
+    val gatewayRoutingPolicyBroken = gatewayRoutingPolicyDecoded?.isFailure == true
+
     // 候选队列：按当前模型算一遍选路结果（不发请求，纯计算）。
     var gatewayQueueEntries by remember {
         mutableStateOf<List<dev.praxis.core.gateway.GatewayQueueEntry>>(emptyList())
@@ -371,6 +382,8 @@ fun PraxisApp(
             state = gatewayRouteState,
             needsImages = false,
             stickyAccountId = null,
+            // 队列是**预测**，用当前策略算 —— 否则用户切到轮询后看到的次序仍是顺序的。
+            policy = gatewayRoutingPolicy,
         )
         gatewayQueueEntries = dev.praxis.core.gateway.GatewayQueue.of(plan)
     }
@@ -674,6 +687,8 @@ fun PraxisApp(
                             // modelRules 的持久化还没接（导入导出界面在 P1 剩余部分），
                             // 所以映射为空；原生承载走 provider 表里各家声明的模型清单。
                             modelRules = { gatewayModelRules },
+                            // 每次现取：改了策略下一句就生效（见 GatewayProvider 的参数说明）。
+                            policy = { gatewayRoutingPolicy },
                             state = gatewayRouteState,
                         ),
                     ),
@@ -1266,6 +1281,15 @@ fun PraxisApp(
                 // ── 模型管理页（gateway_model 的写入口）──
                 gatewayModelRows = gatewayModelRows,
                 gatewayModelError = gatewayModelError,
+                gatewayRoutingPolicy = gatewayRoutingPolicy,
+                gatewayRoutingPolicyBroken = gatewayRoutingPolicyBroken,
+                onGatewayPolicyChange = { updated ->
+                    coroutineScope.launch {
+                        settingsRepository.setGatewayRoutingPolicyJson(
+                            dev.praxis.core.gateway.GatewayRoutingPolicyCodec.encode(updated),
+                        )
+                    }
+                },
                 // 测试连接：真实请求一次 /v1/models（不消耗生成额度），复用主模型页的 fetcher。
                 onTestGatewayAccount = { baseUrl, apiKey ->
                     if (baseUrl.isBlank() || apiKey.isBlank()) {

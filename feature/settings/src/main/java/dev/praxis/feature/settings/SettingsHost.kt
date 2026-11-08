@@ -111,6 +111,11 @@ fun SettingsHost(
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
+    /** 选路策略（顺序/轮询 + 粘性）。 */
+    gatewayRoutingPolicy: dev.praxis.core.gateway.GatewayRoutingPolicy =
+        dev.praxis.core.gateway.GatewayRoutingPolicy(),
+    gatewayRoutingPolicyBroken: Boolean = false,
+    onGatewayPolicyChange: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit = {},
     /** 添加账号（null = 未接线，页面不画入口）。 */
     onAddGatewayAccount: (suspend (String, String, String, String) -> Result<String>)? = null,
     /** 测试连接（地址 / Key）。null = 未接线。 */
@@ -292,6 +297,9 @@ fun SettingsHost(
             gatewayEnabled = gatewayEnabled,
             onGatewayEnabledChange = onGatewayEnabledChange,
             gatewayModelRows = gatewayModelRows,
+            gatewayRoutingPolicy = gatewayRoutingPolicy,
+            gatewayRoutingPolicyBroken = gatewayRoutingPolicyBroken,
+            onGatewayPolicyChange = onGatewayPolicyChange,
             gatewayModelError = gatewayModelError,
             onAddGatewayAccount = onAddGatewayAccount,
             onTestGatewayAccount = onTestGatewayAccount,
@@ -437,6 +445,11 @@ private fun SettingsPageBody(
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
+    /** 选路策略（顺序/轮询 + 粘性）。 */
+    gatewayRoutingPolicy: dev.praxis.core.gateway.GatewayRoutingPolicy =
+        dev.praxis.core.gateway.GatewayRoutingPolicy(),
+    gatewayRoutingPolicyBroken: Boolean = false,
+    onGatewayPolicyChange: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit = {},
     /** 添加账号（null = 未接线，页面不画入口）。 */
     onAddGatewayAccount: (suspend (String, String, String, String) -> Result<String>)? = null,
     /** 测试连接（地址 / Key）。null = 未接线。 */
@@ -698,6 +711,9 @@ private fun SettingsPageBody(
         )
         PraxisRoute.SettingsGatewayRouting -> dev.praxis.feature.gateway.GatewayRoutingScreen(
             modelName = gatewayQueueModelName,
+            policy = gatewayRoutingPolicy,
+            policyBroken = gatewayRoutingPolicyBroken,
+            onPolicyChange = onGatewayPolicyChange,
             entries = gatewayQueueEntries,
             accountNames = gatewayAccountNames,
             modifier = modifier,

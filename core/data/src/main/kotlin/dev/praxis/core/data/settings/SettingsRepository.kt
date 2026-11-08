@@ -660,6 +660,18 @@ class SettingsRepository(
     suspend fun setImageGenTargetJson(text: String) = put(KEY_IMAGEGEN_TARGET, text)
 
     /**
+     * 网关选路策略（文档 §9.4）：顺序/轮询 + 粘性开关。
+     *
+     * 存 JSON 原文，编解码在 `core:gateway` 的 GatewayRoutingPolicyCodec（11 例单测）。
+     * 解不开时保留原文，由界面提示 —— 不静默退回默认策略（那会让用户以为自己的设置丢了）。
+     */
+    val gatewayRoutingPolicyJson: Flow<String?> =
+        dataStore.data.map { it[KEY_GATEWAY_ROUTING_POLICY] }
+
+    suspend fun setGatewayRoutingPolicyJson(text: String) =
+        put(KEY_GATEWAY_ROUTING_POLICY, text)
+
+    /**
      * 用户改写过的**内置人格**（覆盖 Praxis 出厂那段）。空串 = 用出厂人格。
      *
      * ## 为什么要单独一个键，而不是并进 [setSystemPrompt]
@@ -1357,6 +1369,9 @@ private val KEY_GATEWAY_ENABLED = booleanPreferencesKey("gateway_enabled")
 
 /** 生图目标（本地模型或服务商模型）的 JSON 原文，见 [SettingsRepository.imageGenTargetJson]。 */
 private val KEY_IMAGEGEN_TARGET = stringPreferencesKey("imagegen_target")
+
+/** 网关选路策略（顺序/轮询 + 粘性），见 [SettingsRepository.gatewayRoutingPolicyJson]。 */
+private val KEY_GATEWAY_ROUTING_POLICY = stringPreferencesKey("gateway_routing_policy")
 
 /**
  * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。

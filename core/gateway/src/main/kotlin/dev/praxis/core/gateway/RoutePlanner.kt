@@ -128,6 +128,15 @@ object RoutePlanner {
         stickyAccountId: String?,
         /** 各家的运行期用量；空表示没有配置家级限流。 */
         providerUsages: List<ProviderUsage> = emptyList(),
+        /** 选路策略（文档 §9.4）：顺序/轮询 + 粘性开关。 */
+        policy: GatewayRoutingPolicy = GatewayRoutingPolicy(),
+        /**
+         * 轮询的起始偏移（单调递增的请求计数）。
+         *
+         * 用整数而不是时间：纯函数才能单测，而且「每个请求转一位」正是轮询的定义。
+         * 顺序策略忽略它。
+         */
+        rotationSeed: Int = 0,
     ): RoutePlan {
         val skipped = mutableListOf<SkippedAttempt>()
         val usable = mutableListOf<PlannedAttempt>()
@@ -169,11 +178,20 @@ object RoutePlanner {
             compareBy({ priorityOf[it.accountId] ?: 0 }, { groupOrder[it.accountId] ?: 0 }),
         )
 
-        val stickyUsable = stickyAccountId != null &&
-            ordered.any { it.accountId == stickyAccountId }
+        // 轮询：把队列整体转 rotationSeed 位。顺序策略下这一步是空操作。
+        if (policy.strategy == RoutingStrategy.RoundRobin && ordered.size > 1) {
+            val offset = ((rotationSeed % ordered.size) + ordered.size) % ordered.size
+            ordered = ordered.drop(offset) + ordered.take(offset)
+        }
+
+        // 粘性关掉时按「没有上次账号」处理 —— 这也是用户按下开关时期望的行为：
+        // 每个请求重新挑，而不是继续贴着上一个账号。
+        val effectiveSticky = if (policy.stickyEnabled) stickyAccountId else null
+        val stickyUsable = effectiveSticky != null &&
+            ordered.any { it.accountId == effectiveSticky }
         if (stickyUsable) {
             // 粘性命中：把它提到最前（其余仍按上面的顺序作为后备）。
-            ordered = ordered.sortedBy { if (it.accountId == stickyAccountId) 0 else 1 }
+            ordered = ordered.sortedBy { if (it.accountId == effectiveSticky) 0 else 1 }
         }
 
         // 垫底排到队尾。
@@ -182,7 +200,9 @@ object RoutePlanner {
         return RoutePlan(
             attempts = ordered,
             skipped = skipped,
-            stickyCleared = stickyAccountId != null && !stickyUsable,
+            // 用 effectiveSticky：粘性关掉时不该报「粘性被清掉」（那会让界面提示一条
+            // 用户根本没触发的状态变化）。
+            stickyCleared = effectiveSticky != null && !stickyUsable,
         )
     }
 

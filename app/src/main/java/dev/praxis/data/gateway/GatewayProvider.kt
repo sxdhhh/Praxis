@@ -53,6 +53,12 @@ class GatewayProvider(
     /** 内置家 id 到地址的映射；自定义家的地址在 provider 表里（优先查表）。 */
     private val providerBaseUrl: (String) -> String? = { null },
     private val state: RouteState,
+    /**
+     * 选路策略（文档 §9.4）。**每次现取**：用户在设置页改了策略，
+     * 下一句就该按新策略走，而不是重启 App 才生效。
+     */
+    private val policy: () -> dev.praxis.core.gateway.GatewayRoutingPolicy =
+        { dev.praxis.core.gateway.GatewayRoutingPolicy() },
     private val budget: FailoverBudget = FailoverBudget(),
     private val customHeaders: List<CustomHeader> = emptyList(),
     private val client: OkHttpClient = OkHttpClient(),
@@ -92,6 +98,7 @@ class GatewayProvider(
             // 带图请求要先按能力位过滤（文档 13 的验收项，也是 #408 一次白撞 9 次的原因）。
             needsImages = request.messages.any { it.images.isNotEmpty() },
             budget = budget,
+            policy = policy(),
         )
 
         var emitted = false
