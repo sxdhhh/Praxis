@@ -44,6 +44,17 @@ FAILED  dev.praxis.core.plugin.ExtensionSnapshotTest:   9 tests, 1 failures
 > 因此「路由页 5 例 + 错误映射 6 例」这 11 条**已确认通过**（套件 108→111、用例 1143→1160，
 > 失败数不变）。此前交接时 verify 仍在跑，属于未确认状态。
 
+再往后一次全绿（提交 **7b0163c**，2026-11-08，导出功能）：
+
+```
+build   success   (:app 与 :feature 都编过 —— 这一步就是 UI 接线的编译验证)
+verify  success
+test suites: 113   tests: 1175   failed: 9
+```
+
+较 58cbd54：套件 +2、用例 +15（`GatewayExportPlanTest` 10 条 + `GatewayExportWriterTest` 5 条），
+失败数仍是 9（同一批 core:plugin 债）。
+
 | | 网关动工前 | 现在 | 差 |
 |---|---|---|---|
 | 套件 | 87 | 108 | +21 |
@@ -78,9 +89,11 @@ FAILED  dev.praxis.core.plugin.ExtensionSnapshotTest:   9 tests, 1 failures
 ## 五、明确未实现（不是忘了，是还没到）
 
 1. **内置家（21 家）**：没有地址与协议实现，导入时会被跳过并写明理由。依赖 P5 的 Rust 内核 + JNI
-2. **导出**：**逻辑层已完成**（`GatewayExportPlanner` 计划 + `GatewayExportWriter` 落盘，15 条单测）；
-   **界面与接线还没做** —— 现在只能靠代码调用，用户点不到。计划层已如实处理两处缺口：
-   路由/重试/超时配置 Praxis 尚未持久化（note 里写明）、`apiKeys` 未包含（P6 才有网关 Key）
+2. ~~导出~~ **已完成**（提交 7b0163c）：`GatewayExportPlanner`（计划）+ `GatewayExportWriter`（落盘）
+   + 导入导出页两个入口（仅配置 / 含凭证，后者二次确认）+ `:app` 接线，CI 编译通过、15 条单测全绿。
+   **设备端未复验**：还没在真机上点过「导出」、确认文件真的出现在
+   `Android/data/dev.praxis/files/exports/accounts/` 下。
+   两处已知缺口由计划层如实写在 notes 里：路由/重试/超时 Praxis 尚未持久化、`apiKeys` 未包含（P6）
 3. **添加账号三级流程 + H5 容器**：目前只能靠粘贴导入，不能手动新建
 4. **模型页自动填网关模型清单**：现在要手动敲模型名
 5. **路由页 / 模型管理页**：候选队列可视化（谁被跳过、为什么）还没有
@@ -119,4 +132,4 @@ FAILED  dev.praxis.core.plugin.ExtensionSnapshotTest:   9 tests, 1 failures
 2. 路由页：候选队列可视化，把 RoutePlan.skipped 的原因展示出来
 3. core:ai 补三类错误，让 413 与内容拦截落到正确分类
 4. gateway_enabled 总开关（文档 11 要求的回滚闸）
-5. 导出（账号文件 + config 片段）
+5. ~~导出~~（已完成，见 §五-2）
