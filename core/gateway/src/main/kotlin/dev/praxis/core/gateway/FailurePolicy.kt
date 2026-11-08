@@ -87,6 +87,21 @@ object FailurePolicy {
      *        用 [DEFAULT_QUOTA_COOLDOWN_MS]。注意这里收的是**时刻**不是时长。
      * @param nowMillis 当前时刻，用于把「重置时刻」换算成冷却时长
      */
+    /**
+     * 该失败对应哪种动作。
+     *
+     * 单独抽出来是为了让「只需要动作、不关心冷却时长」的调用方（换号循环）
+     * 不必为了拿一个枚举而编造一个 now 时间戳。表只有一份，decide 也走它。
+     */
+    fun actionFor(kind: FailureKind): FailoverAction = when (kind) {
+        FailureKind.QuotaLimited -> FailoverAction.MarkQuotaAndSwitch
+        FailureKind.CredentialExpired -> FailoverAction.TryRefreshThenSwitch
+        FailureKind.ContentBlocked -> FailoverAction.SwitchProviderOnly
+        FailureKind.PayloadTooLarge -> FailoverAction.NoSwitch
+        FailureKind.UpstreamError -> FailoverAction.BackoffAndSwitch
+        FailureKind.InvalidRequest -> FailoverAction.FailFast
+    }
+
     fun decide(
         kind: FailureKind,
         nowMillis: Long,
