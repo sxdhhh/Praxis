@@ -409,6 +409,7 @@ class PluginEntryPointTest {
         // 拿它自己的 id 去渲染，真机上的表现是「入口没有可渲染的 screen」。
         val nav = PluginEntryPoint(
             id = "demo_sidebar",
+            title = LocalizedText.EMPTY,
             kind = PluginEntryPoint.Kind.Navigation,
             surface = EntrySurfaces.MAIN_SIDEBAR_PLUGINS,
             routeId = "toolpkg:com.demo.panel:ui:demo",
@@ -421,6 +422,7 @@ class PluginEntryPointTest {
     fun 页面入口指向自己() {
         val route = PluginEntryPoint(
             id = "demo",
+            title = LocalizedText.EMPTY,
             kind = PluginEntryPoint.Kind.UiRoute,
             routeId = "toolpkg:com.demo.panel:ui:demo",
         )
@@ -432,6 +434,7 @@ class PluginEntryPointTest {
     fun 没有路由时回落自己的_id() {
         val action = PluginEntryPoint(
             id = "quick",
+            title = LocalizedText.EMPTY,
             kind = PluginEntryPoint.Kind.Navigation,
             surface = EntrySurfaces.TOOLBOX,
             action = PluginActionHook(function = "onQuick"),

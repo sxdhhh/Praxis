@@ -182,6 +182,6 @@ class PluginActivationTest {
 
         assertTrue("不该算装载成功", report.loaded.isEmpty())
         assertEquals(1, report.failed.size)
-        assertTrue('原因要指出清单问题：' + report.failed[0].errors.toString(), report.failed[0].errors.any { it.contains("清单问题") })
+        assertTrue("原因要指出清单问题：" + report.failed[0].errors.toString(), report.failed[0].errors.any { it.contains("清单问题") })
     }
 }
