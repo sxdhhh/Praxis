@@ -365,6 +365,12 @@ fun PraxisApp(
         ?: dev.praxis.core.gateway.GatewayRoutingPolicy()
     val gatewayRoutingPolicyBroken = gatewayRoutingPolicyDecoded?.isFailure == true
 
+    // 熔断四参交给 RouteState。用 update 而不是重建 RouteState：重建会连带清空
+    // 当前的冷却/熔断/退避运行态 —— 那是用户改参数时没要求的副作用。
+    LaunchedEffect(gatewayRoutingPolicy) {
+        gatewayRouteState.updateBreakerConfig(gatewayRoutingPolicy.toBreakerConfig())
+    }
+
     // 候选队列：按当前模型算一遍选路结果（不发请求，纯计算）。
     var gatewayQueueEntries by remember {
         mutableStateOf<List<dev.praxis.core.gateway.GatewayQueueEntry>>(emptyList())

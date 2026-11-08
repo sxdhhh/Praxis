@@ -121,6 +121,56 @@ class GatewayRoutingPolicyTest {
         assertNull(GatewayRoutingPolicyCodec.decode("  "))
     }
 
+    // ── 容错四参 ──
+
+    @Test
+    fun `熔断四参往返`() {
+        val policy = GatewayRoutingPolicy(
+            breakerEnabled = true,
+            breakerFailureThreshold = 7,
+            breakerOpenMillis = 120_000L,
+            breakerSuccessThreshold = 3,
+        )
+        assertEquals(policy, GatewayRoutingPolicyCodec.decode(GatewayRoutingPolicyCodec.encode(policy))?.getOrNull())
+    }
+
+    @Test
+    fun `老配置缺四参时用默认值`() {
+        // schema 演进，不是兜底：老配置的含义没变，只是多了几个没配过的项。
+        val decoded = GatewayRoutingPolicyCodec
+            .decode("""{"strategy":"RoundRobin","stickyEnabled":false}""")
+            ?.getOrNull()
+        assertEquals(RoutingStrategy.RoundRobin, decoded?.strategy)
+        assertEquals(false, decoded?.breakerEnabled)
+        assertEquals(3, decoded?.breakerFailureThreshold)
+        assertEquals(60_000L, decoded?.breakerOpenMillis)
+    }
+
+    @Test
+    fun `四参类型不对算坏内容`() {
+        // 「写了中文」不能当成没配过 —— 那样会静默用默认阈值跑熔断。
+        assertTrue(
+            GatewayRoutingPolicyCodec
+                .decode("""{"strategy":"Sequential","stickyEnabled":true,"breakerFailureThreshold":"三次"}""")
+                ?.isFailure == true,
+        )
+    }
+
+    @Test
+    fun `toBreakerConfig 逐字段对齐`() {
+        val policy = GatewayRoutingPolicy(
+            breakerEnabled = true,
+            breakerFailureThreshold = 5,
+            breakerOpenMillis = 90_000L,
+            breakerSuccessThreshold = 2,
+        )
+        val config = policy.toBreakerConfig()
+        assertTrue(config.enabled)
+        assertEquals(5, config.failureThreshold)
+        assertEquals(90_000L, config.openMillis)
+        assertEquals(2, config.successThreshold)
+    }
+
     @Test
     fun `坏内容与不认识的策略都算失败`() {
         assertTrue(GatewayRoutingPolicyCodec.decode("{bad")!!.isFailure)

@@ -37,7 +37,11 @@ data class BreakerConfig(
  */
 class RouteState(
     private val clock: () -> Long,
-    private val breaker: BreakerConfig,
+    /**
+     * 熔断四参。**可变**：用户在设置页改了参数，下一次判定就该按新参数走，
+     * 而重建 RouteState 会连带清空当前的冷却/熔断/退避运行态 —— 那是用户没要求的副作用。
+     */
+    private var breaker: BreakerConfig,
 ) {
 
     private class BackoffEntry(var untilMillis: Long, var attempts: Int)
@@ -100,6 +104,16 @@ class RouteState(
      * 文档 6.5 的签名里只有 breakerOpen（布尔）。但界面上要显示「还有多久恢复」，
      * 布尔答不了这个问题 —— 于是补一个只读访问器，与 markSink / markLimit 同理。
      */
+    /**
+     * 换一组熔断参数（设置页改了就调它）。
+     *
+     * 刻意**不动**已有的失败计数与打开状态：改阈值不该把某个正在冷却的账号立刻放出来，
+     * 也不该把健康的账号提前打开。新参数从下一次判定开始生效。
+     */
+    fun updateBreakerConfig(config: BreakerConfig) {
+        breaker = config
+    }
+
     fun breakerUntil(id: String): Long? {
         if (!breaker.enabled) return null
         return breakerOpenUntil[id]?.takeIf { it > clock() }

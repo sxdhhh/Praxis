@@ -144,7 +144,13 @@ test suites: 118   tests: 1252   failed: 9
    合并规则在 `core:gateway/GatewayModelOptions`（5 例单测：结构化优先、大小写不敏感去重）。
    **仍缺数据源**：`gateway_model` 表至今没有写入路径，所以眼下候选里只有目录名。
    要真正用上结构化条目，需要「模型管理页」（手动增删改 + 逐条启停）或等 P5 的内置家清单。
-5. **路由页 / 模型管理页**：候选队列可视化（谁被跳过、为什么）还没有
+5. ~~路由页 / 模型管理页~~ **已落地**：
+   - 候选队列可视化（位次 · 账号 · 可用/跳过原因）—— 早已有；
+   - **策略区**（提交 2bed3ac）：顺序 / 轮询 + 粘性开关，真正接进 `RoutePlanner` /
+     `RouterSession` / `GatewayProvider` 与队列预测（11 例单测）；
+   - **容错区**（本轮）：熔断四参（开关 / 阈值 / 冷却秒 / 恢复次数）持久化并接到 `RouteState`，
+     用 `updateBreakerConfig` 而不是重建 —— 重建会连带清空当前冷却/熔断运行态。
+   - 模型管理页（提交 2bed3ac 之前）：`gateway_model` 的写入口（添加 / 逐条启停 / 删除）。
 6. ~~gateway_enabled 总开关~~ **已完成**（提交 87328ae）：`GatewayGate`（纯函数，4 例单测）
    决定「非网关档案不受影响 / 网关档案 + 开 = 走网关 / 网关档案 + 关 = GatewayDisabled」，
    概览页顶部有开关（`MiuixSwitchWidget`）。关掉时**明确报错而不回落** ——

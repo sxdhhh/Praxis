@@ -1,5 +1,16 @@
 package dev.praxis.feature.gateway
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import dev.praxis.ui.widgets.MiuixAnimatedDialog
+import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.basic.Card
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
@@ -59,6 +70,7 @@ fun GatewayRoutingScreen(
     val topInset = dev.praxis.ui.design.component.LocalTopBarInset.current
     // 底栏同理：滚动终点必须抬高，否则最后一项被压住看不见。
     val scrollLimit = dev.praxis.ui.design.component.LocalScrollBottomLimit.current
+    var faultDialogVisible by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -131,6 +143,38 @@ fun GatewayRoutingScreen(
             }
         }
 
+        // ── 容错（§9.4）──
+        item(key = "__routing_fault_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Rule,
+                title = "容错",
+                subtitle = "熔断：连续失败到阈值后暂时跳过该账号",
+            )
+        }
+        item(key = "__routing_fault_switch__") {
+            GatewayCard {
+                MiuixSwitchWidget(
+                    title = "启用熔断",
+                    description = "关掉时上游错误仍会退避换号，只是不会把账号「熔断打开」",
+                    checked = policy.breakerEnabled,
+                    onCheckedChange = { enabled ->
+                        onPolicyChange(policy.copy(breakerEnabled = enabled))
+                    },
+                )
+            }
+        }
+        item(key = "__routing_fault_numbers__") {
+            GatewayCard {
+                MiuixNavigationItemWidget(
+                    title = "熔断参数",
+                    description = "阈值 " + policy.breakerFailureThreshold + " 次 · 冷却 " +
+                        (policy.breakerOpenMillis / 1000) + " 秒 · 恢复 " +
+                        policy.breakerSuccessThreshold + " 次",
+                    onClick = { faultDialogVisible = true },
+                )
+            }
+        }
+
         item(key = "__routing_queue_title__") {
             SettingsSectionHeader(
                 icon = Icons.Outlined.Rule,
@@ -185,6 +229,112 @@ fun GatewayRoutingScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    if (faultDialogVisible) {
+        FaultParamsDialog(
+            policy = policy,
+            onDismiss = { faultDialogVisible = false },
+            onConfirm = { updated ->
+                onPolicyChange(updated)
+                faultDialogVisible = false
+            },
+        )
+    }
+}
+
+/**
+ * 熔断参数弹窗（文档 §9.4 的三个数值）。
+ *
+ * ## 为什么用文本框而不是步进器
+ *
+ * 仓库里没有 `MiuixNumPicker` 的封装，自写一个步进器就违反了「不自写控件」这条纪律。
+ * 文本框是既有控件，配一句范围说明足够用；数值不合理（<=0）时**不保存并说明**。
+ */
+@Composable
+private fun FaultParamsDialog(
+    policy: dev.praxis.core.gateway.GatewayRoutingPolicy,
+    onDismiss: () -> Unit,
+    onConfirm: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit,
+) {
+    var threshold by remember {
+        mutableStateOf(policy.breakerFailureThreshold.toString())
+    }
+    var cooldownSeconds by remember {
+        mutableStateOf((policy.breakerOpenMillis / 1000).toString())
+    }
+    var successes by remember {
+        mutableStateOf(policy.breakerSuccessThreshold.toString())
+    }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+        Card {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(text = "熔断参数", style = MiuixTheme.textStyles.body1)
+                Text(
+                    text = "三个值都必须大于 0；改完从下一次判定开始生效（不会重置已有的冷却）",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(12.dp))
+                TextField(
+                    value = threshold,
+                    onValueChange = { threshold = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "连续失败多少次后打开",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = cooldownSeconds,
+                    onValueChange = { cooldownSeconds = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "打开后保持多少秒",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = successes,
+                    onValueChange = { successes = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "恢复所需的成功次数（当前只记录）",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                error?.let { text ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = text,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.error,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                MiuixNavigationItemWidget(
+                    title = "保存",
+                    description = "不重置已有的冷却与熔断状态",
+                    onClick = {
+                        val t = threshold.trim().toIntOrNull()
+                        val c = cooldownSeconds.trim().toLongOrNull()
+                        val s = successes.trim().toIntOrNull()
+                        if (t == null || c == null || s == null || t <= 0 || c <= 0 || s <= 0) {
+                            error = "三个值都必须是大于 0 的整数"
+                        } else {
+                            onConfirm(
+                                policy.copy(
+                                    breakerFailureThreshold = t,
+                                    breakerOpenMillis = c * 1000L,
+                                    breakerSuccessThreshold = s,
+                                ),
+                            )
+                        }
+                    },
+                )
             }
         }
     }
