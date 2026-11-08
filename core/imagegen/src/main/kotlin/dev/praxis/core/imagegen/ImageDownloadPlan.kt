@@ -61,6 +61,14 @@ data class ImageDownloadPlan(
     val partPaths: List<File> get() = targets.map { File(targetDir, it.localName + PART_SUFFIX) }
 
     val zipTempFile: File get() = File(targetDir, zipTempName)
+
+    /** 单 zip 包解压前那个压缩包（多文件包为 null）。 */
+    val extractedZipFile: File?
+        get() = if (isZip) {
+            targets.firstOrNull()?.let { File(targetDir, it.localName) }
+        } else {
+            null
+        }
     val extractTempDir: File get() = File(targetDir, extractTempName)
 
     companion object {
@@ -168,10 +176,20 @@ object SpaceCheck {
  */
 object DownloadCleanup {
 
+    /**
+     * 需要删除的残留文件。
+     *
+     * 除了 `.part`，**单 zip 包还要带上解压前那个压缩包本体**：
+     * 解压失败时如果把它留在模型目录里，「目录非空」这条判据会让
+     * [ImageModelCatalog.isInstalled] 误报「已安装」—— 用户看到一个装不上的模型
+     * 被标成已装好，而引擎一启动就失败。
+     */
     fun staleFiles(plan: ImageDownloadPlan): List<File> =
-        plan.partPaths + listOfNotNull(
-            plan.zipTempFile.takeIf { plan.zipTempName.isNotEmpty() },
-        )
+        plan.partPaths +
+            listOfNotNull(
+                plan.zipTempFile.takeIf { plan.zipTempName.isNotEmpty() },
+                plan.extractedZipFile,
+            )
 
     /** 需要整目录删除的临时解压目录。 */
     fun staleDirs(plan: ImageDownloadPlan): List<File> = listOf(plan.extractTempDir)

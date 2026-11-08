@@ -96,6 +96,8 @@ class ImageDownloadPlanTest {
         assertEquals("AnythingV5.zip.part", zipPlan.zipTempName)
         assertTrue(zipPlan.zipTempFile.name.endsWith(".part"))
         assertTrue(DownloadCleanup.staleFiles(zipPlan).any { it.name == "AnythingV5.zip.part" })
+        // 压缩包本体也要在清单里：解压失败时它若留在目录里，「目录非空」会让 isInstalled 误报已安装。
+        assertTrue(DownloadCleanup.staleFiles(zipPlan).any { it.name == "AnythingV5.zip" })
     }
 
     @Test

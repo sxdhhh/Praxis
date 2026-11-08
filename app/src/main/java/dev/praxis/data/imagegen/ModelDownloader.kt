@@ -29,7 +29,16 @@ sealed interface DownloadResult {
      * [spaceWasUnknown] 为 true 表示下载前**无法预估**所需空间（`approximateSize` 解析不出来），
      * 不是「预检通过」—— 这两种情况给用户的文案必须不同。
      */
-    data class Completed(val spaceWasUnknown: Boolean) : DownloadResult
+    data class Completed(
+        val spaceWasUnknown: Boolean,
+        /**
+         * 解压后删不掉的压缩包文件名；null = 删干净了。
+         *
+         * 不算失败（模型已经能用），但必须带出去说一声 —— 它会一直占着空间，
+         * 下次空间预检也会把它算进去。静默忽略的话，用户看到的是一块不明去向的占用。
+         */
+        val leftoverZipName: String? = null,
+    ) : DownloadResult
 
     /** 空间不足，一个字节都没写。 */
     data class InsufficientSpace(val requiredBytes: Long, val freeBytes: Long) : DownloadResult
@@ -81,7 +90,7 @@ class ModelDownloader(
                 return DownloadResult.InsufficientSpace(space.requiredBytes, space.freeBytes)
             else -> Unit
         }
-        val spaceUnknown = plan.requiredBytes == null
+        val spaceWasUnknown = plan.requiredBytes == null
 
         // ② 逐个文件下载。
         val total = plan.requiredBytes
@@ -122,10 +131,9 @@ class ModelDownloader(
             if (plan.isZip) {
                 val zip = File(plan.targetDir, plan.targets.first().localName)
                 extractZip(zip, plan)
-                if (!zip.delete()) {
-                    // 删不掉不算致命（模型已经能用），但要说出来 —— 下次预检会把它算进占用。
-                    return DownloadResult.Completed(spaceWasUnknown)
-                }
+                // 删不掉不算失败（模型已经能用），但要把名字带出去 —— 见 Completed 的说明。
+                val leftover = if (zip.delete()) null else zip.name
+                return DownloadResult.Completed(spaceWasUnknown, leftover)
             } else if (plan.markerFileName.isNotEmpty()) {
                 // ④ 多文件：写标记。这一步之后 [ImageModelCatalog.isInstalled] 才会认。
                 File(plan.targetDir, plan.markerFileName).writeText("")
