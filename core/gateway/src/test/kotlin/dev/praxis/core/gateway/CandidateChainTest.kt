@@ -161,4 +161,80 @@ class CandidateChainTest {
         assertTrue(result.candidates.isEmpty())
         assertTrue(result.unresolvedMappings.isEmpty())
     }
+
+    // ── 大小写与遮蔽（文档 5.4，2026-11-08 修正）──
+
+    @Test
+    fun 原生匹配忽略大小写() {
+        // 文档 5.4：网关全链路 eq_ignore_ascii_case。精确比较会让
+        // 「模型页填 gpt-4o、配置里写 GPT-4o」匹配不上，表现只是「没有可用候选」。
+        val result = CandidateChain.of(
+            requestedModel = "GPT-X",
+            nativeModels = native,
+            mappings = emptyList(),
+            defaultProvider = null,
+        )
+
+        assertEquals(listOf("gpt-x", "gpt-x"), result.candidates.map { it.wireModel })
+    }
+
+    @Test
+    fun 映射别名匹配忽略大小写() {
+        val result = CandidateChain.of(
+            requestedModel = "FAST",
+            nativeModels = native,
+            mappings = listOf(ModelMapping(alias = "fast", target = "m-a", provider = "openai")),
+            defaultProvider = null,
+        )
+
+        assertEquals(listOf("m-a"), result.candidates.map { it.wireModel })
+    }
+
+    @Test
+    fun 停用的条目不参与选路() {
+        val entries = listOf(
+            ModelEntry(provider = "openai", id = "gpt-x", source = ModelSource.Native),
+            ModelEntry(provider = "anthropic", id = "gpt-x", source = ModelSource.Native, enabled = false),
+        )
+
+        val result = CandidateChain.ofEntries(
+            requestedModel = "gpt-x",
+            entries = entries,
+            mappings = emptyList(),
+            defaultProvider = null,
+        )
+
+        assertEquals(listOf("openai"), result.candidates.map { it.provider })
+    }
+
+    @Test
+    fun 条目候选链与原生链一致() {
+        val entries = listOf(
+            ModelEntry(provider = "openai", id = "gpt-x", source = ModelSource.Native),
+            ModelEntry(provider = "anthropic", id = "GPT-X", source = ModelSource.Native),
+        )
+
+        val result = CandidateChain.ofEntries("gpt-x", entries, emptyList(), null)
+
+        // 顺带证明 ofEntries 没有偷偷改写成大小写：wireModel 仍是原文。
+        assertEquals(listOf("gpt-x", "GPT-X"), result.candidates.map { it.wireModel })
+    }
+
+    @Test
+    fun 遮蔽检测只差大小写算冲突() {
+        val collisions = CandidateChain.detectCaseCollisions(listOf("fast", "FAST", "slow"))
+
+        assertEquals(listOf(CaseCollision("fast", "FAST")), collisions)
+    }
+
+    @Test
+    fun 完全相同的重复不算遮蔽() {
+        // 同名重复是列表里的两个位置，不是遮蔽；文档要求拦的是「只差大小写」。
+        assertTrue(CandidateChain.detectCaseCollisions(listOf("fast", "fast")).isEmpty())
+    }
+
+    @Test
+    fun 没有冲突时返回空() {
+        assertTrue(CandidateChain.detectCaseCollisions(listOf("a", "b", "c")).isEmpty())
+    }
 }
