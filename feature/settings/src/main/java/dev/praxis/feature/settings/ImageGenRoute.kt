@@ -4,6 +4,9 @@ import androidx.compose.material.icons.outlined.CloudDownload
 import dev.praxis.ui.widgets.MiuixSwitchWidget
 import dev.praxis.ui.widgets.MiuixAnimatedDialog
 import top.yukonga.miuix.kmp.basic.TextField
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Arrangement
@@ -75,6 +78,10 @@ fun ImageGenRoute(
     downloadSettings: dev.praxis.core.imagegen.ImageDownloadSettings =
         dev.praxis.core.imagegen.ImageDownloadSettings(),
     onDownloadSettingsChange: (dev.praxis.core.imagegen.ImageDownloadSettings) -> Unit = {},
+    /** 生图默认参数（画布 / 采样）。模型没说这些参数时按它走。 */
+    imageDefaults: dev.praxis.core.imagegen.ImageGenDefaults =
+        dev.praxis.core.imagegen.ImageGenDefaults(),
+    onImageDefaultsChange: (dev.praxis.core.imagegen.ImageGenDefaults) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // 组合局部变量只能在组合期读一次、闭包捕获；写进 onClick 的 lambda 里会在点击时越界
@@ -85,6 +92,7 @@ fun ImageGenRoute(
     var probe by remember { mutableStateOf<ProbeUi>(ProbeUi.Probing) }
     var targetPickerVisible by remember { mutableStateOf(false) }
     var sourceDialogVisible by remember { mutableStateOf(false) }
+    var defaultsDialogVisible by remember { mutableStateOf(false) }
 
     // 进页面探一次；点「重新检测」把 tick 加一即重探。
     LaunchedEffect(probeTick) {
@@ -271,6 +279,36 @@ fun ImageGenRoute(
         }
 
         // ── 还没做的部分 ──
+        // ── 画布与采样（§7.1）──
+        //
+        // **偏离文档一处**：文档把它们拆成「画布」「采样」两个分区，这里合成一个。
+        // 理由：五个参数（宽/高/步数/CFG/负向提示词）在同一张弹窗里编辑，
+        // 拆成两个分区意味着用户要在两个弹窗之间来回改同一组相关参数。
+        item(key = "__canvas_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Tune,
+                title = "画布与采样",
+                subtitle = "AI 没说这些参数时按这里的走",
+            )
+        }
+        item(key = "__canvas_row__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "默认参数",
+                    description = imageDefaults.width.toString() + "×" +
+                        imageDefaults.height.toString() + " · " + imageDefaults.steps + " 步 · CFG " +
+                        formatCfg(imageDefaults.cfg) +
+                        if (imageDefaults.negative.isBlank()) "" else " · 负向已设",
+                    onClick = { defaultsDialogVisible = true },
+                )
+            }
+        }
+
         // ── 下载源（§7.2）──
         item(key = "__download_title__") {
             SettingsSectionHeader(
@@ -341,6 +379,17 @@ fun ImageGenRoute(
                 }
             }
         }
+    }
+
+    if (defaultsDialogVisible) {
+        GenerationParamsDialog(
+            defaults = imageDefaults,
+            onDismiss = { defaultsDialogVisible = false },
+            onConfirm = { updated ->
+                onImageDefaultsChange(updated)
+                defaultsDialogVisible = false
+            },
+        )
     }
 
     if (sourceDialogVisible) {
@@ -415,7 +464,8 @@ private fun reasonLine(result: EngineAvailability.Unavailable): String {
 private val PLAN_LINES = listOf(
     "模型库：内置清单 + 下载（单 zip / 多文件）+ 导入",
     "模型提供方：下载源、仅 Wi-Fi、并发数、代理",
-    "画布 / 采样 / 性能 / 输出：那些参数现在只能由 AI 通过工具改",
+    "模型提供方：下载源与仅 Wi-Fi 已可用；并发数要先把下载改成并行，代理要等全局代理设置",
+    "性能 / 输出：引擎启动参数（预热、后端选择）与自动存相册还没接",
     "诊断：上次启动耗时、引擎日志尾巴",
 )
 
@@ -487,6 +537,126 @@ private fun DownloadSourceDialog(
                     onClick = {
                         baseUrl = dev.praxis.core.imagegen.ImageDownloadSettings.DEFAULT_BASE_URL
                         error = null
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** CFG 显示成 7 而不是 7.0（整数就省掉小数点）。 */
+private fun formatCfg(cfg: Float): String =
+    if (cfg == cfg.toInt().toFloat()) cfg.toInt().toString() else cfg.toString()
+
+/**
+ * 默认参数弹窗（文档 §7.1 的画布 + 采样）。
+ *
+ * ## 校验用 core 的规则
+ *
+ * `ImageGenDefaultsRules` 与 `generate_image` 工具读的是同一套边界（256~1024 /
+ * 1~60 / 1~20）。页面自己再判一遍必然漂移，表现是「设置页说能存、生成时被拒」。
+ */
+@Composable
+private fun GenerationParamsDialog(
+    defaults: dev.praxis.core.imagegen.ImageGenDefaults,
+    onDismiss: () -> Unit,
+    onConfirm: (dev.praxis.core.imagegen.ImageGenDefaults) -> Unit,
+) {
+    var width by remember { mutableStateOf(defaults.width.toString()) }
+    var height by remember { mutableStateOf(defaults.height.toString()) }
+    var steps by remember { mutableStateOf(defaults.steps.toString()) }
+    var cfg by remember { mutableStateOf(formatCfg(defaults.cfg)) }
+    var negative by remember { mutableStateOf(defaults.negative) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+        Card {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(text = "默认生成参数", style = MiuixTheme.textStyles.body1)
+                Text(
+                    text = "AI 没在工具参数里指定时按这里的值走；它自己指定了就听它的",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(12.dp))
+                TextField(
+                    value = width,
+                    onValueChange = { width = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "宽（256~1024）",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = height,
+                    onValueChange = { height = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "高（256~1024）",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = steps,
+                    onValueChange = { steps = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "步数（1~60）",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = cfg,
+                    onValueChange = { cfg = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "CFG（1~20）",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = negative,
+                    onValueChange = { negative = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "负向提示词（可留空）",
+                    useLabelAsPlaceholder = true,
+                    minLines = 2,
+                    maxLines = 4,
+                )
+                error?.let { text ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = text,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.error,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                MiuixNavigationItemWidget(
+                    title = "保存",
+                    description = "越界不会保存（不静默夹到边界）",
+                    onClick = {
+                        val candidate = dev.praxis.core.imagegen.ImageGenDefaults(
+                            width = width.trim().toIntOrNull() ?: -1,
+                            height = height.trim().toIntOrNull() ?: -1,
+                            steps = steps.trim().toIntOrNull() ?: -1,
+                            cfg = cfg.trim().toFloatOrNull() ?: Float.NaN,
+                            negative = negative,
+                            scheduler = defaults.scheduler,
+                        )
+                        val invalid = dev.praxis.core.imagegen.ImageGenDefaultsRules
+                            .validate(candidate)
+                        if (invalid != null) {
+                            error = invalid
+                        } else {
+                            onConfirm(candidate)
+                        }
                     },
                 )
             }

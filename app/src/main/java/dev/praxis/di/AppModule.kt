@@ -477,6 +477,13 @@ val appModule = module {
                         remoteGenerator = get(),
                         reportProgress = { progress -> get<dev.praxis.core.imagegen.ImageGenProgressBus>().publish(progress) },
                         apiKey = { settings.apiKey() },
+                        // 设置页的画布/采样默认值：模型没说尺寸步数时就按它走。
+                        imageDefaults = {
+                            dev.praxis.core.imagegen.ImageGenDefaultsCodec
+                                .decode(settings.imageGenDefaultsJson.first())
+                                ?.getOrNull()
+                                ?: dev.praxis.core.imagegen.ImageGenDefaults()
+                        },
                         // 档位校验暂时只做全局范围（256~1024）：目录里每个模型只记了一个
                         // 默认尺寸，拿它当「唯一可用档位」会把 512x768 这类合法请求拦掉。
                         availableSizes = { emptyList() },

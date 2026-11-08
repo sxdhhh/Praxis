@@ -684,6 +684,17 @@ class SettingsRepository(
         put(KEY_IMAGEGEN_DOWNLOAD, text)
 
     /**
+     * 生图默认参数（文档 §7.1 的画布 / 采样）：宽高、步数、CFG、负向提示词、调度器。
+     *
+     * 它们是 `generate_image` 工具在模型**没说**这些参数时的取值 —— 否则设置页那两个
+     * 分区就是读不到的死配置。
+     */
+    val imageGenDefaultsJson: Flow<String?> =
+        dataStore.data.map { it[KEY_IMAGEGEN_DEFAULTS] }
+
+    suspend fun setImageGenDefaultsJson(text: String) = put(KEY_IMAGEGEN_DEFAULTS, text)
+
+    /**
      * 用户改写过的**内置人格**（覆盖 Praxis 出厂那段）。空串 = 用出厂人格。
      *
      * ## 为什么要单独一个键，而不是并进 [setSystemPrompt]
@@ -1387,6 +1398,9 @@ private val KEY_GATEWAY_ROUTING_POLICY = stringPreferencesKey("gateway_routing_p
 
 /** 模型下载设置（下载源 + 仅 Wi-Fi），见 [SettingsRepository.imageDownloadSettingsJson]。 */
 private val KEY_IMAGEGEN_DOWNLOAD = stringPreferencesKey("imagegen_download")
+
+/** 生图默认参数（画布/采样），见 [SettingsRepository.imageGenDefaultsJson]。 */
+private val KEY_IMAGEGEN_DEFAULTS = stringPreferencesKey("imagegen_defaults")
 
 /**
  * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。

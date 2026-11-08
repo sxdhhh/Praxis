@@ -147,6 +147,10 @@ fun SettingsHost(
         dev.praxis.core.imagegen.ImageDownloadSettings(),
     onImageDownloadSettingsChange:
         (dev.praxis.core.imagegen.ImageDownloadSettings) -> Unit = {},
+    /** 生图默认参数（画布 / 采样）。 */
+    imageGenDefaults: dev.praxis.core.imagegen.ImageGenDefaults =
+        dev.praxis.core.imagegen.ImageGenDefaults(),
+    onImageGenDefaultsChange: (dev.praxis.core.imagegen.ImageGenDefaults) -> Unit = {},
     imageGenModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
     imageGenInstalledIds: Set<String> = emptySet(),
     imageGenDownloadState: dev.praxis.core.imagegen.ImageDownloadState =
@@ -319,6 +323,8 @@ fun SettingsHost(
             imageGenModelsRootPath = imageGenModelsRootPath,
             imageDownloadSettings = imageDownloadSettings,
             onImageDownloadSettingsChange = onImageDownloadSettingsChange,
+            imageGenDefaults = imageGenDefaults,
+            onImageGenDefaultsChange = onImageGenDefaultsChange,
             imageGenModels = imageGenModels,
             imageGenInstalledIds = imageGenInstalledIds,
             imageGenDownloadState = imageGenDownloadState,
@@ -482,6 +488,10 @@ private fun SettingsPageBody(
         dev.praxis.core.imagegen.ImageDownloadSettings(),
     onImageDownloadSettingsChange:
         (dev.praxis.core.imagegen.ImageDownloadSettings) -> Unit = {},
+    /** 生图默认参数（画布 / 采样）。 */
+    imageGenDefaults: dev.praxis.core.imagegen.ImageGenDefaults =
+        dev.praxis.core.imagegen.ImageGenDefaults(),
+    onImageGenDefaultsChange: (dev.praxis.core.imagegen.ImageGenDefaults) -> Unit = {},
     imageGenModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
     imageGenInstalledIds: Set<String> = emptySet(),
     imageGenDownloadState: dev.praxis.core.imagegen.ImageDownloadState =
@@ -705,6 +715,8 @@ private fun SettingsPageBody(
             modelsRootPath = imageGenModelsRootPath,
             downloadSettings = imageDownloadSettings,
             onDownloadSettingsChange = onImageDownloadSettingsChange,
+            imageDefaults = imageGenDefaults,
+            onImageDefaultsChange = onImageGenDefaultsChange,
             modifier = modifier,
         )
         PraxisRoute.SettingsGateway -> dev.praxis.feature.gateway.GatewayRoute(

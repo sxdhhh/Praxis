@@ -592,6 +592,16 @@ fun PraxisApp(
             ?: dev.praxis.core.imagegen.ImageDownloadSettings()
     }
 
+    // 生图默认参数（画布 / 采样）：工具在模型没说这些参数时按它走。
+    val imageGenDefaultsJson by settingsRepository.imageGenDefaultsJson
+        .collectAsState(initial = null)
+    val imageGenDefaults = remember(imageGenDefaultsJson) {
+        dev.praxis.core.imagegen.ImageGenDefaultsCodec
+            .decode(imageGenDefaultsJson)
+            ?.getOrNull()
+            ?: dev.praxis.core.imagegen.ImageGenDefaults()
+    }
+
     val imageGenEngineLocator: dev.praxis.data.imagegen.EngineLocator =
         org.koin.compose.koinInject()
     // 与工具共用同一条进度总线（工具写、聊天层读）。
@@ -1428,6 +1438,14 @@ fun PraxisApp(
                 },
                 imageGenModelsRootPath = imageGenModelsRoot.absolutePath,
                 imageDownloadSettings = imageDownloadSettings,
+                imageGenDefaults = imageGenDefaults,
+                onImageGenDefaultsChange = { updated ->
+                    coroutineScope.launch {
+                        settingsRepository.setImageGenDefaultsJson(
+                            dev.praxis.core.imagegen.ImageGenDefaultsCodec.encode(updated),
+                        )
+                    }
+                },
                 onImageDownloadSettingsChange = { updated ->
                     coroutineScope.launch {
                         settingsRepository.setImageDownloadSettingsJson(

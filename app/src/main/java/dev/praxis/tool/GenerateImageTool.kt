@@ -3,6 +3,7 @@ package dev.praxis.tool
 import dev.praxis.core.imagegen.ImageGenEvent
 import dev.praxis.core.imagegen.ImageGenParams
 import dev.praxis.core.imagegen.ImageGenParamsRules
+import dev.praxis.core.imagegen.ImageGenDefaults
 import dev.praxis.core.imagegen.ImageGenProgress
 import dev.praxis.core.imagegen.ImageGenTarget
 import dev.praxis.core.tool.PermissionTier
@@ -75,6 +76,13 @@ class GenerateImageTool(
      * 传 null 表示「结束了」—— 聊天层据此清掉进度条，不会留一个永远转的圈。
      */
     private val reportProgress: (ImageGenProgress?) -> Unit = {},
+    /**
+     * 设置页的生图默认参数（文档 §7.1 的画布 / 采样）。
+     *
+     * 模型没说这些参数时用它 —— 否则设置页那两个分区就是读不到的死配置。
+     * suspend：设置存在 DataStore。
+     */
+    private val imageDefaults: suspend () -> ImageGenDefaults = { ImageGenDefaults() },
     /** 落盘：返回绝对路径。放成 lambda 让工具不碰 Context。 */
     private val saveImage: suspend (ByteArray) -> String,
 ) : Tool {
@@ -112,14 +120,17 @@ class GenerateImageTool(
             return failure("bad_arguments", "count 必须在 1~" + MAX_COUNT + " 之间")
         }
 
+        // 模型没给的参数取设置页的默认值（模型显式给空串也算「给了」）。
+        val defaults = imageDefaults()
         val params = ImageGenParams(
             prompt = prompt,
-            negative = args.text("negative").orEmpty(),
-            width = args.int("width") ?: ImageGenParams.DEFAULT_WIDTH,
-            height = args.int("height") ?: ImageGenParams.DEFAULT_HEIGHT,
-            steps = args.int("steps") ?: ImageGenParams.DEFAULT_STEPS,
-            cfg = args.float("cfg") ?: DEFAULT_CFG,
-            scheduler = args.text("scheduler")?.takeIf { it.isNotBlank() },
+            negative = args.text("negative") ?: defaults.negative,
+            width = args.int("width") ?: defaults.width,
+            height = args.int("height") ?: defaults.height,
+            steps = args.int("steps") ?: defaults.steps,
+            cfg = args.float("cfg") ?: defaults.cfg,
+            scheduler = args.text("scheduler")?.takeIf { it.isNotBlank() }
+                ?: defaults.scheduler,
             seed = args.long("seed"),
             showPreview = false,
         )
