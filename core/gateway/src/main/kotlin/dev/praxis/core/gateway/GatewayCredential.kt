@@ -93,10 +93,16 @@ object GatewayCredentialCodec {
  * 所以这里对 OAuth 的支持是为 P2 之后准备的，不是当下就会走到的分支。
  */
 fun GatewayAccountFile.toCredential(): Result<GatewayCredential> = runCatching {
-    if (apiKey.isNotBlank()) return@runCatching GatewayCredential.ApiKey(apiKey)
-    if (!accessToken.isNullOrBlank()) {
+    // 先取到局部变量：这三个字段是另一个模块里的可空属性，
+    // 直接写 apiKey.isNotBlank() 会因为没有智能转换而编不过。
+    val key = apiKey
+    if (!key.isNullOrBlank()) {
+        return@runCatching GatewayCredential.ApiKey(key)
+    }
+    val token = accessToken
+    if (!token.isNullOrBlank()) {
         return@runCatching GatewayCredential.OAuth(
-            accessToken = accessToken,
+            accessToken = token,
             refreshToken = refreshToken,
         )
     }
