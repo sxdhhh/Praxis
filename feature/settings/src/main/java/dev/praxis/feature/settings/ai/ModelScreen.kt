@@ -40,8 +40,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.praxis.core.model.settings.ThinkingEffort
 import dev.praxis.core.model.settings.ApiProvider
+import dev.praxis.core.model.settings.ModelProfileKind
 import dev.praxis.core.model.settings.ModelSettings
+import dev.praxis.ui.navigation.LocalNavigator
+import dev.praxis.ui.navigation.PraxisRoute
 import dev.praxis.ui.widgets.MiuixBadge
+import dev.praxis.ui.widgets.MiuixNavigationItemWidget
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownItem
@@ -466,6 +470,12 @@ fun ModelScreen(
         }
         // 首个卡片自己带 top padding（下面 .padding(top = 12.dp)），
         // 这里不再补一个 Spacer —— 两道加起来是 24dp，与其余页面的 12dp 不一致。
+        // ── 网关配置下，服务商 / 接口地址 / API Key 三块整块不渲染 ──
+        //
+        // 文档《决定二》：网关模式下地址与密钥属于**账号**（一个网关可以有多个
+        // 账号），放在这里填就退化成「一套配置一个账号」，等于白移植。
+        val activeKind = profiles.active?.kind ?: ModelProfileKind.Single
+        if (activeKind == ModelProfileKind.Single) {
         // ── 服务商 ──────────────────────────────────────────────────
         //
         // 旧实现这里**不加**分组标题，理由是「卡片里只有一行，行标题已写着
@@ -659,6 +669,30 @@ fun ModelScreen(
                 }
             }
         }
+        }
+
+        // ── 网关入口（仅网关配置）────────────────────────────────────
+        //
+        // 文档 §9.1②：三块隐藏之后换成这一张卡片。它不是表单，只有一行入口 ——
+        // 用户要做的只是把账号配好，再回来选模型。
+        if (activeKind == ModelProfileKind.Gateway) {
+            item {
+                Card(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 12.dp),
+                ) {
+                    val navigator = LocalNavigator.current
+                    MiuixNavigationItemWidget(
+                        title = "网关入口",
+                        // 账号池要到 P1 才落地：这里如实说「还没有账号」，
+                        // 不显示一个假的 0 账号 · 0 提供商 · 0 模型。
+                        description = "还没有账号，点这里配置",
+                        onClick = { navigator.push(PraxisRoute.SettingsGateway) },
+                    )
+                }
+            }
+        }
 
         // ── 模型 ────────────────────────────────────────────────────
         item {
@@ -703,7 +737,8 @@ fun ModelScreen(
                             modifier = Modifier.weight(1f),
                             singleLine = true,
                         )
-                        if (modelCatalogFetcher != null) {
+                        // 网关配置下没有 baseUrl，谈不上「从服务商拉取」。
+                        if (modelCatalogFetcher != null && activeKind == ModelProfileKind.Single) {
                             // 与上游 `canRequestModelList` 同一套判据：
                             // 地址非空 +（服务商需要 key 时）确实有 key。
                             //
@@ -722,8 +757,19 @@ fun ModelScreen(
                             )
                         }
                     }
+                    // 网关配置下按钮不存在，这里换一句真实的来源说明 ——
+                    // 「请先填写接口地址」在这种模式下是误导。
+                    if (activeKind == ModelProfileKind.Gateway) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "网关配置的模型来自网关的对外模型清单；" +
+                                "网关里还没有模型，暂时可以手动填写模型名。",
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
                     // 缺什么就说什么：这两句是「拉取」按钮灰掉时的唯一解释。
-                    if (modelCatalogFetcher != null) {
+                    if (modelCatalogFetcher != null && activeKind == ModelProfileKind.Single) {
                         val hasKey = apiKey.isNotBlank() || savedApiKey.isNotBlank()
                         val missing = when {
                             baseUrl.isBlank() -> "请先填写上面的接口地址。"
