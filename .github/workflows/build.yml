@@ -286,8 +286,13 @@ jobs:
       - name: Unit tests (JVM modules, observation)
         continue-on-error: true
         run: |
+          # --continue：Gradle 默认在第一个失败任务后停止执行后续任务，
+          # 于是 :core:plugin:test 一红，排在它后面的模块全部不跑。
+          # 加了之后每个模块都会跑，失败各自记账（步骤仍是 continue-on-error）。
           timeout --signal=KILL 2400 ./gradlew \
+            --continue \
             :core:ai:test \
+            :core:data:test \
             :core:goal:test \
             :core:linux:test \
             :core:memory:test \
