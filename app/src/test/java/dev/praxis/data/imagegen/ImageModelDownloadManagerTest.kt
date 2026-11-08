@@ -64,6 +64,9 @@ class ImageModelDownloadManagerTest {
         assertFalse("第二个请求必须被拒绝，而不是排队", m.start(model()))
         m.cancel()
         withTimeout(10_000) { m.state.first { it is ImageDownloadState.Cancelled } }
+        // JUnit4 要求测试方法返回 void：runBlocking 块的最后一句不能是带值的表达式，
+        // 否则整类会以 initializationError 失败（CI 抓到的就是这个）。
+        Unit
     }
 
     @Test
