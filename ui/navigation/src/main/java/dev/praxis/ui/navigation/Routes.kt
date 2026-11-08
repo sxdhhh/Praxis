@@ -190,6 +190,14 @@ data object SettingsGatewayRouting : PraxisRoute
  */
 data object SettingsImageGen : PraxisRoute
 
+/**
+ * 模型库（设置 -> 本地生图 -> 模型库）。
+ *
+ * 内置清单 + 下载 + 导入。单独一页而不是塞进主页：清单几十项、每项带进度条，
+ * 嵌在主页的 LazyColumn 里会出现两层滚动（文档 §7.5）。
+ */
+data object SettingsImageGenModels : PraxisRoute
+
 data object SettingsCompatPluginEntries : PraxisRoute
 
 /**

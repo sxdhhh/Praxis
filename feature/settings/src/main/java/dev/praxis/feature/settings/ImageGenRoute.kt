@@ -174,6 +174,23 @@ fun ImageGenRoute(
                 subtitle = "已下载的权重",
             )
         }
+        item(key = "__models_library__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "模型库",
+                    description = "内置清单 · 下载 · 导入",
+                    onClick = {
+                        dev.praxis.ui.navigation.LocalNavigator.current
+                            .push(dev.praxis.ui.navigation.PraxisRoute.SettingsImageGenModels)
+                    },
+                )
+            }
+        }
         item(key = "__models_card__") {
             BareCard {
                 Text(

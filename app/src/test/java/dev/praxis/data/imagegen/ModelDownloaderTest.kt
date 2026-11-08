@@ -1,5 +1,6 @@
 package dev.praxis.data.imagegen
 
+import dev.praxis.core.imagegen.DownloadProgress
 import dev.praxis.core.imagegen.ImageDownloadPlan
 import dev.praxis.core.imagegen.ImageDownloadPlanner
 import dev.praxis.core.imagegen.ImageModel

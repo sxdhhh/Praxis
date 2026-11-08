@@ -124,6 +124,12 @@ fun SettingsHost(
     imageGenSocModel: String = "",
     imageGenInstalledModels: List<String> = emptyList(),
     imageGenModelsRootPath: String = "",
+    imageGenModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
+    imageGenInstalledIds: Set<String> = emptySet(),
+    imageGenDownloadState: dev.praxis.core.imagegen.ImageDownloadState =
+        dev.praxis.core.imagegen.ImageDownloadState.Idle,
+    onDownloadImageGenModel: (dev.praxis.core.imagegen.ImageModel) -> Unit = {},
+    onCancelImageGenDownload: () -> Unit = {},
     repository: SettingsRepository,
     versionName: String,
     versionCode: Int,
@@ -276,6 +282,11 @@ fun SettingsHost(
             imageGenSocModel = imageGenSocModel,
             imageGenInstalledModels = imageGenInstalledModels,
             imageGenModelsRootPath = imageGenModelsRootPath,
+            imageGenModels = imageGenModels,
+            imageGenInstalledIds = imageGenInstalledIds,
+            imageGenDownloadState = imageGenDownloadState,
+            onDownloadImageGenModel = onDownloadImageGenModel,
+            onCancelImageGenDownload = onCancelImageGenDownload,
             pluginRuntime = pluginRuntime,
             capturedEntries = capturedEntries,
             activationFailures = activationFailures,
@@ -411,6 +422,12 @@ private fun SettingsPageBody(
     imageGenSocModel: String = "",
     imageGenInstalledModels: List<String> = emptyList(),
     imageGenModelsRootPath: String = "",
+    imageGenModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
+    imageGenInstalledIds: Set<String> = emptySet(),
+    imageGenDownloadState: dev.praxis.core.imagegen.ImageDownloadState =
+        dev.praxis.core.imagegen.ImageDownloadState.Idle,
+    onDownloadImageGenModel: (dev.praxis.core.imagegen.ImageModel) -> Unit = {},
+    onCancelImageGenDownload: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     when (route) {
@@ -611,6 +628,14 @@ private fun SettingsPageBody(
             }
         }
         // 插件入口：页面由插件脚本的 compose_dsl 渲染。
+        PraxisRoute.SettingsImageGenModels -> ImageGenModelsRoute(
+            models = imageGenModels,
+            installedIds = imageGenInstalledIds,
+            state = imageGenDownloadState,
+            onDownload = onDownloadImageGenModel,
+            onCancel = onCancelImageGenDownload,
+            modifier = modifier,
+        )
         PraxisRoute.SettingsImageGen -> ImageGenRoute(
             probeEngine = imageGenProbeEngine,
             socModel = imageGenSocModel,

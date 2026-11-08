@@ -359,6 +359,25 @@ val appModule = module {
     // 两处必须操作**同一份** rootfs 与会话表，否则「AI 装的用户在设置页看不到」。
     single { dev.praxis.data.linux.ProotEnvPort(androidContext()) }
 
+    // ── 本地生图：模型下载（docs/PORTING-IMAGEGEN.md §8）──
+    //
+    // 应用级作用域：下载要在离开设置页之后继续跑（前台服务接进来之前，至少不能被
+    // 页面销毁连带取消）。用 SupervisorJob：一次下载失败不该影响后续任务。
+    single {
+        kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
+        )
+    }
+    single { dev.praxis.data.imagegen.ModelDownloader() }
+    single {
+        dev.praxis.data.imagegen.ImageModelDownloadManager(
+            downloader = get(),
+            // 模型目录与引擎认的路径一致：<files>/models/<id>/。
+            modelsRoot = java.io.File(androidContext().filesDir, "models"),
+            scope = get(),
+        )
+    }
+
     // ## 终端会话端口：必须 single（2026-10-29）
     //
     // 有两个消费者：

@@ -1,5 +1,6 @@
 package dev.praxis.data.imagegen
 
+import dev.praxis.core.imagegen.ImageDownloadState
 import dev.praxis.core.imagegen.ImageModel
 import java.io.ByteArrayInputStream
 import java.io.InputStream

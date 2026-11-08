@@ -1,6 +1,8 @@
 package dev.praxis.data.imagegen
 
+import dev.praxis.core.imagegen.DownloadProgress
 import dev.praxis.core.imagegen.ImageDownloadPlanner
+import dev.praxis.core.imagegen.ImageDownloadState
 import dev.praxis.core.imagegen.ImageModel
 import java.io.File
 import kotlinx.coroutines.CoroutineDispatcher
@@ -12,33 +14,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-/** 一次模型下载的状态（界面只认这一个流）。 */
-sealed interface ImageDownloadState {
-
-    data object Idle : ImageDownloadState
-
-    /** 正在下载。[progress] 为 null = 还没收到第一块。 */
-    data class Running(val modelId: String, val progress: DownloadProgress?) : ImageDownloadState
-
-    data class Completed(
-        val modelId: String,
-        val spaceWasUnknown: Boolean,
-        val leftoverZipName: String?,
-    ) : ImageDownloadState
-
-    data class Failed(val modelId: String, val reason: Reason, val detail: String) : ImageDownloadState {
-        enum class Reason {
-            /** 空间不足：一个字节都没写。 */
-            InsufficientSpace,
-            /** 传输/解压失败。 */
-            Transport,
-        }
-    }
-
-    /** 用户取消。不是错误，界面不该弹红字。 */
-    data class Cancelled(val modelId: String) : ImageDownloadState
-}
 
 /**
  * 模型下载的编排层。

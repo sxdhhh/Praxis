@@ -464,8 +464,8 @@ fun PraxisApp(
 
     // ── 本地生图（设置 → 本地生图）──
     //
-    // 模型目录与「已安装清单」在这里算一次：它们是文件系统上的事实，不该在 Compose 里
-    // 反复做 IO。装了新模型后重进本页即可看到（下载流程接进来时再改成可刷新的状态）。
+    // 模型目录与「已安装清单」在组合期算一次：它们是文件系统上的事实，不该在 Compose 里
+    // 反复做 IO。下载完成后靠 imageGenRefreshTick 重算一次，装好的模型立刻出现。
     val imageGenModelsRoot = remember { java.io.File(appContext.filesDir, "models") }
     val imageGenSocModel = remember {
         // Build.SOC_MODEL 是 API 31 才有的；低版本用 HARDWARE（同样是芯片型号字符串）。
@@ -475,13 +475,30 @@ fun PraxisApp(
             android.os.Build.HARDWARE
         }
     }
-    val imageGenInstalledModels = remember(imageGenSocModel) {
-        dev.praxis.core.imagegen.ImageModelCatalog
-            .builtin(imageGenSocModel)
+    val imageGenDownloadManager: dev.praxis.data.imagegen.ImageModelDownloadManager =
+        org.koin.compose.koinInject()
+    val imageGenDownloadState by imageGenDownloadManager.state.collectAsState()
+
+    // 下载完成后重读一次文件系统：装好的模型立刻出现在列表里，不用重启 App（文档 §7.3）。
+    var imageGenRefreshTick by remember { mutableStateOf(0) }
+    LaunchedEffect(imageGenDownloadState) {
+        if (imageGenDownloadState is dev.praxis.core.imagegen.ImageDownloadState.Completed) {
+            imageGenRefreshTick += 1
+        }
+    }
+    val imageGenCatalog = remember(imageGenSocModel) {
+        dev.praxis.core.imagegen.ImageModelCatalog.builtin(imageGenSocModel)
+    }
+    val imageGenInstalledIds = remember(imageGenCatalog, imageGenRefreshTick) {
+        imageGenCatalog
             .filter { model ->
                 dev.praxis.core.imagegen.ImageModelCatalog.isInstalled(imageGenModelsRoot, model)
             }
-            .map { model -> model.name }
+            .map { model -> model.id }
+            .toSet()
+    }
+    val imageGenInstalledNames = remember(imageGenCatalog, imageGenInstalledIds) {
+        imageGenCatalog.filter { model -> model.id in imageGenInstalledIds }.map { it.name }
     }
     val imageGenEngineLocator = remember { dev.praxis.data.imagegen.EngineLocator() }
 
@@ -1184,8 +1201,13 @@ fun PraxisApp(
                 },
                 imageGenProbeEngine = { imageGenEngineLocator.probe() },
                 imageGenSocModel = imageGenSocModel,
-                imageGenInstalledModels = imageGenInstalledModels,
+                imageGenInstalledModels = imageGenInstalledNames,
                 imageGenModelsRootPath = imageGenModelsRoot.absolutePath,
+                imageGenModels = imageGenCatalog,
+                imageGenInstalledIds = imageGenInstalledIds,
+                imageGenDownloadState = imageGenDownloadState,
+                onDownloadImageGenModel = { model -> imageGenDownloadManager.start(model) },
+                onCancelImageGenDownload = { imageGenDownloadManager.cancel() },
                 onClearGatewayRuntime = { ids ->
                     // 运行期状态是内存里的，清掉就是真的清掉；随后触发一次重算。
                     ids.forEach { gatewayRouteState.onSuccess(it) }

@@ -1,6 +1,7 @@
 package dev.praxis.data.imagegen
 
 import dev.praxis.core.imagegen.DownloadCleanup
+import dev.praxis.core.imagegen.DownloadProgress
 import dev.praxis.core.imagegen.ImageDownloadPlan
 import dev.praxis.core.imagegen.SpaceCheck
 import dev.praxis.core.imagegen.SpaceDecision
@@ -11,14 +12,6 @@ import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 import okhttp3.OkHttpClient
 import okhttp3.Request
-
-/** 下载进度。[fraction] 为 null = 总量未知（不编一个假进度）。 */
-data class DownloadProgress(
-    val bytesDownloaded: Long,
-    val totalBytes: Long?,
-    val fraction: Float?,
-    val fileName: String,
-)
 
 /** 一次下载的结果。四档对应四种不同的用户处置，不合并。 */
 sealed interface DownloadResult {
