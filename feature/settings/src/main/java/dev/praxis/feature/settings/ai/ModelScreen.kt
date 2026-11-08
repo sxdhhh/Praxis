@@ -373,6 +373,15 @@ fun ModelScreen(
     var models by remember { mutableStateOf<List<dev.praxis.core.ai.AiModelOption>>(emptyList()) }
     var showModelPicker by remember { mutableStateOf(false) }
 
+    /**
+     * 当前档案是不是「网关」。
+     *
+     * 在函数顶层算一次，而不是在渲染分支里算：模型选择弹窗是在另一个作用域里
+     * 调用的，那里看不到 SettingsList 内部声明的 activeKind（CI 就是这么报的）。
+     */
+    val gatewayKindActive =
+        (profiles.active?.kind ?: ModelProfileKind.Single) == ModelProfileKind.Gateway
+
     // 认证方式：本地推理不带认证头，OpenRouter 要两个额外标识头。
     // 判定放这里而不是 fetcher 里 —— fetcher 在 :core:ai，不该认识 ApiProvider。
     val providerKind = when {
@@ -1295,7 +1304,7 @@ fun ModelScreen(
     // 那点开销远小于「动画播不出来」。
     ModelPickerDialog(
         // 网关档案下用网关的对外清单：它不需要网络请求，也不该显示「拉取」。
-        options = if (activeKind == ModelProfileKind.Gateway) gatewayModels else models,
+        options = if (gatewayKindActive) gatewayModels else models,
         // 可见性交给组件自己带进带出（见上面的说明）。
         visible = showModelPicker,
         // 把已保存的池子传进去（弹窗要据此显示哪些勾上了）。
