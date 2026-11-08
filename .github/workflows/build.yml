@@ -289,8 +289,14 @@ jobs:
           # --continue：Gradle 默认在第一个失败任务后停止执行后续任务，
           # 于是 :core:plugin:test 一红，排在它后面的模块全部不跑。
           # 加了之后每个模块都会跑，失败各自记账（步骤仍是 continue-on-error）。
+          #
+          # --rerun-tasks --no-build-cache：这一步的用途是**观察**，
+          # 而 UP-TO-DATE / FROM-CACHE 会让它什么都没跑却看起来跑过了
+          # （实测 :core:data:test 就是这么被跳过的）。宁可慢，也要真跑。
           timeout --signal=KILL 2400 ./gradlew \
             --continue \
+            --rerun-tasks \
+            --no-build-cache \
             :core:ai:test \
             :core:data:test \
             :core:goal:test \
@@ -302,6 +308,45 @@ jobs:
             :core:tool:test \
             :core:workflow:test \
             --stacktrace
+
+      # ## 为什么需要一个单独的汇总步骤（2026-11-08）
+      #
+      # Gradle 在测试**全部通过**时什么都不打印 —— 只有失败时才输出
+      # `N tests completed, M failed`。于是「日志里没有 FAILED」既可能是全绿，
+      # 也可能是这个模块压根没跑（UP-TO-DATE / FROM-CACHE / 被前面的失败挡住）。
+      # 两种情况在日志上长得一模一样，这是最危险的一类假绿。
+      #
+      # 这一步直接读 build/test-results 下的 XML，把每个模块的
+      # tests / failures / 失败类名打出来。跑了没跑、过没过，一眼可见。
+      - name: Summarize JVM test results
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+
+          suites = []
+          for path in glob.glob('**/build/test-results/**/*.xml', recursive=True):
+              try:
+                  root = ET.parse(path).getroot()
+              except Exception:
+                  continue
+              suites.append((
+                  root.get('name', path),
+                  int(root.get('tests', 0) or 0),
+                  int(root.get('failures', 0) or 0),
+                  int(root.get('errors', 0) or 0),
+              ))
+
+          total = sum(s[1] for s in suites)
+          failed = sum(s[2] + s[3] for s in suites)
+          print(f'test suites: {len(suites)}  tests: {total}  failed: {failed}')
+          for name, tests, failures, errors in sorted(suites, key=lambda s: -(s[2] + s[3])):
+              if failures or errors:
+                  print(f'  FAILED  {name}: {tests} tests, {failures} failures, {errors} errors')
+          if not suites:
+              print('  (没有任何测试结果 XML —— 说明测试根本没跑)')
+          PY
 
       # ## :feature:chat 必须**逐类**跑（2026-11-07，R15 补）
       #
