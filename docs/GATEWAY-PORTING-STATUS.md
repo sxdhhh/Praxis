@@ -55,6 +55,19 @@ test suites: 113   tests: 1175   failed: 9
 较 58cbd54：套件 +2、用例 +15（`GatewayExportPlanTest` 10 条 + `GatewayExportWriterTest` 5 条），
 失败数仍是 9（同一批 core:plugin 债）。
 
+端侧生图内核（P0a/P1）落地后（提交 **4d61367**，2026-11-08）：
+
+```
+build   success   (新增 core:imagegen 模块 + :app 的探活/客户端/工具都编过)
+verify  success
+test suites: 116   tests: 1230   failed: 9
+```
+
+较 7b0163c：套件 +3、用例 +55 —— 正好是 `core:imagegen` 的三套（18+17+20）。
+`GenerateImageToolTest`（10 条）在「Unit tests (:app, per class)」那步执行并通过
+（10 条 STARTED 之后直接 BUILD SUCCESSFUL、无 FAILED），但它**不进汇总行** ——
+因为「Summarize JVM test results」排在 per-class 那两步之前（既有管线顺序，非本次引入）。
+
 | | 网关动工前 | 现在 | 差 |
 |---|---|---|---|
 | 套件 | 87 | 108 | +21 |
@@ -125,6 +138,10 @@ test suites: 113   tests: 1175   failed: 9
 1. **Room 迁移只验证到编译期**：v11 到 v13 一步自动迁移，但真正的 schema 校验发生在打开数据库时。需要一台装过旧版本的设备启动一次
 2. **内置家不可用**：任何内置家的账号都会被跳过，用户会看到「导入完成但什么也没进来」。导入页与报告里都写了理由，但这是真实的功能缺口
 3. **CI 的 observation 步骤是 continue-on-error**：测试挂了任务仍可能显示绿色。必须读汇总行（失败数），不能只看任务颜色。曾因此漏看一条真实失败
+5. **汇总行不覆盖 `:app` 与 `:feature:chat`**：`Summarize JVM test results` 排在 per-class 两步之前，
+   所以汇总只统计 library + JVM 模块。那两批测试的通过与否要看各自步骤的 `BUILD SUCCESSFUL` 与有没有
+   `::error::` 行 —— 单看汇总行会低估覆盖（4d61367 时汇总 1230，实际另有 10 条工具测试已跑过）。
+
 4. **CI 的测试是显式清单，不是「跑全部」**（2026-11-08 踩到）：
    `Unit tests (JVM modules)` 逐个列 `:core:X:test`，`:app` 那步是**类名白名单**。
    新模块 / 新测试类不写进去就**永远不会执行**，而任务照样绿色、汇总行数字纹丝不动。
