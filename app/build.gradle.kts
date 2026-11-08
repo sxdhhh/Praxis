@@ -326,6 +326,9 @@ dependencies {
     // 网关领域模型与纯逻辑。core:data 虽然也用它，但那边是 implementation 依赖，
     // 不会传递到 :app —— 这里用到 RouteState / GatewayAccountRow，必须自己声明。
     implementation(project(":core:gateway"))
+    // 端侧生图的引擎契约（端点/字段名/参数/错误分类）。纯 JVM 模块，
+    // 引擎本身是独立原生可执行，见 docs/PORTING-IMAGEGEN.md §3。
+    implementation(project(":core:imagegen"))
     implementation(project(":core:ai"))
     implementation(project(":core:tool"))
     implementation(project(":core:memory"))

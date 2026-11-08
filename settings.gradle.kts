@@ -60,6 +60,9 @@ include(":core:linux")
 include(":core:workflow")
 include(":core:plugin")
 include(":core:gateway")
+// 端侧生图：引擎契约（端点/字段名）、NDJSON 解析、参数与错误分类。
+// 纯 JVM —— 引擎是独立原生可执行，通过本机 HTTP 通话，见 docs/PORTING-IMAGEGEN.md §3。
+include(":core:imagegen")
 
 // ── UI 基础设施 ────────────────────────────────────────
 include(":ui:theme")
