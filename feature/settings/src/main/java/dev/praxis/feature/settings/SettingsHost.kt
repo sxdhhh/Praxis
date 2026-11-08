@@ -205,6 +205,8 @@ fun SettingsHost(
     ) { _ ->
         SettingsPageBody(
             route = route,
+            gatewayAccountRows = gatewayAccountRows,
+            onClearGatewayRuntime = onClearGatewayRuntime,
             pluginRuntime = pluginRuntime,
             capturedEntries = capturedEntries,
             activationFailures = activationFailures,
@@ -310,6 +312,10 @@ private fun SettingsPageBody(
     onTerminalReset: () -> Unit,
     /** 模型列表拉取端口（可为 null：未装配时模型页不给「拉取」按钮）。 */
     modelCatalogFetcher: dev.praxis.core.ai.ModelCatalogFetcher? = null,
+    /** 网关账号池的行模型（见 [SettingsHost] 上的同名参数）。 */
+    gatewayAccountRows: List<dev.praxis.core.gateway.GatewayAccountRow> = emptyList(),
+    /** 批量清空运行期状态（见 [SettingsHost] 上的同名参数）。 */
+    onClearGatewayRuntime: (List<String>) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     when (route) {
