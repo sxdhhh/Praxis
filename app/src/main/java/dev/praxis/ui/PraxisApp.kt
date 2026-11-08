@@ -317,13 +317,23 @@ fun PraxisApp(
     var gatewayModelOptions by remember {
         mutableStateOf<List<dev.praxis.core.ai.AiModelOption>>(emptyList())
     }
+    // 结构化模型条目（gateway_model 表）。它是模型页候选的**第二来源**：
+    // 带启停与能力位，代表「用户明确管过」的那批。
+    val gatewayModelStore: dev.praxis.data.gateway.GatewayModelStore =
+        org.koin.compose.koinInject()
     LaunchedEffect(gatewayRowsRefresh, gatewayModelRulesJson) {
-        gatewayModelOptions = dev.praxis.core.gateway.GatewayModelCatalog
+        val fromCatalog = dev.praxis.core.gateway.GatewayModelCatalog
             .visibleNames(
                 nativeModels = gatewayAccountStore.nativeModels(),
                 mappings = gatewayModelRules.toRoutingMappings(),
             )
-            .map { dev.praxis.core.ai.AiModelOption(id = it, name = it) }
+        // 两个来源都真实存在，合并而不是二选一：刚导入账号、还没逐条管过模型的用户
+        // 也必须看到候选（见 GatewayModelOptions 的 KDoc）。
+        val merged = dev.praxis.core.gateway.GatewayModelOptions.merge(
+            structured = gatewayModelStore.visibleModelIds(),
+            catalog = fromCatalog,
+        )
+        gatewayModelOptions = merged.map { dev.praxis.core.ai.AiModelOption(id = it, name = it) }
     }
 
     // 候选队列：按当前模型算一遍选路结果（不发请求，纯计算）。

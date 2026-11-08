@@ -374,6 +374,10 @@ val appModule = module {
     single { dev.praxis.data.imagegen.EngineLocator() }
     // 生成客户端：按 ImageGenRunner 接口注册，工具只依赖接口。
     single<dev.praxis.data.imagegen.ImageGenRunner> { dev.praxis.data.imagegen.ImageGenClient() }
+    // 网关结构化模型条目（gateway_model 表）：模型页候选的第二来源。
+    single {
+        dev.praxis.data.gateway.GatewayModelStore(get<dev.praxis.data.db.PraxisDatabase>().gatewayModelDao())
+    }
     // 远端出图（OpenAI 兼容 /v1/images/generations）。
     // 生图进度总线（文档 §6.1）：工具往里写，聊天层从里读。
     single { dev.praxis.core.imagegen.ImageGenProgressBus() }

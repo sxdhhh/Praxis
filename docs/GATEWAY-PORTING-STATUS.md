@@ -139,7 +139,11 @@ test suites: 118   tests: 1252   failed: 9
    `Android/data/dev.praxis/files/exports/accounts/` 下。
    两处已知缺口由计划层如实写在 notes 里：路由/重试/超时 Praxis 尚未持久化、`apiKeys` 未包含（P6）
 3. **添加账号三级流程 + H5 容器**：目前只能靠粘贴导入，不能手动新建
-4. **模型页自动填网关模型清单**：现在要手动敲模型名
+4. **模型页自动填网关模型清单**：**机制已接通**（本轮）：模型页候选现在由两个来源合并 ——
+   结构化条目（`gateway_model` 表，带启停与能力位）+ 各家声明与映射别名（`GatewayModelCatalog`）。
+   合并规则在 `core:gateway/GatewayModelOptions`（5 例单测：结构化优先、大小写不敏感去重）。
+   **仍缺数据源**：`gateway_model` 表至今没有写入路径，所以眼下候选里只有目录名。
+   要真正用上结构化条目，需要「模型管理页」（手动增删改 + 逐条启停）或等 P5 的内置家清单。
 5. **路由页 / 模型管理页**：候选队列可视化（谁被跳过、为什么）还没有
 6. ~~gateway_enabled 总开关~~ **已完成**（提交 87328ae）：`GatewayGate`（纯函数，4 例单测）
    决定「非网关档案不受影响 / 网关档案 + 开 = 走网关 / 网关档案 + 关 = GatewayDisabled」，
