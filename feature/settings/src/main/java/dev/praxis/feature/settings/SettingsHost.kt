@@ -109,6 +109,21 @@ fun SettingsHost(
     /** 网关总开关（文档 §11 末尾的回滚闸）。 */
     gatewayEnabled: Boolean = true,
     onGatewayEnabledChange: (Boolean) -> Unit = {},
+    /**
+     * 本地生图的引擎探活（:app 注入）。
+     *
+     * 默认值不是「假装不可用」的兜底，而是一句**准确的**说明：没接线就是没接线，
+     * 页面会把它原样显示出来（而不是显示成「引擎没起」让用户去查端口）。
+     */
+    imageGenProbeEngine: suspend () -> dev.praxis.core.imagegen.EngineAvailability = {
+        dev.praxis.core.imagegen.EngineAvailability.Unavailable(
+            reason = dev.praxis.core.imagegen.EngineAvailability.Unavailable.Reason.NotRunning,
+            detail = "设置页没有拿到探活函数（构建配置问题）",
+        )
+    },
+    imageGenSocModel: String = "",
+    imageGenInstalledModels: List<String> = emptyList(),
+    imageGenModelsRootPath: String = "",
     repository: SettingsRepository,
     versionName: String,
     versionCode: Int,
@@ -257,6 +272,10 @@ fun SettingsHost(
             onExportGateway = onExportGateway,
             gatewayEnabled = gatewayEnabled,
             onGatewayEnabledChange = onGatewayEnabledChange,
+            imageGenProbeEngine = imageGenProbeEngine,
+            imageGenSocModel = imageGenSocModel,
+            imageGenInstalledModels = imageGenInstalledModels,
+            imageGenModelsRootPath = imageGenModelsRootPath,
             pluginRuntime = pluginRuntime,
             capturedEntries = capturedEntries,
             activationFailures = activationFailures,
@@ -383,6 +402,15 @@ private fun SettingsPageBody(
     onExportGateway: (Boolean) -> Unit = {},
     gatewayEnabled: Boolean = true,
     onGatewayEnabledChange: (Boolean) -> Unit = {},
+    imageGenProbeEngine: suspend () -> dev.praxis.core.imagegen.EngineAvailability = {
+        dev.praxis.core.imagegen.EngineAvailability.Unavailable(
+            reason = dev.praxis.core.imagegen.EngineAvailability.Unavailable.Reason.NotRunning,
+            detail = "设置页没有拿到探活函数（构建配置问题）",
+        )
+    },
+    imageGenSocModel: String = "",
+    imageGenInstalledModels: List<String> = emptyList(),
+    imageGenModelsRootPath: String = "",
     modifier: Modifier = Modifier,
 ) {
     when (route) {
@@ -583,6 +611,13 @@ private fun SettingsPageBody(
             }
         }
         // 插件入口：页面由插件脚本的 compose_dsl 渲染。
+        PraxisRoute.SettingsImageGen -> ImageGenRoute(
+            probeEngine = imageGenProbeEngine,
+            socModel = imageGenSocModel,
+            installedModels = imageGenInstalledModels,
+            modelsRootPath = imageGenModelsRootPath,
+            modifier = modifier,
+        )
         PraxisRoute.SettingsGateway -> dev.praxis.feature.gateway.GatewayRoute(
             accountCount = gatewayAccountRows.size,
             gatewayEnabled = gatewayEnabled,

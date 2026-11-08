@@ -5,7 +5,7 @@ import dev.praxis.core.imagegen.ImageGenParams
 import dev.praxis.core.tool.PermissionTier
 import dev.praxis.core.tool.ToolFailureStage
 import dev.praxis.core.tool.ToolContext
-import dev.praxis.data.imagegen.EngineAvailability
+import dev.praxis.core.imagegen.EngineAvailability
 import dev.praxis.data.imagegen.ImageGenRunner
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow

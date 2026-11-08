@@ -181,6 +181,15 @@ data object SettingsGatewayImport : PraxisRoute
 /** 网关的路由页（设置 -> 网关 -> 路由）。 */
 data object SettingsGatewayRouting : PraxisRoute
 
+/**
+ * 本地生图（设置 -> 本地生图）。
+ *
+ * 按 docs/PORTING-IMAGEGEN.md §7.1：不新增 Tab，入口放在设置页，
+ * 页面名就叫「本地生图」。模型库 / 模型详情 / 模型提供方是它的下级页，
+ * 各自的路由在做到对应页面时再加 —— 声明了却没有 entry 就是「点了没反应」。
+ */
+data object SettingsImageGen : PraxisRoute
+
 data object SettingsCompatPluginEntries : PraxisRoute
 
 /**

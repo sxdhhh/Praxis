@@ -10,7 +10,7 @@ import dev.praxis.core.tool.ToolFailureStage
 import dev.praxis.core.tool.ToolResult
 import dev.praxis.core.tool.ToolRisk
 import dev.praxis.core.tool.ToolSpec
-import dev.praxis.data.imagegen.EngineAvailability
+import dev.praxis.core.imagegen.EngineAvailability
 import dev.praxis.data.imagegen.ImageGenRunner
 import java.io.IOException
 import kotlinx.serialization.json.Json

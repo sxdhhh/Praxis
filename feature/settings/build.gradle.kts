@@ -11,6 +11,9 @@ android {
 dependencies {
     // 账号行模型（GatewayAccountRow）在核心层；网关页的行数据要经过这里转发。
     implementation(project(":core:gateway"))
+    // 本地生图（设置 → 本地生图）：页面要展示引擎探活结果、芯片档位与已安装模型。
+    // 那些类型都是纯数据（core:imagegen），不反向依赖 :app。
+    implementation(project(":core:imagegen"))
     api(project(":ui:widgets"))
     api(project(":ui:navigation"))
     api(project(":ui:design"))

@@ -61,6 +61,18 @@ enum class SettingsEntry(
         summary = "账号池、路由策略与请求统计",
     ),
 
+    /**
+     * 本地生图（docs/PORTING-IMAGEGEN.md §7.1）。
+     *
+     * 紧跟网关：两者都是「这次请求去哪出图」的一条路 —— 一个是本机引擎，
+     * 一个是远端服务商。排在一起用户才能顺着读下来。
+     */
+    ImageGen(
+        route = PraxisRoute.SettingsImageGen,
+        title = "本地生图",
+        summary = "本机引擎、模型与画布",
+    ),
+
     FunctionModel(
         route = PraxisRoute.SettingsFunctionModel,
         title = "功能模型",

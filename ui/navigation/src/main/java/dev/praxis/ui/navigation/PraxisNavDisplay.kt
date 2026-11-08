@@ -143,6 +143,10 @@ fun PraxisNavDisplay(
             entry<PraxisRoute.SettingsGatewayAccounts>(swipeDismiss = swipe) { route -> content(route) }
             entry<PraxisRoute.SettingsGatewayImport>(swipeDismiss = swipe) { route -> content(route) }
             entry<PraxisRoute.SettingsGatewayRouting>(swipeDismiss = swipe) { route -> content(route) }
+    // 与 SettingsModel 一致：主设置页不允许侧滑返回，避免误退（文档 §7.1 的表）。
+    entry<PraxisRoute.SettingsImageGen>(swipeDismiss = NavSwipeDirection.None) { route ->
+        content(route)
+    }
             entry<PraxisRoute.SettingsCompatPluginEntries>(swipeDismiss = swipe) { route -> content(route) }
             // 插件页面：内容由第三方脚本决定，手势方向不可预判 → 允许侧滑返回。
             entry<PraxisRoute.PluginEntry>(swipeDismiss = swipe) { route -> content(route) }
@@ -186,6 +190,7 @@ fun PraxisRoute.title(): String = when (this) {
     PraxisRoute.SettingsGatewayAccounts -> "账号"
     PraxisRoute.SettingsGatewayImport -> "导入导出"
     PraxisRoute.SettingsGatewayRouting -> "路由"
+    PraxisRoute.SettingsImageGen -> "本地生图"
     PraxisRoute.SettingsCompatPluginEntries -> "兼容插件入口"
     // when (this) 的 is 分支不会智能转换 this，必须显式取出来：
     // 直接写 this.title 会去找 PraxisRoute 上的成员 title，编译不过。
