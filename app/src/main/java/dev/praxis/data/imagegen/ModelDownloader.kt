@@ -45,6 +45,13 @@ sealed interface DownloadResult {
 
     /** 传输/解压失败。残留已清理。 */
     data class Failed(val detail: String) : DownloadResult
+
+    /**
+     * 用户取消。残留已清理。
+     *
+     * 与 [Failed] 分开：取消不是错误，界面不该弹红字，也不该进「失败率」这类统计。
+     */
+    data object Cancelled : DownloadResult
 }
 
 /**
@@ -78,7 +85,17 @@ class ModelDownloader(
      *
      * @param onProgress 每写一块回调一次；`fraction` 可能为 null（总量未知）。
      */
-    fun download(plan: ImageDownloadPlan, onProgress: (DownloadProgress) -> Unit): DownloadResult {
+    fun download(
+        plan: ImageDownloadPlan,
+        onProgress: (DownloadProgress) -> Unit,
+        /**
+         * 每写一块检查一次「要不要停」。
+         *
+         * 为什么不用协程取消：这里的读是**阻塞 IO**，`Job.cancel()` 打断不了卡在
+         * `InputStream.read` 上的线程。用标志位让循环自己退出，才能保证清理真的跑完。
+         */
+        shouldStop: () -> Boolean = { false },
+    ): DownloadResult {
         // ① 目录 + 预检。先清残留再判空间：否则上次失败的 .part 会让预检自相矛盾地报「不够」。
         if (!plan.targetDir.exists() && !plan.targetDir.mkdirs()) {
             return DownloadResult.Failed("无法创建模型目录：" + plan.targetDir.absolutePath)
@@ -105,6 +122,10 @@ class ModelDownloader(
                     part.outputStream().use { output ->
                         val buffer = ByteArray(BUFFER_SIZE)
                         while (true) {
+                            if (shouldStop()) {
+                                cleanStale(plan)
+                                return DownloadResult.Cancelled
+                            }
                             val read = input.read(buffer)
                             if (read <= 0) break
                             output.write(buffer, 0, read)

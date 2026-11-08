@@ -167,6 +167,24 @@ class ModelDownloaderTest {
     }
 
     @Test
+    fun `取消时返回 Cancelled 并清理残留`() {
+        val root = tmp.newFolder("models")
+        val plan = ImageDownloadPlanner.plan(root, multiModel())
+        var progressed = 0
+        val downloader = ModelDownloader(baseUrl = "") { ByteArrayInputStream(ByteArray(300_000)) }
+
+        val result = downloader.download(
+            plan = plan,
+            onProgress = { progressed += 1 },
+            shouldStop = { progressed > 0 },
+        )
+
+        assertTrue("取消不是失败", result is DownloadResult.Cancelled)
+        assertTrue("残留必须清掉", plan.partPaths.none { it.exists() })
+        assertFalse(ImageModelCatalog.isInstalled(root, multiModel()))
+    }
+
+    @Test
     fun `体积未知时结果里明确标注而不是当成预检通过`() {
         val root = tmp.newFolder("models")
         val base = ImageDownloadPlanner.plan(root, zipModel())

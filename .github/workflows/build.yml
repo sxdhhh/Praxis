@@ -401,7 +401,7 @@ jobs:
           for CT in MemoryPortImplTest ToolWorkflowPortTest HardLinkParseTest \
                     ProotLoaderStagingTest SessionShutdownTest WiringGuardTest \
                     GenerateImageToolTest OpenAiCompatProviderNonStreamingTest \
-                    ModelDownloaderTest; do
+                    ModelDownloaderTest ImageModelDownloadManagerTest; do
             echo "::group::$CT"
             timeout --signal=KILL 240 ./gradlew :app:testDebugUnitTest \
               --tests "*$CT" --stacktrace
