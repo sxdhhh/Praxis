@@ -443,5 +443,58 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
                 db.execSQL("ALTER TABLE `sessions` ADD COLUMN `contextLimit` INTEGER NOT NULL DEFAULT 0")
             }
         }
+
+        /**
+         * v12 -> v13：新增 `gateway_model`（结构化模型条目）。
+         *
+         * ## 为什么这条必须手写，而不能继续靠 [Database.autoMigrations]
+         *
+         * `AutoMigration(11, 13)` 只覆盖「**从 11 直接升到 13**」的设备。Room **不会**
+         * 把它拆成 11->12、12->13 两步。于是装过 v12 那一版的设备（真机上就是这种情况）
+         * 打开数据库时报：
+         *
+         * ```
+         * IllegalStateException: A migration from 12 to 13 was required but not found
+         * ```
+         *
+         * 表现为「启动约 3 秒后崩溃」—— 界面已经画出来了，第一条查询才去开库。
+         *
+         * 改成两段 AutoMigration 也不行：那要求 `12.json` 在 schema 目录里，而它只在
+         * 真正构建过 v12 时才会生成。所以这一步手写建表 SQL，11->13 的自动迁移保留。
+         *
+         * ## SQL 必须与实体逐列一致
+         *
+         * Room 打开库时用 identity hash 校验表结构。列名、类型、NOT NULL 有一处不对，
+         * 表现不是「数据静默丢失」，而是启动即崩并打印期望/实际的结构差异 —— 严格比宽松安全。
+         * 列的来源是 `GatewayModelEntity`（列顺序、可空性逐字对齐）。
+         */
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `gateway_model` (" +
+                        "`provider` TEXT NOT NULL, " +
+                        "`id` TEXT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`kind` TEXT NOT NULL, " +
+                        "`source` TEXT NOT NULL, " +
+                        "`enabled` INTEGER NOT NULL, " +
+                        "`credits` REAL, " +
+                        "`supportsToolCall` INTEGER, " +
+                        "`supportsImages` INTEGER, " +
+                        "`supportsVideo` INTEGER, " +
+                        "`supportsReasoning` INTEGER, " +
+                        "`supportsImageGeneration` INTEGER, " +
+                        "`supportsImageEditing` INTEGER, " +
+                        "`inputModalities` TEXT NOT NULL, " +
+                        "`maxInputTokens` INTEGER, " +
+                        "`maxOutputTokens` INTEGER, " +
+                        "`reasoningEfforts` TEXT NOT NULL, " +
+                        "`reasoningDefault` TEXT, " +
+                        "`reasoningFixed` TEXT, " +
+                        "`reasoningSource` TEXT, " +
+                        "PRIMARY KEY(`provider`, `id`))",
+                )
+            }
+        }
     }
 }

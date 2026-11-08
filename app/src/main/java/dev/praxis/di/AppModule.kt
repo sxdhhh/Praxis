@@ -59,6 +59,10 @@ val appModule = module {
                 PraxisDatabase.MIGRATION_6_7,
 
                 PraxisDatabase.MIGRATION_7_8,
+                // v9：messages 加 reasoning。这条**定义早就存在却没挂上来**（2026-11-09 发现），
+                // 结果停在 v8 的设备升级时同样会报「A migration from 8 to 9 was required but not found」。
+                // 与 12->13 是同一类错误：迁移写好了，但没登记进 builder。
+                PraxisDatabase.MIGRATION_8_9,
                 // v9：messages 加 reasoning（模型思考过程）。
                 //
                 // 同样只加一个可空列，NULL 就是老消息的正确值，无需回填。
@@ -73,6 +77,14 @@ val appModule = module {
                 // 两个默认 0 的列 —— 老数据等价于「还不知道用量」，
                 // 与旧行为一致（旧实现在重启后同样是 0）。
                 PraxisDatabase.MIGRATION_10_11,
+                // v12 -> v13：新增 gateway_model。
+                //
+                // ## 为什么这条不能省（真机踩到过）
+                //
+                // `autoMigrations = [AutoMigration(11, 13)]` 只覆盖「从 11 直冲 13」的设备；
+                // Room 不会自动拆成 11->12、12->13。装过 v12 那一版的设备因此打不开库，
+                // 表现是「界面加载约 3 秒后崩溃」（第一条查询才去开库）。
+                PraxisDatabase.MIGRATION_12_13,
             )
             .build()
     }
