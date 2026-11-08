@@ -175,6 +175,9 @@ data object SettingsGateway : PraxisRoute
  */
 data object SettingsGatewayAccounts : PraxisRoute
 
+/** 网关的导入导出（设置 -> 网关 -> 导入导出）。 */
+data object SettingsGatewayImport : PraxisRoute
+
 data object SettingsCompatPluginEntries : PraxisRoute
 
 /**

@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Construction
 import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Insights
 import dev.praxis.ui.navigation.LocalNavigator
 import dev.praxis.ui.navigation.PraxisRoute
@@ -90,6 +91,29 @@ fun GatewayRoute(
                         accountCount.toString() + " 个账号 · 点这里管理"
                     },
                     onClick = { navigator.push(PraxisRoute.SettingsGatewayAccounts) },
+                )
+            }
+        }
+
+        // ── 导入导出（文档 9.7）──
+        item(key = "__import_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Restore,
+                title = "导入导出",
+                subtitle = "把网关那边配好的账号搬过来",
+            )
+        }
+        item(key = "__import_card__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "导入导出",
+                    description = "从剪贴板导入账号文件",
+                    onClick = { navigator.push(PraxisRoute.SettingsGatewayImport) },
                 )
             }
         }

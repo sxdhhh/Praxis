@@ -263,6 +263,20 @@ fun PraxisApp(
         )
     }
 
+    // ── 导入（文档 9.7 的「从剪贴板」入口）──
+    //
+    // 分两步：先预检（只解析、不写库），把四段报告给用户看；确认之后才写。
+    // 顺序不能反 —— 写完了再报，用户就没得选了。
+    var gatewayImportBusy by remember { mutableStateOf(false) }
+    var gatewayImportReport by remember {
+        mutableStateOf<dev.praxis.core.gateway.GatewayImportReport?>(null)
+    }
+    var gatewayImportPlan by remember {
+        mutableStateOf<dev.praxis.core.gateway.GatewayImportPlan?>(null)
+    }
+    var gatewayImportResult by remember { mutableStateOf<String?>(null) }
+    var gatewayImportError by remember { mutableStateOf<String?>(null) }
+
     var gatewayAccountRows by remember {
         mutableStateOf<List<dev.praxis.core.gateway.GatewayAccountRow>>(emptyList())
     }
@@ -383,6 +397,16 @@ fun PraxisApp(
      * 捕获它不会造成泄漏（这个 Composable 本身生命周期不长于 Activity）。
      */
     val appContext = androidx.compose.ui.platform.LocalContext.current
+
+    /**
+     * 剪贴板。在组合期取一次并记住。
+     *
+     * 与上面 appContext 同一条纪律：不在回调里读 LocalContext.current，
+     * 那个时刻已经不在组合期了。
+     */
+    val clipboardManager = remember(appContext) {
+        appContext.getSystemService(android.content.ClipboardManager::class.java)
+    }
 
     // 运行时权限申请。回调不逐条比对结果，统一 refresh() 回读系统真值 ——
     // 多权限、部分授予时逐条比对必错。
@@ -1081,6 +1105,75 @@ fun PraxisApp(
                     // 运行期状态是内存里的，清掉就是真的清掉；随后触发一次重算。
                     ids.forEach { gatewayRouteState.onSuccess(it) }
                     gatewayRowsRefresh += 1
+                },
+                gatewayImportBusy = gatewayImportBusy,
+                gatewayImportReport = gatewayImportReport,
+                gatewayImportResult = gatewayImportResult,
+                gatewayImportError = gatewayImportError,
+                onImportFromClipboard = {
+                    gatewayImportError = null
+                    gatewayImportResult = null
+                    val text = clipboardManager?.primaryClip
+                        ?.takeIf { it.itemCount > 0 }
+                        ?.getItemAt(0)
+                        ?.coerceToText(appContext)
+                        ?.toString()
+                    if (text.isNullOrBlank()) {
+                        gatewayImportError = "剪贴板里没有文本。请先在网关面板导出账号文件并复制内容。"
+                    } else {
+                        gatewayImportBusy = true
+                        coroutineScope.launch {
+                            val existing = gatewayAccountStore.all().map { it.id }.toSet()
+                            // 认得哪些家：目前只有我们自己表里已有的自定义家。
+                            // 内置家要等 P5 的上游实现 —— 不认得的会被跳过，理由写进报告。
+                            val known = gatewayAccountStore.providers().map { it.id }.toSet()
+                            val plan = dev.praxis.core.gateway.GatewayImporter.prepare(
+                                files = mapOf("clipboard.json" to text),
+                                existingIds = existing,
+                                knownProviders = known,
+                            )
+                            gatewayImportPlan = plan
+                            gatewayImportReport = plan.report
+                            gatewayImportBusy = false
+                        }
+                    }
+                },
+                onConfirmGatewayImport = {
+                    val plan = gatewayImportPlan
+                    if (plan == null) {
+                        gatewayImportError = "没有待写入的导入计划（先解析一次）"
+                    } else {
+                        gatewayImportBusy = true
+                        coroutineScope.launch {
+                            val result = gatewayAccountStore.applyImport(plan)
+                            gatewayImportBusy = false
+                            gatewayImportReport = null
+                            gatewayImportPlan = null
+                            gatewayImportResult = result.fold(
+                                onSuccess = { stored ->
+                                    val head = "已写入 " + stored.accountIds.size + " 个账号"
+                                    val tail = if (stored.providersWithoutBaseUrl.isEmpty()) {
+                                        ""
+                                    } else {
+                                        "；有 " + stored.providersWithoutBaseUrl.size +
+                                            " 个自定义家没有地址，没有写入"
+                                    }
+                                    head + tail
+                                },
+                                onFailure = { error ->
+                                    "写入失败：" + (error.message ?: "未说明原因") +
+                                        "。没有写入任何账号（不会存明文）。"
+                                },
+                            )
+                            gatewayRowsRefresh += 1
+                        }
+                    }
+                },
+                onDismissGatewayImport = {
+                    gatewayImportReport = null
+                    gatewayImportPlan = null
+                    gatewayImportResult = null
+                    gatewayImportError = null
                 },
                 repository = settingsRepository,
                 versionName = versionName,

@@ -76,6 +76,20 @@ fun SettingsHost(
      * 没有默认值：这是会真的改状态的操作，不该有一个「忘了传就静默无效」的默认实现。
      */
     onClearGatewayRuntime: (List<String>) -> Unit,
+    /** 导入页的四段报告（预检结果；null = 还没解析）。 */
+    gatewayImportReport: dev.praxis.core.gateway.GatewayImportReport? = null,
+    /** 导入页的落库结果文案。 */
+    gatewayImportResult: String? = null,
+    /** 导入页的错误文案。 */
+    gatewayImportError: String? = null,
+    /** 解析中（阻塞对话框）。 */
+    gatewayImportBusy: Boolean = false,
+    /** 从剪贴板读并预检。 */
+    onImportFromClipboard: () -> Unit = {},
+    /** 预检通过后写入。 */
+    onConfirmGatewayImport: () -> Unit = {},
+    /** 关掉导入页的对话框/结果。 */
+    onDismissGatewayImport: () -> Unit = {},
     repository: SettingsRepository,
     versionName: String,
     versionCode: Int,
@@ -207,6 +221,13 @@ fun SettingsHost(
             route = route,
             gatewayAccountRows = gatewayAccountRows,
             onClearGatewayRuntime = onClearGatewayRuntime,
+            gatewayImportReport = gatewayImportReport,
+            gatewayImportResult = gatewayImportResult,
+            gatewayImportError = gatewayImportError,
+            gatewayImportBusy = gatewayImportBusy,
+            onImportFromClipboard = onImportFromClipboard,
+            onConfirmGatewayImport = onConfirmGatewayImport,
+            onDismissGatewayImport = onDismissGatewayImport,
             pluginRuntime = pluginRuntime,
             capturedEntries = capturedEntries,
             activationFailures = activationFailures,
@@ -316,6 +337,13 @@ private fun SettingsPageBody(
     gatewayAccountRows: List<dev.praxis.core.gateway.GatewayAccountRow> = emptyList(),
     /** 批量清空运行期状态（见 [SettingsHost] 上的同名参数）。 */
     onClearGatewayRuntime: (List<String>) -> Unit = {},
+    gatewayImportReport: dev.praxis.core.gateway.GatewayImportReport? = null,
+    gatewayImportResult: String? = null,
+    gatewayImportError: String? = null,
+    gatewayImportBusy: Boolean = false,
+    onImportFromClipboard: () -> Unit = {},
+    onConfirmGatewayImport: () -> Unit = {},
+    onDismissGatewayImport: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     when (route) {
@@ -521,6 +549,16 @@ private fun SettingsPageBody(
         )
         // 账号页：账号池的存储层已经就绪，但还没有「添加账号」的界面（P1 剩余部分），
         // 所以这里传的是真实状态（空列表），不是占位数据。
+        PraxisRoute.SettingsGatewayImport -> dev.praxis.feature.gateway.GatewayImportScreen(
+            busy = gatewayImportBusy,
+            report = gatewayImportReport,
+            resultText = gatewayImportResult,
+            errorMessage = gatewayImportError,
+            onImportFromClipboard = onImportFromClipboard,
+            onConfirmImport = onConfirmGatewayImport,
+            onDismissDialog = onDismissGatewayImport,
+            modifier = modifier,
+        )
         PraxisRoute.SettingsGatewayAccounts -> dev.praxis.feature.gateway.GatewayAccountsScreen(
             rows = gatewayAccountRows,
             onMove = { _, _ -> },
