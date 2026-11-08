@@ -14,6 +14,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import dev.praxis.core.model.settings.ColorSource
 import dev.praxis.core.model.settings.ApiProvider
 import dev.praxis.core.model.settings.ModelAdvancedSettings
+import dev.praxis.core.model.settings.ModelProfileKind
 import dev.praxis.core.model.settings.ModelSettings
 import dev.praxis.core.model.settings.FunctionSlot
 import dev.praxis.core.model.settings.FunctionModelSettings
@@ -220,6 +221,41 @@ class SettingsRepository(
     private val KEY_PROFILE_NAMES = stringPreferencesKey("model_profile_names")
 
     /**
+     * 配置 id -> 形态（`Single` / `Gateway`）。
+     *
+     * 编码与 [KEY_PROFILE_NAMES] 同款（`id\u0001kind` 逐行），理由也一样：
+     * 要保序、又不值得为它开一张表。**没有这一行 = Single**，
+     * 所以老数据不需要迁移。
+     */
+    private val KEY_PROFILE_KINDS = stringPreferencesKey("model_profile_kinds")
+
+    /**
+     * 是否已经播种过「默认配置 + 网关配置」。
+     *
+     * 用户删掉「网关」配置是合法操作，不能每次启动又给他加回去 ——
+     * 那会变成删不掉的条目。所以用这个标记保证只播种一次。
+     */
+    private val KEY_PROFILE_SEEDED = booleanPreferencesKey("model_profile_seeded")
+
+    /** 解析 `id\u0001kind` 串。认不出的 kind 当作没写过。 */
+    private fun parseProfileKinds(raw: String?): Map<String, ModelProfileKind> =
+        raw.orEmpty().split('\n').filter { it.isNotBlank() }.mapNotNull { line ->
+            val sep = line.indexOf('\u0001')
+            if (sep <= 0) return@mapNotNull null
+            val id = line.substring(0, sep)
+            val kind = ModelProfileKind.entries.firstOrNull { it.name == line.substring(sep + 1) }
+                ?: return@mapNotNull null
+            id to kind
+        }.toMap()
+
+    /** 写入/覆盖一个配置的形态。 */
+    private fun upsertProfileKind(raw: String?, id: String, kind: ModelProfileKind): String {
+        val kept = raw.orEmpty().split('\n')
+            .filter { it.isNotBlank() && !it.startsWith(id + '\u0001') }
+        return (kept + (id + '\u0001' + kind.name)).joinToString("\n")
+    }
+
+    /**
      * 某配置的某个字段的 key。
      *
      * [profileId] 为 null/空 时返回 [legacy] —— 这就是**旧配置兼容**的全部：
@@ -241,11 +277,13 @@ class SettingsRepository(
         dataStore.data.map { prefs ->
             val ids = parseIds(prefs[KEY_PROFILE_IDS])
             val names = parseProfileNames(prefs[KEY_PROFILE_NAMES].orEmpty())
+            val kinds = parseProfileKinds(prefs[KEY_PROFILE_KINDS])
             val profiles = ids.map { id ->
                 dev.praxis.core.model.settings.ModelProfile(
                     id = id,
                     name = names[id] ?: id,
                     settings = readModelSettings(prefs, id),
+                    kind = kinds[id] ?: ModelProfileKind.Single,
                 )
             }
             dev.praxis.core.model.settings.ModelProfileSet(
@@ -295,6 +333,7 @@ class SettingsRepository(
     suspend fun createProfile(
         name: String,
         settings: ModelSettings = ModelSettings(),
+        kind: ModelProfileKind = ModelProfileKind.Single,
     ): String {
         // ## id 必须**在写入时**校验唯一性（2026-11-05 修）
         //
@@ -324,10 +363,77 @@ class SettingsRepository(
                 name.ifBlank { "新配置" },
             )
             writeModelSettings(prefs, candidate, settings)
+            prefs[KEY_PROFILE_KINDS] = upsertProfileKind(
+                prefs[KEY_PROFILE_KINDS],
+                candidate,
+                kind,
+            )
             // 第一个配置自动成为当前 —— 否则用户建完发现「没生效」。
             if (prefs[KEY_PROFILE_ACTIVE].isNullOrBlank()) prefs[KEY_PROFILE_ACTIVE] = candidate
         }
         return created
+    }
+
+    /**
+     * 播种：确保有一套「默认配置」，并预置一套「网关」配置。
+     *
+     * ## 为什么要有这一步（网关移植 决定二）
+     *
+     * 网关模式在模型页是一套独立形态：用户切到「网关」后不需要填地址与密钥。
+     * 这套配置必须**先存在**，否则用户得先自己「新建配置」再猜它有什么不同。
+     *
+     * ## 三条约束
+     *
+     * 1. **网关配置不设为当前**：用户还没配账号时切过去，所有对话都会发不出去。
+     * 2. **只播种一次**：用户删掉「网关」配置是合法的，不能每次启动又加回来。
+     * 3. **老用户也收拢**：没有多配置的用户，第一次进来把旧的扁平 key 收进
+     *    「默认配置」，他看到的是自己原来的配置，不是一张白纸。
+     *
+     * 幂等：重复调用什么都不改。
+     */
+    suspend fun ensureProfiles() {
+        dataStore.edit { prefs ->
+            if (prefs[KEY_PROFILE_SEEDED] == true) return@edit
+
+            val existing = parseIds(prefs[KEY_PROFILE_IDS])
+            if (existing.isEmpty()) {
+                val defaultId = nextProfileId()
+                prefs[KEY_PROFILE_IDS] = defaultId
+                prefs[KEY_PROFILE_NAMES] = appendProfileName(
+                    prefs[KEY_PROFILE_NAMES].orEmpty(),
+                    defaultId,
+                    "默认配置",
+                )
+                prefs[KEY_PROFILE_KINDS] = upsertProfileKind(
+                    prefs[KEY_PROFILE_KINDS],
+                    defaultId,
+                    ModelProfileKind.Single,
+                )
+                // 旧扁平 key 收进新配置：用户升级后看到的是自己原来的设置。
+                writeModelSettings(prefs, defaultId, readModelSettings(prefs, null))
+                prefs[KEY_PROFILE_ACTIVE] = defaultId
+            }
+
+            val kinds = parseProfileKinds(prefs[KEY_PROFILE_KINDS])
+            val hasGateway = kinds.values.any { it == ModelProfileKind.Gateway }
+            if (!hasGateway) {
+                val gatewayId = nextProfileId()
+                prefs[KEY_PROFILE_IDS] = (parseIds(prefs[KEY_PROFILE_IDS]) + gatewayId)
+                    .joinToString("\n")
+                prefs[KEY_PROFILE_NAMES] = appendProfileName(
+                    prefs[KEY_PROFILE_NAMES].orEmpty(),
+                    gatewayId,
+                    "网关",
+                )
+                prefs[KEY_PROFILE_KINDS] = upsertProfileKind(
+                    prefs[KEY_PROFILE_KINDS],
+                    gatewayId,
+                    ModelProfileKind.Gateway,
+                )
+            }
+
+            prefs[KEY_PROFILE_SEEDED] = true
+        }
     }
 
     /**

@@ -203,6 +203,13 @@ fun PraxisApp(
         pluginActivation.activateAll()
     }
 
+    // 播种模型配置：确保「默认配置 + 网关配置」存在（幂等，只播一次）。
+    //
+    // 放在启动时而不是模型页里：网关配置要在用户第一次打开模型页之前就存在。
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        settingsRepository.ensureProfiles()
+    }
+
     // 装载完成后重新取一次捕获到的入口。
     //
     // 静态快照会让列表停在启动那一刻：装载是异步的，页面可能先组合出来。

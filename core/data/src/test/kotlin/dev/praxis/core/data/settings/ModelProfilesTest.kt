@@ -3,6 +3,7 @@ package dev.praxis.core.data.settings
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
+import dev.praxis.core.model.settings.ModelProfileKind
 import dev.praxis.core.model.settings.ModelSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -340,5 +341,38 @@ class ModelProfilesTest {
         repo.setActiveProfile("p-nope")
 
         assertEquals("不该把 activeId 写成脏值", a, repo.modelProfiles.first().activeId)
+    }
+
+    /** 播种：没有配置时建「默认配置」，并预置一条「网关」配置（不设为当前）。 */
+    @Test
+    fun ensureProfilesSeedsDefaultAndGateway() = runBlocking {
+        val repo = newRepo()
+        repo.ensureProfiles()
+
+        val set = repo.modelProfiles.first()
+        assertEquals(2, set.profiles.size)
+        assertEquals("默认配置", set.profiles[0].name)
+        assertEquals(ModelProfileKind.Single, set.profiles[0].kind)
+        assertEquals("网关", set.profiles[1].name)
+        assertEquals(ModelProfileKind.Gateway, set.profiles[1].kind)
+        // 网关配置不设为当前：用户还没配账号时切过去，所有对话都会发不出去。
+        assertEquals("网关配置不该设为当前", set.profiles[0].id, set.activeId)
+    }
+
+    /** 播种幂等；用户删掉「网关」后不会被加回来。 */
+    @Test
+    fun ensureProfilesIsIdempotent() = runBlocking {
+        val repo = newRepo()
+        repo.ensureProfiles()
+        repo.ensureProfiles()
+        assertEquals(2, repo.modelProfiles.first().profiles.size)
+
+        val gateway = repo.modelProfiles.first().profiles
+            .first { it.kind == ModelProfileKind.Gateway }
+        repo.deleteProfile(gateway.id)
+        repo.ensureProfiles()
+
+        // 用户删掉是合法操作：再播种加回来就变成删不掉的条目。
+        assertEquals(1, repo.modelProfiles.first().profiles.size)
     }
 }

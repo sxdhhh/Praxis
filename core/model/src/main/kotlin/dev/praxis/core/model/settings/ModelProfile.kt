@@ -36,6 +36,23 @@ package dev.praxis.core.model.settings
  * 与 `ModelSettings` 同一条纪律：这个对象会进日志、进状态快照。
  * key 单独加密存取（见 `SettingsRepository.profileApiKey(id)`）。
  */
+/**
+ * 一套配置的形态。
+ *
+ * ## 为什么要有这个字段（网关移植 决定二）
+ *
+ * 网关模式下，服务商 / 接口地址 / API Key 属于**账号**而不是配置：一个网关
+ * 可以挂多个账号。若还让用户在配置页填地址与密钥，就退化成「一套配置一个
+ * 账号」，与网关的意义相反。所以用 kind 把两种形态分开，而不是加一堆可空字段。
+ */
+enum class ModelProfileKind {
+    /** 普通配置：自己填服务商、地址、密钥。 */
+    Single,
+
+    /** 网关配置：地址与密钥由网关账号池管理，这里只选对外模型名。 */
+    Gateway,
+}
+
 data class ModelProfile(
     /** 稳定标识（建配置时生成，重命名不变）。 */
     val id: String,
@@ -43,6 +60,8 @@ data class ModelProfile(
     val name: String,
     /** 这套配置的全部参数。 */
     val settings: ModelSettings = ModelSettings(),
+    /** 配置形态。默认普通配置，旧数据不需要迁移。 */
+    val kind: ModelProfileKind = ModelProfileKind.Single,
 ) {
 
     /**
