@@ -4699,6 +4699,12 @@ private fun AiError.displayText(): String = when (kind) {
     AiErrorKind.AUTH -> "密钥无效或权限不足，请到设置里检查。"
     AiErrorKind.INVALID_REQUEST -> "请求参数有误，请检查模型配置。"
     AiErrorKind.CANCELLED -> "已取消。"
+    // 额度用尽与速率限制分开说：前者要等重置，后者等一下就好。
+    AiErrorKind.QUOTA_LIMITED -> "额度已用尽，等额度重置后再试。"
+    // 令牌过期可以续期或重新授权，与「密钥错了」的处置不同。
+    AiErrorKind.TOKEN_EXPIRED -> "登录凭证已过期，请到设置里重新授权。"
+    // 内容拦截换哪家都会被拦，别让用户以为是账号的问题。
+    AiErrorKind.CONTENT_BLOCKED -> "这次请求被上游的内容策略拦下了，调整输入内容后再试。"
     AiErrorKind.PROTOCOL -> "服务端返回的数据无法解析，请检查接口地址是否正确。"
     AiErrorKind.UNKNOWN -> "出现未知错误：$message"
 }

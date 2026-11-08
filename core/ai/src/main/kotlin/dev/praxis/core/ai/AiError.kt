@@ -43,6 +43,39 @@ enum class AiErrorKind {
     PROTOCOL,
 
 
+    /**
+     * 额度用尽（429 且正文表明配额耗尽，或正文带配额标记）。
+     *
+     * ## 与 [RATE_LIMIT] 分开的理由
+     *
+     * 两者都是 429，但用户该做的事完全不同：速率限制等一下就好；额度用尽要等
+     * 上游重置（或换号）。混成一类，网关就会把「等十秒」和「等一天」当成同一件事。
+     *
+     * ## 谁产出它（当前未实现）
+     *
+     * 需要看响应正文里的配额标记。这个判定点还没写，所以现在不会出现这个 kind；
+     * 加它进来是为了让判定落地时路由层的行为已经是对的（见 7.4 第 1 行）。
+     */
+    QUOTA_LIMITED,
+
+    /**
+     * 令牌过期（401 且正文说明令牌失效，而不是密钥写错）。
+     *
+     * 与 [AUTH] 分开：令牌过期可以**尝试续期一次**再换号，密钥错只能让用户重填。
+     *
+     * 同样：正文判定点尚未实现，现在不会产出。
+     */
+    TOKEN_EXPIRED,
+
+    /**
+     * 内容拦截：HTTP 200，但正文是拒绝标记，或 finish_reason 命中。
+     *
+     * 这类失败**不罚账号**——换哪个号都会被拦（文档 7.4 第 3 行）。
+     *
+     * 同样：判定点尚未实现（需要检查正文与 finish_reason），现在不会产出。
+     */
+    CONTENT_BLOCKED,
+
     /** 用户主动取消（协程被 cancel）。 */
     CANCELLED,
 
@@ -70,7 +103,13 @@ data class AiError(
             AiErrorKind.AUTH, AiErrorKind.INVALID_REQUEST,
             AiErrorKind.CANCELLED, AiErrorKind.UNKNOWN,
             // 服务端回来的响应体形态不对，原样重试只会拿到同样的形态。
-            AiErrorKind.PROTOCOL -> false
+            AiErrorKind.PROTOCOL,
+            // 额度用尽要等上游重置，原样重试只会再撞一次 429。
+            AiErrorKind.QUOTA_LIMITED,
+            // 令牌过期要续期（或由用户重填），重试没有意义。
+            AiErrorKind.TOKEN_EXPIRED,
+            // 内容拦截换谁都会被拦，重试同样没用。
+            AiErrorKind.CONTENT_BLOCKED -> false
         }
 
     companion object {

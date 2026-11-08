@@ -14,6 +14,7 @@ import dev.praxis.core.gateway.GatewayCredential
 import dev.praxis.core.gateway.GatewayModelRules
 import dev.praxis.core.gateway.RouteState
 import dev.praxis.core.gateway.RouterSession
+import dev.praxis.core.gateway.toFailureKind
 import dev.praxis.core.model.settings.CustomHeader
 import dev.praxis.data.ai.OpenAiCompatProvider
 import kotlinx.coroutines.flow.Flow
@@ -140,20 +141,4 @@ class GatewayProvider(
             ),
         )
     }
-}
-
-/** AiErrorKind 到文档 7.4 失败分类的映射。 */
-internal fun AiErrorKind.toFailureKind(): FailureKind = when (this) {
-    AiErrorKind.RATE_LIMIT -> FailureKind.QuotaLimited
-    AiErrorKind.AUTH -> FailureKind.CredentialExpired
-    AiErrorKind.INVALID_REQUEST -> FailureKind.InvalidRequest
-    AiErrorKind.NETWORK,
-    AiErrorKind.SERVER,
-    AiErrorKind.STREAM_INTERRUPTED,
-    AiErrorKind.PROTOCOL,
-    AiErrorKind.UNKNOWN,
-    -> FailureKind.UpstreamError
-
-    // 调用方在拿到 CANCELLED 时就原样抛出，不该走到这里。
-    AiErrorKind.CANCELLED -> FailureKind.UpstreamError
 }
