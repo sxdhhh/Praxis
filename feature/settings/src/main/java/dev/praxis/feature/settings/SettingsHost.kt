@@ -122,7 +122,10 @@ fun SettingsHost(
         )
     },
     imageGenSocModel: String = "",
-    imageGenInstalledModels: List<String> = emptyList(),
+    imageGenInstalledModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
+    /** 当前选中的生图目标（imagegen_target 解码后的值）。 */
+    imageGenCurrentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
+    onSelectImageGenTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
     imageGenModelsRootPath: String = "",
     imageGenModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
     imageGenInstalledIds: Set<String> = emptySet(),
@@ -281,6 +284,8 @@ fun SettingsHost(
             imageGenProbeEngine = imageGenProbeEngine,
             imageGenSocModel = imageGenSocModel,
             imageGenInstalledModels = imageGenInstalledModels,
+            imageGenCurrentTarget = imageGenCurrentTarget,
+            onSelectImageGenTarget = onSelectImageGenTarget,
             imageGenModelsRootPath = imageGenModelsRootPath,
             imageGenModels = imageGenModels,
             imageGenInstalledIds = imageGenInstalledIds,
@@ -420,7 +425,10 @@ private fun SettingsPageBody(
         )
     },
     imageGenSocModel: String = "",
-    imageGenInstalledModels: List<String> = emptyList(),
+    imageGenInstalledModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
+    /** 当前选中的生图目标（imagegen_target 解码后的值）。 */
+    imageGenCurrentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
+    onSelectImageGenTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
     imageGenModelsRootPath: String = "",
     imageGenModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
     imageGenInstalledIds: Set<String> = emptySet(),
@@ -640,6 +648,8 @@ private fun SettingsPageBody(
             probeEngine = imageGenProbeEngine,
             socModel = imageGenSocModel,
             installedModels = imageGenInstalledModels,
+            currentTarget = imageGenCurrentTarget,
+            onSelectTarget = onSelectImageGenTarget,
             modelsRootPath = imageGenModelsRootPath,
             modifier = modifier,
         )

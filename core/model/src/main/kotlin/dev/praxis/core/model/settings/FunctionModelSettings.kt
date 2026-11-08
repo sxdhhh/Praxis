@@ -83,8 +83,10 @@ enum class FunctionSlot(
      * ## 为什么功能模型页暂时不列出它
      *
      * 那一页的行会把模型写进 [FunctionModelOverride]，而这个槽位的目标在 `imagegen_target`。
-     * 专用选择器还没做，先列出来就是「点进去写到一个没人读的地方」的假入口。
-     * 页面里用 `filter { it != FunctionSlot.IMAGE }` 暂时隐藏，选择器做完再放出来。
+     * 现在选择器已经存在，但入口挂在「设置 → 本地生图 → 更换目标」（那里能同时列出本地模型
+     * 与服务商分组）；功能模型页要复用同一个选择器还得把生图数据一路传进那个屏幕，
+     * 属于独立一步。所以那一页仍用 `filter { it != FunctionSlot.IMAGE }` 隐藏 ——
+     * 列出来却写错地方，就是假入口。
      */
     IMAGE(
         key = "image",

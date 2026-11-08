@@ -56,8 +56,12 @@ fun ImageGenRoute(
     probeEngine: suspend () -> EngineAvailability,
     /** 本机芯片型号原值（`Build.SOC_MODEL`，API < 31 回落 `Build.HARDWARE`）。 */
     socModel: String,
-    /** 已安装的模型显示名。 */
-    installedModels: List<String>,
+    /** 已安装的模型（选择器要用 id）。 */
+    installedModels: List<dev.praxis.core.imagegen.ImageModel>,
+    /** 当前选中的生图目标；null = 还没选。 */
+    currentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
+    /** 选完写回 imagegen_target。 */
+    onSelectTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
     /** 模型目录的绝对路径（只读展示，方便用户自己放文件）。 */
     modelsRootPath: String,
     modifier: Modifier = Modifier,
@@ -68,6 +72,7 @@ fun ImageGenRoute(
 
     var probeTick by remember { mutableStateOf(0) }
     var probe by remember { mutableStateOf<ProbeUi>(ProbeUi.Probing) }
+    var targetPickerVisible by remember { mutableStateOf(false) }
 
     // 进页面探一次；点「重新检测」把 tick 加一即重探。
     LaunchedEffect(probeTick) {
@@ -178,6 +183,38 @@ fun ImageGenRoute(
                 subtitle = "已下载的权重",
             )
         }
+        item(key = "__target_card__") {
+            BareCard {
+                Text(
+                    text = "当前目标",
+                    style = MiuixTheme.textStyles.body2,
+                )
+                Text(
+                    text = targetLine(currentTarget, installedModels),
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+        }
+        item(key = "__target_pick__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "更换目标",
+                    description = if (installedModels.isEmpty()) {
+                        "还没有已下载的模型，先去模型库下一个"
+                    } else {
+                        "从已下载的本地模型里选"
+                    },
+                    onClick = { targetPickerVisible = true },
+                )
+            }
+        }
         item(key = "__models_library__") {
             Card(
                 modifier = Modifier
@@ -200,7 +237,8 @@ fun ImageGenRoute(
                     text = if (installedModels.isEmpty()) {
                         "还没有已安装的模型。"
                     } else {
-                        "已安装 " + installedModels.size + " 个：" + installedModels.joinToString("、")
+                        "已安装 " + installedModels.size + " 个：" +
+                            installedModels.joinToString("、") { model -> model.name }
                     },
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -241,6 +279,28 @@ fun ImageGenRoute(
             }
         }
     }
+
+    ImageGenTargetDialog(
+        visible = targetPickerVisible,
+        onDismiss = { targetPickerVisible = false },
+        localModels = installedModels,
+        current = currentTarget,
+        onSelect = onSelectTarget,
+    )
+}
+
+/** 当前目标的一句话说明（本地显示模型名，而不是 id）。 */
+private fun targetLine(
+    current: dev.praxis.core.imagegen.ImageGenTarget?,
+    installed: List<dev.praxis.core.imagegen.ImageModel>,
+): String = when (current) {
+    null -> "还没选。装好第一个模型后会自动选中它。"
+    is dev.praxis.core.imagegen.ImageGenTarget.Local -> {
+        val name = installed.firstOrNull { it.id == current.modelId }?.name ?: current.modelId
+        "本地：" + name
+    }
+    is dev.praxis.core.imagegen.ImageGenTarget.Remote ->
+        "服务商：" + current.provider + " / " + current.model
 }
 
 @Composable

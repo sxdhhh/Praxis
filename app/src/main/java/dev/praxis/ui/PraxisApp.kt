@@ -492,9 +492,16 @@ fun PraxisApp(
             .map { model -> model.id }
             .toSet()
     }
-    val imageGenInstalledNames = remember(imageGenCatalog, imageGenInstalledIds) {
-        imageGenCatalog.filter { model -> model.id in imageGenInstalledIds }.map { it.name }
+    val imageGenInstalledModels = remember(imageGenCatalog, imageGenInstalledIds) {
+        imageGenCatalog.filter { model -> model.id in imageGenInstalledIds }
     }
+    // 生图目标（文档 §7.3）：解不开时保留原文，这里只把「坏内容」与「没配过」区分开 ——
+    // 与 ImageGenTargetCodec 的约定一致（别把坏内容当成没配过）。
+    val imageGenTargetJson by settingsRepository.imageGenTargetJson.collectAsState(initial = null)
+    val imageGenTargetDecoded = remember(imageGenTargetJson) {
+        dev.praxis.core.imagegen.ImageGenTargetCodec.decode(imageGenTargetJson)
+    }
+    val imageGenCurrentTarget = imageGenTargetDecoded?.getOrNull()
 
     LaunchedEffect(imageGenDownloadState) {
         val downloadState = imageGenDownloadState
@@ -1229,7 +1236,15 @@ fun PraxisApp(
                 },
                 imageGenProbeEngine = { imageGenEngineLocator.probe() },
                 imageGenSocModel = imageGenSocModel,
-                imageGenInstalledModels = imageGenInstalledNames,
+                imageGenInstalledModels = imageGenInstalledModels,
+                imageGenCurrentTarget = imageGenCurrentTarget,
+                onSelectImageGenTarget = { target ->
+                    coroutineScope.launch {
+                        settingsRepository.setImageGenTargetJson(
+                            dev.praxis.core.imagegen.ImageGenTargetCodec.encode(target),
+                        )
+                    }
+                },
                 imageGenModelsRootPath = imageGenModelsRoot.absolutePath,
                 imageGenModels = imageGenCatalog,
                 imageGenInstalledIds = imageGenInstalledIds,
