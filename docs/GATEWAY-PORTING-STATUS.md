@@ -74,6 +74,17 @@ test suites: 117   tests: 1234   failed: 9
 ```
 
 较 4d61367：套件 +1、用例 +4（`GatewayGateTest`），CI 上逐条 PASSED。
+
+三类错误产出点落地后（提交 **dadaff5**，2026-11-09）：
+
+```
+build   success
+verify  success
+test suites: 118   tests: 1247   failed: 9
+```
+
+较 87328ae：套件 +1、用例 +13（`UpstreamErrorClassifierTest`，CI 上 13 条 PASSED）；
+`OpenAiCompatProviderNonStreamingTest` 5 条在 `:app` per-class 步骤执行、无 FAILED。
 `GenerateImageToolTest`（10 条）在「Unit tests (:app, per class)」那步执行并通过
 （10 条 STARTED 之后直接 BUILD SUCCESSFUL、无 FAILED），但它**不进汇总行** ——
 因为「Summarize JVM test results」排在 per-class 那两步之前（既有管线顺序，非本次引入）。
@@ -124,7 +135,12 @@ test suites: 117   tests: 1234   failed: 9
    决定「非网关档案不受影响 / 网关档案 + 开 = 走网关 / 网关档案 + 关 = GatewayDisabled」，
    概览页顶部有开关（`MiuixSwitchWidget`）。关掉时**明确报错而不回落** ——
    网关档案上没有 baseUrl/apiKey，回落等于拿空地址发请求
-7. **core:ai 补三类错误**（QuotaLimited / ContentBlocked / TokenExpired）：因此 413 与内容拦截落不到正确分类
+7. ~~core:ai 三类错误的产出点~~ **已完成**（提交 dadaff5）：新增 `UpstreamErrorClassifier`
+   （13 例单测）—— 正文标记优先、状态码兜底；`finish_reason` 是内容拦截的权威信号。
+   接线两处：HTTP 错误路径改用它（429+配额正文 → 额度耗尽；401+过期标记 → 令牌过期；413/上下文超限 → 不换号）；
+   非流式 `emitNonStreaming` 在「content_filter 且一个字都没吐」时抛 `CONTENT_BLOCKED`。
+   **仍有缺口**：流式 SSE 路径的 `content_filter` 还没转成异常 —— 需要在累积器里记「是否已吐内容」，
+   否则会破坏既有的「已吐字不换号」语义。下一轮做。
 8. **token 预算限流**：7.2 只实现了每账号与每家的 RPM，token 预算需要 P3 的请求记录表
 9. **P3 及之后**：协议编码器、报表、日志并入、系统设置、代理、云同步、Rust 内核、签到框架、AGPL 转换
 
@@ -165,6 +181,6 @@ test suites: 117   tests: 1234   failed: 9
 
 1. 模型页自动填网关模型清单（数据已齐：gateway_model + provider 的 modelsJson + mappings 的 alias）
 2. 路由页：候选队列可视化，把 RoutePlan.skipped 的原因展示出来
-3. core:ai 补三类错误，让 413 与内容拦截落到正确分类
+3. ~~core:ai 补三类错误~~（已完成，见 §五-7；流式 content_filter 仍待接线）
 4. ~~gateway_enabled 总开关~~（已完成，见 §五-6）
 5. ~~导出~~（已完成，见 §五-2）
