@@ -69,7 +69,7 @@ fun SettingsHost(
      * 之后由它传入真实数据 —— 这里不做「读不到就当空」的兜底，空列表是
      * 调用方的选择，不是这一层替他决定的。
      */
-    gatewayAccountRows: List<dev.praxis.feature.gateway.GatewayAccountRow> = emptyList(),
+    gatewayAccountRows: List<dev.praxis.core.gateway.GatewayAccountRow> = emptyList(),
     repository: SettingsRepository,
     versionName: String,
     versionCode: Int,

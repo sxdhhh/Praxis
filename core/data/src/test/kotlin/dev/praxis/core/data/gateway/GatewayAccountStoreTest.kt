@@ -1,10 +1,12 @@
 package dev.praxis.core.data.gateway
 
 import dev.praxis.core.gateway.GatewayCredential
+import dev.praxis.core.gateway.GatewayCredentialCodec
 import dev.praxis.core.gateway.GatewayImporter
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -70,10 +72,14 @@ class GatewayAccountStoreTest {
     fun 落库的是密文不是明文() = runBlocking {
         store().applyImport(plan("a1")).getOrThrow()
 
-        val row = accountDao.rows.getValue("a1")
+        val stored = accountDao.rows.getValue("a1").credentialsCipher
+        val plain = GatewayCredentialCodec.encode(GatewayCredential.ApiKey("sk-a1"))
 
-        assertTrue(row.credentialsCipher.startsWith("enc:"))
-        assertFalse("明文不该出现在库里", row.credentialsCipher.contains("sk-a1"))
+        assertTrue(stored.startsWith("enc:"))
+        // 存的必须是 encrypt 的产物，而不是编码后的明文本身。
+        // （不能断言「密文里不含 sk-a1」：这个假加密器只是加前缀，
+        //   它本来就不隐藏内容 —— 那属于真加密器的职责，不归这一层验。）
+        assertNotEquals("库里该存密文而不是明文", plain, stored)
     }
 
     @Test

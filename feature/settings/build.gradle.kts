@@ -9,6 +9,8 @@ android {
 }
 
 dependencies {
+    // 账号行模型（GatewayAccountRow）在核心层；网关页的行数据要经过这里转发。
+    implementation(project(":core:gateway"))
     api(project(":ui:widgets"))
     api(project(":ui:navigation"))
     api(project(":ui:design"))
