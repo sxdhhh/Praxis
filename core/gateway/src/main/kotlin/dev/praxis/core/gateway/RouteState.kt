@@ -94,12 +94,19 @@ class RouteState(
         return until
     }
 
-    /** 熔断是否打开。未启用时恒为 false。 */
-    fun breakerOpen(id: String): Boolean {
-        if (!breaker.enabled) return false
-        val until = breakerOpenUntil[id] ?: return false
-        return until > clock()
+    /**
+     * 熔断的到期时刻；未打开或已过期返回 null。
+     *
+     * 文档 6.5 的签名里只有 breakerOpen（布尔）。但界面上要显示「还有多久恢复」，
+     * 布尔答不了这个问题 —— 于是补一个只读访问器，与 markSink / markLimit 同理。
+     */
+    fun breakerUntil(id: String): Long? {
+        if (!breaker.enabled) return null
+        return breakerOpenUntil[id]?.takeIf { it > clock() }
     }
+
+    /** 熔断是否打开。未启用时恒为 false。 */
+    fun breakerOpen(id: String): Boolean = breakerUntil(id) != null
 
     /**
      * 一次成功。
