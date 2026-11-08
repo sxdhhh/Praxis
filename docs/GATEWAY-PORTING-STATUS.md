@@ -14,14 +14,43 @@ P0 全部完成；P1 的纯逻辑部分（路由引擎 + 失败切换 + 账号�
 
 | 范围 | 用例数 | 能否本地执行 |
 |---|---|---|
-| core:gateway（纯 JVM） | 160 | 当前机器起不了 Gradle（内存不足），未执行 |
+| core:gateway（纯 JVM） | 167 | 当前机器起不了 Gradle（内存不足），未执行 |
 | core:data 的网关映射与落库 | 20 | 同上，未执行 |
 | :app / :feature（Room 实体、DI、Compose） | 0 | 本地完全编不了，只能交 CI |
 
-所以：这 180 例只是写出来了，还没有在任何地方跑过。本次改动尚未推送，CI 一次都没跑。
-凡本文写「有测试」的地方，指的是存在该用例，不表示它已经通过。
+所以：这 187 例没有在本地跑过（本机起不了 Gradle）。它们靠 CI 验证，结果记在下面一节。
+凡本文写「有测试」的地方，指的是存在该用例；是否通过看下一节的 CI 记录。
 
 已经做过的静态检查只有一种：括号与结构配平（自写脚本）。它只能证明结构没断，证明不了类型正确。
+
+## 二之二、CI 验证结果
+
+推送后 CI（build + verify）全绿：
+
+```
+build   success
+verify  success
+test suites: 106   tests: 1125   failed: 9
+```
+
+| | 这批改动之前 | 现在 | 差 |
+|---|---|---|---|
+| 套件 | 87 | 106 | +19 |
+| 用例 | 945 | 1125 | +180 |
+| 失败 | 9 | 9 | 不变 |
+
+**+180 正好是新增的网关用例数**，失败数一条没增 —— 说明网关这部分全部通过。
+剩下 9 条失败全是既有的 core:plugin 债（PluginRepositoryTest 6 / PluginLoadOrderTest 2 / ExtensionSnapshotTest 1），与网关无关。
+
+推送过程中 CI 抓出并已修掉的真问题（都记在 commit message 里）：
+
+1. toCredential 的空安全：apiKey 与 accessToken 是跨模块的可空属性，拿不到智能转换
+2. SettingsHost 的参数类型还写着旧包名，且 feature:settings 没依赖 core:gateway
+3. 一条自相矛盾的测试断言：假加密器是「前缀 + 明文」，却断言密文不含明文
+4. MiuixNavigationItemWidget.description 是必填非空参数
+5. Room 分两段自动迁移（11 到 12、12 到 13）要求 12.json 存在，而 CI 只构建最终状态，于是合并为一步 11 到 13
+6. 倒计时的死分支：先向上取整再判断 minutes < 1，只要剩余时间大于 0 结果恒大于等于 1
+7. 参数加在了 SettingsHost（薄壳）而不是持有 when (route) 的 SettingsPageBody 上
 
 ## 三、已完成
 
@@ -41,6 +70,7 @@ P0 全部完成；P1 的纯逻辑部分（路由引擎 + 失败切换 + 账号�
 | RouteState.kt | 6.5 四张运行期表 | 13 |
 | CandidateChain.kt | 7.1 候选链 + 5.4 大小写与遮蔽 | 16 |
 | RoutePlanner.kt | 7.2 过滤 + 7.3 排序 | 18 |
+| ConversationKey.kt | 7.3 会话粘性键（显式头优先，否则内容哈希） | 7 |
 | FailoverLoop.kt | 7.4 + 12 换号上限 | 13 |
 | AutoContinuePolicy.kt | 7.5 自动续写 | 10 |
 | GatewayCredential.kt | 6.1 凭证两种形态 | 5 |
