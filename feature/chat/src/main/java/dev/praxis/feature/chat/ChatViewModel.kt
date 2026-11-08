@@ -2206,6 +2206,8 @@ class ChatViewModel(
                 // 两处都必须列出，漏一处就是 NO_ELSE_IN_WHEN 编译错误。）
                 is AiStreamEvent.ReasoningDelta -> Unit
                 is AiStreamEvent.Done -> Unit
+            // 用量上报：这两个消费方都不关心它，但要列全（sealed 的穷尽性）。
+            is AiStreamEvent.Usage -> Unit
             }
         }
         return sb.toString().trim()
@@ -2477,6 +2479,9 @@ class ChatViewModel(
                                 )
                                 runToolCalls(event.calls, assistantId)
                             }
+
+                            // 用量上报：聊天层不消费它（报表才消费），但要列全。
+                            is AiStreamEvent.Usage -> Unit
 
                             is AiStreamEvent.Done -> {
                                 // 兜底：某些网关只发 tool_calls 不发 finish_reason，

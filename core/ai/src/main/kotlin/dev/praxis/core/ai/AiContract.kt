@@ -242,6 +242,27 @@ sealed interface AiStreamEvent {
 
     /** 正常结束。[finishReason] 为 provider 给的原始值。 */
     data class Done(val finishReason: String?) : AiStreamEvent
+
+    /**
+     * 本次请求的 token 用量（上游 `usage` 字段）。
+     *
+     * ## 为什么它是流里的一个事件，而不是 [Done] 的字段
+     *
+     * `Done` 的构造点有十几处（各 provider、各测试），加字段等于全改一遍；
+     * 而用量在协议里本来就是**独立的一次上报**（流式下它出现在最后一片、
+     * 非流式下是响应体的兄弟字段）。做成独立事件，两个来源都能自然映射过来。
+     *
+     * ## 缺失是常态，不是错误
+     *
+     * 上游不给 usage（很多中转站不给）、或流被中断时，就**没有这个事件**。
+     * 消费方必须按「可能没有」处理 —— 不能把它当成本轮一定有。
+     */
+    data class Usage(
+        val promptTokens: Int,
+        val completionTokens: Int,
+        /** Anthropic 风格的缓存命中；OpenAI 兼容多为 0。 */
+        val cacheReadTokens: Int = 0,
+    ) : AiStreamEvent
 }
 
 /**

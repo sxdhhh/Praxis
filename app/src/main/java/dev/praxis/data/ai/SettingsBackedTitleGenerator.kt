@@ -76,6 +76,8 @@ class SettingsBackedTitleGenerator(
                 // 思考增量同样忽略：标题描述的是**回答的主题**，推理不算内容。
                 is AiStreamEvent.ReasoningDelta -> Unit
                 is AiStreamEvent.Done -> Unit
+            // 用量上报：这两个消费方都不关心它，但要列全（sealed 的穷尽性）。
+            is AiStreamEvent.Usage -> Unit
             }
         }
         return builder.toString()

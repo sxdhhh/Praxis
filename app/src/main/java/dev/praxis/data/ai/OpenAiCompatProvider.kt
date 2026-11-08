@@ -174,6 +174,9 @@ class OpenAiCompatProvider(
                 // SSE 事件以空行分隔；readUtf8Line 逐行读，这里补回分隔符
                 sse.feed(line + "\n").forEach { payload ->
                     assembler.feed(payload).forEach { emit(it) }
+                    // 用量通常出现在最后一片（OpenAI 在 stream_options.include_usage 时如此）。
+                    // 单独 emit：它不是正文的一部分，也不该进累积器。
+                    dev.praxis.core.ai.OpenAiUsage.parseJson(payload)?.let { emit(it) }
                 }
                 if (line.isEmpty()) {
                     // 空行 = 一个事件结束
@@ -183,6 +186,7 @@ class OpenAiCompatProvider(
             // 多行拼接后可能还剩一条未以空行结尾的事件
             sse.finish().forEach { payload ->
                 assembler.feed(payload).forEach { emit(it) }
+                dev.praxis.core.ai.OpenAiUsage.parseJson(payload)?.let { emit(it) }
             }
 
             // ── 内容拦截（文档 §7.4，流式这一支）──
@@ -241,6 +245,12 @@ class OpenAiCompatProvider(
         // 本轮先把字段与写入点打通（让开关有实际效果：不再请求 stream），
         // 响应体解析的兼容分支留给下一步（见记忆里的未完成项）。
         put("stream", request.stream)
+        if (request.stream) {
+            // 要求上游在最后一片带上 usage（OpenAI 的 stream_options.include_usage）。
+            // 不认这个参数的兼容实现会忽略它 —— 那时就没有 Usage 事件，
+            // 报表按「没有数据」处理（而不是记一条 0 token）。
+            put("stream_options", buildJsonObject { put("include_usage", true) })
+        }
         put("temperature", request.temperature)
         request.maxTokens?.let { put("max_tokens", it) }
 
@@ -529,6 +539,9 @@ class OpenAiCompatProvider(
                     )
                 }
             }
+
+            // 用量（如果有）：非流式下它是响应体的兄弟字段。
+            dev.praxis.core.ai.OpenAiUsage.parse(root)?.let { events += it }
 
             // 结束事件。非流式一定补一次 Done，否则上层状态机停在 Connecting。
             events += AiStreamEvent.Done(finishReason)
