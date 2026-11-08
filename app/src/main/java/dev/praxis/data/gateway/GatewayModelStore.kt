@@ -30,5 +30,7 @@ class GatewayModelStore(private val dao: GatewayModelDao) {
 
     suspend fun upsertAll(entries: List<GatewayModelEntity>) = dao.upsertAll(entries)
 
+    suspend fun delete(provider: String, id: String) = dao.delete(provider, id)
+
     suspend fun clear() = dao.clear()
 }

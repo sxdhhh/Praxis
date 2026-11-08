@@ -109,6 +109,12 @@ fun SettingsHost(
     /** 网关总开关（文档 §11 末尾的回滚闸）。 */
     gatewayEnabled: Boolean = true,
     onGatewayEnabledChange: (Boolean) -> Unit = {},
+    /** 模型管理页的结构化条目（gateway_model）。 */
+    gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
+    gatewayModelError: String? = null,
+    onToggleGatewayModel: (String, String, Boolean) -> Unit = { _, _, _ -> },
+    onDeleteGatewayModel: (String, String) -> Unit = { _, _ -> },
+    onAddGatewayModel: (String, String, String) -> Unit = { _, _, _ -> },
     /**
      * 本地生图的引擎探活（:app 注入）。
      *
@@ -281,6 +287,11 @@ fun SettingsHost(
             onExportGateway = onExportGateway,
             gatewayEnabled = gatewayEnabled,
             onGatewayEnabledChange = onGatewayEnabledChange,
+            gatewayModelRows = gatewayModelRows,
+            gatewayModelError = gatewayModelError,
+            onToggleGatewayModel = onToggleGatewayModel,
+            onDeleteGatewayModel = onDeleteGatewayModel,
+            onAddGatewayModel = onAddGatewayModel,
             imageGenProbeEngine = imageGenProbeEngine,
             imageGenSocModel = imageGenSocModel,
             imageGenInstalledModels = imageGenInstalledModels,
@@ -418,6 +429,12 @@ private fun SettingsPageBody(
     onExportGateway: (Boolean) -> Unit = {},
     gatewayEnabled: Boolean = true,
     onGatewayEnabledChange: (Boolean) -> Unit = {},
+    /** 模型管理页的结构化条目（gateway_model）。 */
+    gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
+    gatewayModelError: String? = null,
+    onToggleGatewayModel: (String, String, Boolean) -> Unit = { _, _, _ -> },
+    onDeleteGatewayModel: (String, String) -> Unit = { _, _ -> },
+    onAddGatewayModel: (String, String, String) -> Unit = { _, _, _ -> },
     imageGenProbeEngine: suspend () -> dev.praxis.core.imagegen.EngineAvailability = {
         dev.praxis.core.imagegen.EngineAvailability.Unavailable(
             reason = dev.praxis.core.imagegen.EngineAvailability.Unavailable.Reason.NotRunning,
@@ -661,6 +678,14 @@ private fun SettingsPageBody(
         )
         // 账号页：账号池的存储层已经就绪，但还没有「添加账号」的界面（P1 剩余部分），
         // 所以这里传的是真实状态（空列表），不是占位数据。
+        PraxisRoute.SettingsGatewayModels -> dev.praxis.feature.gateway.GatewayModelsScreen(
+            rows = gatewayModelRows,
+            error = gatewayModelError,
+            onToggle = onToggleGatewayModel,
+            onDelete = onDeleteGatewayModel,
+            onAdd = onAddGatewayModel,
+            modifier = modifier,
+        )
         PraxisRoute.SettingsGatewayRouting -> dev.praxis.feature.gateway.GatewayRoutingScreen(
             modelName = gatewayQueueModelName,
             entries = gatewayQueueEntries,

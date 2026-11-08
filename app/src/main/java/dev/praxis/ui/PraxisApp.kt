@@ -321,6 +321,24 @@ fun PraxisApp(
     // 带启停与能力位，代表「用户明确管过」的那批。
     val gatewayModelStore: dev.praxis.data.gateway.GatewayModelStore =
         org.koin.compose.koinInject()
+
+    // 模型管理页的行（结构化条目）。写入后靠 gatewayRowsRefresh 重读，
+    // 与账号池/候选队列同一个刷新信号 —— 三处显示的是同一份真相。
+    var gatewayModelRows by remember {
+        mutableStateOf<List<dev.praxis.core.gateway.GatewayModelRow>>(emptyList())
+    }
+    var gatewayModelError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(gatewayRowsRefresh) {
+        gatewayModelRows = gatewayModelStore.all().map { entity ->
+            dev.praxis.core.gateway.GatewayModelRow(
+                provider = entity.provider,
+                id = entity.id,
+                name = entity.name,
+                kind = entity.kind,
+                enabled = entity.enabled,
+            )
+        }
+    }
     LaunchedEffect(gatewayRowsRefresh, gatewayModelRulesJson) {
         val fromCatalog = dev.praxis.core.gateway.GatewayModelCatalog
             .visibleNames(
@@ -1245,6 +1263,63 @@ fun PraxisApp(
             else -> dev.praxis.feature.settings.SettingsHost(
                 route = route,
                 gatewayAccountRows = gatewayAccountRows,
+                // ── 模型管理页（gateway_model 的写入口）──
+                gatewayModelRows = gatewayModelRows,
+                gatewayModelError = gatewayModelError,
+                onToggleGatewayModel = { provider, id, enabled ->
+                    coroutineScope.launch {
+                        val existing = gatewayModelStore.all()
+                            .firstOrNull { it.provider == provider && it.id == id }
+                        if (existing == null) {
+                            // 找不到就说出来，而不是静默不写（那会让开关看起来生效了）。
+                            gatewayModelError = "找不到这条记录：" + provider + "/" + id
+                        } else {
+                            gatewayModelError = null
+                            gatewayModelStore.upsertAll(listOf(existing.copy(enabled = enabled)))
+                            gatewayRowsRefresh += 1
+                        }
+                    }
+                },
+                onDeleteGatewayModel = { provider, id ->
+                    coroutineScope.launch {
+                        gatewayModelError = null
+                        gatewayModelStore.delete(provider, id)
+                        gatewayRowsRefresh += 1
+                    }
+                },
+                onAddGatewayModel = { provider, id, name ->
+                    coroutineScope.launch {
+                        gatewayModelError = null
+                        // 能力位全部留 null（未知），不猜 —— 见 GatewayModelEntryDefaults 的 KDoc。
+                        val entity = dev.praxis.core.data.gateway.GatewayModelEntity(
+                            provider = provider,
+                            id = id,
+                            name = dev.praxis.core.gateway.GatewayModelEntryDefaults
+                                .displayName(id, name),
+                            kind = dev.praxis.core.gateway.GatewayModelEntryDefaults.DEFAULT_KIND,
+                            source = dev.praxis.core.gateway.GatewayModelEntryDefaults.SOURCE_MANUAL,
+                            enabled = true,
+                            credits = null,
+                            supportsToolCall = null,
+                            supportsImages = null,
+                            supportsVideo = null,
+                            supportsReasoning = null,
+                            supportsImageGeneration = null,
+                            supportsImageEditing = null,
+                            inputModalities = dev.praxis.core.gateway.GatewayModelEntryDefaults
+                                .DEFAULT_INPUT_MODALITIES,
+                            maxInputTokens = null,
+                            maxOutputTokens = null,
+                            reasoningEfforts = dev.praxis.core.gateway.GatewayModelEntryDefaults
+                                .NO_REASONING_EFFORTS,
+                            reasoningDefault = null,
+                            reasoningFixed = null,
+                            reasoningSource = null,
+                        )
+                        gatewayModelStore.upsertAll(listOf(entity))
+                        gatewayRowsRefresh += 1
+                    }
+                },
                 gatewayEnabled = gatewayEnabled,
                 onGatewayEnabledChange = { enabled ->
                     coroutineScope.launch { settingsRepository.setGatewayEnabled(enabled) }

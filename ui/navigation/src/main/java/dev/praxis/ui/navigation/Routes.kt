@@ -182,6 +182,14 @@ data object SettingsGatewayImport : PraxisRoute
 data object SettingsGatewayRouting : PraxisRoute
 
 /**
+ * 网关的模型管理页（设置 -> 网关 -> 模型管理）。
+ *
+ * `gateway_model` 表在 P2 建好却一直没有写入路径（等于一张死表）；
+ * 这一页是它的写入口：手动添加、逐条启停、删除。
+ */
+data object SettingsGatewayModels : PraxisRoute
+
+/**
  * 本地生图（设置 -> 本地生图）。
  *
  * 按 docs/PORTING-IMAGEGEN.md §7.1：不新增 Tab，入口放在设置页，
