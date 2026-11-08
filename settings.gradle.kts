@@ -59,6 +59,7 @@ include(":core:terminal")
 include(":core:linux")
 include(":core:workflow")
 include(":core:plugin")
+include(":core:gateway")
 
 // ── UI 基础设施 ────────────────────────────────────────
 include(":ui:theme")
