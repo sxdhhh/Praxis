@@ -79,6 +79,12 @@ enum class FunctionSlot(
      *
      * 那个类型是「模型 + 服务商」的远端语义，塞不进本地模型 id。所以这一行只是**入口**，
      * 选完写回独立的 `imagegen_target` 键（`core:imagegen` 的 ImageGenTarget）。
+     *
+     * ## 为什么功能模型页暂时不列出它
+     *
+     * 那一页的行会把模型写进 [FunctionModelOverride]，而这个槽位的目标在 `imagegen_target`。
+     * 专用选择器还没做，先列出来就是「点进去写到一个没人读的地方」的假入口。
+     * 页面里用 `filter { it != FunctionSlot.IMAGE }` 暂时隐藏，选择器做完再放出来。
      */
     IMAGE(
         key = "image",

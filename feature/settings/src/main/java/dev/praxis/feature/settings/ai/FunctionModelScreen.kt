@@ -166,7 +166,14 @@ fun FunctionModelRoute(
         item {
             SmallTitle("功能模型")
             Card(modifier = Modifier.padding(horizontal = 12.dp)) {
-                FunctionSlot.entries.forEachIndexed { index, slot ->
+                // 生图（IMAGE）这一行**暂时不在这里渲染**：
+                //
+                // 它的目标是独立的 `imagegen_target`（本地模型 id 塞不进
+                // FunctionModelOverride 的「模型 + 服务商」语义），而专用选择器还没做。
+                // 现在若照常列出，用户点进去会把模型写到一个没人读的地方 ——
+                // 那正是 FunctionSlot 注释里说的「假入口」。等选择器做完再一起放出来。
+                val visibleSlots = FunctionSlot.entries.filter { it != FunctionSlot.IMAGE }
+                visibleSlots.forEachIndexed { index, slot ->
                     FunctionSlotRow(
                         slot = slot,
                         current = functions[slot],
@@ -210,7 +217,7 @@ fun FunctionModelRoute(
                             }
                         },
                     )
-                    if (index != FunctionSlot.entries.lastIndex) {
+                    if (index != visibleSlots.lastIndex) {
                         HorizontalDivider(
                             modifier = Modifier.padding(horizontal = 16.dp),
                             color = MiuixTheme.colorScheme.dividerLine,
