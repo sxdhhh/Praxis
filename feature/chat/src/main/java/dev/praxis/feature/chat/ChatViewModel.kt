@@ -2657,6 +2657,42 @@ class ChatViewModel(
                     name = exec.invocation.name,
                 ),
             )
+
+            // ── 生图结果要进气泡（文档 §6.2）──
+            //
+            // 工具结果本身是 JSON（里面是本地路径），但用户要看的是图。这里把图缩成
+            // 消息用的缩略图挂到**这一轮助手气泡**上（原图仍在磁盘，路径留在工具结果里）。
+            //
+            // 缩图失败时 toBase64Jpeg 返回 null，此处就只是不挂图 —— 展示环节的失败
+            // 不该拖垮整轮对话，用户仍能从工具结果里看到文件路径。
+            //
+            // ## 两个已知边界（不是没想到）
+            //
+            // 1. `MessageEntity` 没有图片列，`images` 只在内存 —— **重启后气泡里的图会消失**，
+            //    但原图还在磁盘、路径还在工具结果文本里。要持久化得先给消息表加列，
+            //    那是独立的一步（现在所有消息的图都是这个行为，不只是生图）。
+            // 2. 挂到**助手**气泡而不是用户气泡是有意的：上游只回传 `role == User` 的图
+            //    （见 OpenAiCompatProvider），所以生成图不会被当成多模态输入再发一遍。
+            if (!exec.result.isError && exec.invocation.name == "generate_image") {
+                val generated = dev.praxis.core.imagegen.GenerateImageResultCodec
+                    .parse(exec.result.content)
+                    .orEmpty()
+                    .mapNotNull { image ->
+                        dev.praxis.feature.chat.widget.ImageThumbnail
+                            .toBase64Jpeg(image.path)
+                            ?.let { base64 ->
+                                dev.praxis.core.ai.ChatImage(
+                                    mimeType = "image/jpeg",
+                                    base64 = base64,
+                                )
+                            }
+                    }
+                if (generated.isNotEmpty()) {
+                    updateBubble(assistantId) { bubble ->
+                        bubble.copy(images = bubble.images + generated)
+                    }
+                }
+            }
             // 流式期间为这次调用建过卡片就**就地填结果**，否则才新建。
             //
             // 为什么不一律新建：卡片提前出现（见 ToolCallDelta 分支）之后，

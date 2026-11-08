@@ -19,6 +19,9 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:ai"))
     implementation(project(":core:tool"))
+    // 生图结果的解析（GenerateImageResultCodec）：工具产出的图要在气泡里显示，
+    // 而结果的 JSON 格式由 core:imagegen 定义 —— 聊天层不该各写一份解析。
+    implementation(project(":core:imagegen"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

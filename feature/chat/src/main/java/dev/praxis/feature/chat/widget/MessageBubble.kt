@@ -292,6 +292,16 @@ fun MessageBubble(
                         }
                     }
 else -> {
+                        // 生成的图内联在助手气泡里（文档 §6.2：与用户上传图同款观感）。
+                        // 画在正文**上方**：先看图再看解说，与用户消息的顺序一致。
+                        //
+                        // 这一支原先不画图 —— 那时 `images` 只有用户消息会带。本地生图把图挂到
+                        // 助手气泡之后，若仍不画，就会出现「消息里明明有图、界面什么都不显示」
+                        // （数据对了、界面没跟上，最难查的那类）。
+                        if (images.isNotEmpty()) {
+                            MessageImages(images = images, contentColor = content)
+                            if (text.isNotBlank()) Spacer(Modifier.height(8.dp))
+                        }
                         // 助手正文走 Markdown 渲染（标题/列表/代码块/表格）。
                         // 光标由 MarkdownText 自己画（`streaming` 参数），
                         // 所以不再叠 StreamingText —— 两者叠用会出现两个闪块。
