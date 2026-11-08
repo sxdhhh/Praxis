@@ -111,6 +111,8 @@ fun SettingsHost(
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
+    /** 添加账号（null = 未接线，页面不画入口）。 */
+    onAddGatewayAccount: (suspend (String, String, String, String) -> Result<String>)? = null,
     gatewayModelError: String? = null,
     onToggleGatewayModel: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onDeleteGatewayModel: (String, String) -> Unit = { _, _ -> },
@@ -289,6 +291,7 @@ fun SettingsHost(
             onGatewayEnabledChange = onGatewayEnabledChange,
             gatewayModelRows = gatewayModelRows,
             gatewayModelError = gatewayModelError,
+            onAddGatewayAccount = onAddGatewayAccount,
             onToggleGatewayModel = onToggleGatewayModel,
             onDeleteGatewayModel = onDeleteGatewayModel,
             onAddGatewayModel = onAddGatewayModel,
@@ -431,6 +434,8 @@ private fun SettingsPageBody(
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
+    /** 添加账号（null = 未接线，页面不画入口）。 */
+    onAddGatewayAccount: (suspend (String, String, String, String) -> Result<String>)? = null,
     gatewayModelError: String? = null,
     onToggleGatewayModel: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onDeleteGatewayModel: (String, String) -> Unit = { _, _ -> },
@@ -707,6 +712,7 @@ private fun SettingsPageBody(
             modifier = modifier,
         )
         PraxisRoute.SettingsGatewayAccounts -> dev.praxis.feature.gateway.GatewayAccountsScreen(
+            onAddAccount = onAddGatewayAccount,
             rows = gatewayAccountRows,
             onMove = { _, _ -> },
             onOpenAccount = { },

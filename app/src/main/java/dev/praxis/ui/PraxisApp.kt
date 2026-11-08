@@ -1266,6 +1266,26 @@ fun PraxisApp(
                 // ── 模型管理页（gateway_model 的写入口）──
                 gatewayModelRows = gatewayModelRows,
                 gatewayModelError = gatewayModelError,
+                onAddGatewayAccount = { provider, name, baseUrl, apiKey ->
+                    val draft = dev.praxis.core.gateway.GatewayAccountDraft(
+                        providerId = provider,
+                        name = name,
+                        baseUrl = baseUrl,
+                        apiKey = apiKey,
+                    )
+                    val added = gatewayAccountStore.addAccount(draft)
+                    added.fold(
+                        onSuccess = { entity ->
+                            gatewayRowsRefresh += 1
+                            Result.success("已添加：" + entity.name)
+                        },
+                        onFailure = { error ->
+                            Result.failure<String>(
+                                IllegalStateException(error.message ?: "保存失败"),
+                            )
+                        },
+                    )
+                },
                 onToggleGatewayModel = { provider, id, enabled ->
                     coroutineScope.launch {
                         val existing = gatewayModelStore.all()

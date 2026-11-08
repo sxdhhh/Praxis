@@ -120,6 +120,51 @@ class GatewayAccountStore(
         )
     }
 
+    /**
+     * 手动添加一个账号（文档 §9.3 的三级流程终点）。
+     *
+     * ## 与 [applyImport] 同一套纪律
+     *
+     * 先校验、再加密、最后才写；加密失败**一个字节都不写** ——
+     * 半写进去的账号用户没法收拾（删都不知道删哪条）。
+     *
+     * ## id 为什么用 custom- 前缀
+     *
+     * 与网关的命名习惯一致：内置家有固定 id，用户自己加的用 `custom-<12 位>`。
+     * 两批账号放在同一个池子里参与选路，前缀只是让人一眼看出出处。
+     */
+    suspend fun addAccount(draft: GatewayAccountDraft): Result<GatewayAccountEntity> {
+        val error = GatewayAccountDraftRules.validate(draft)
+        if (error != null) {
+            return Result.failure(IllegalArgumentException(error.userMessage()))
+        }
+        val normalized = GatewayAccountDraftRules.normalize(draft)
+        val cipher = encrypt(
+            GatewayCredentialCodec.encode(GatewayCredential.ApiKey(normalized.apiKey)),
+        ) ?: return Result.failure(
+            IllegalStateException("凭证加密失败，已中止（不会写明文）"),
+        )
+        val existing = accountDao.all()
+        val entity = GatewayAccountEntity(
+            id = newAccountId(),
+            providerId = normalized.providerId,
+            name = normalized.name,
+            baseUrlOverride = normalized.baseUrl.takeIf { it.isNotBlank() },
+            enabled = true,
+            priority = (existing.maxOfOrNull { row -> row.priority } ?: -1) + 1,
+            maxConcurrent = 0,
+            credentialsCipher = cipher,
+            expiringAt = null,
+            createdAt = clock(),
+        )
+        accountDao.upsert(entity)
+        return Result.success(entity)
+    }
+
+    /** `custom-<12 位小写十六进制>`，与网关的 id 形状一致。 */
+    private fun newAccountId(): String =
+        "custom-" + java.util.UUID.randomUUID().toString().replace("-", "").take(12)
+
     /** 读出某账号的凭证。解不出时返回失败，不返回空凭证。 */
     suspend fun credentialOf(id: String): Result<GatewayCredential> {
         val entity = accountDao.byId(id)

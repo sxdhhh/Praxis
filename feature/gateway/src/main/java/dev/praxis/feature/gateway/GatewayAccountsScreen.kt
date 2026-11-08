@@ -2,6 +2,10 @@ package dev.praxis.feature.gateway
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,7 +18,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import dev.praxis.ui.widgets.MiuixAnimatedDialog
+import top.yukonga.miuix.kmp.basic.TextField
 import dev.praxis.core.gateway.GatewayAccountRow
 import dev.praxis.core.gateway.GatewayAccountState
 import dev.praxis.core.gateway.GatewayAccountStatus
@@ -25,6 +33,7 @@ import dev.praxis.ui.widgets.MiuixNavigationItemWidget
 import dev.praxis.ui.widgets.MiuixSelectableRow
 import dev.praxis.ui.widgets.SettingsSectionHeader
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -56,15 +65,39 @@ fun GatewayAccountsScreen(
      * （测试 / 导出 / 删除）要等 P1 的请求通道与导入导出界面，暂不放假按钮。
      */
     onClearRuntime: (List<String>) -> Unit,
+    /**
+     * 手动添加一个账号（文档 §9.3）。
+     *
+     * 返回 Result：成功给一句「已添加 xxx」，失败给可读原因（校验/加密/落库）。
+     * null = 没接线 —— 那时**不画**「添加账号」入口，而不是画一个点了没反应的按钮。
+     */
+    onAddAccount: (suspend (providerId: String, name: String, baseUrl: String, apiKey: String) -> Result<String>)? = null,
     modifier: Modifier = Modifier,
     nowMillis: Long = System.currentTimeMillis(),
 ) {
     var batchMode by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var addVisible by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
+        if (onAddAccount != null) {
+            item(key = "__add_account__") {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 12.dp),
+                ) {
+                    MiuixNavigationItemWidget(
+                        title = "添加账号",
+                        description = "填地址与 Key；内置家清单要等 Rust 内核",
+                        onClick = { addVisible = true },
+                    )
+                }
+            }
+        }
         item(key = "__accounts_title__") {
             SettingsSectionHeader(
                 icon = Icons.Outlined.AccountCircle,
@@ -169,6 +202,13 @@ fun GatewayAccountsScreen(
             }
         }
     }
+
+    if (addVisible && onAddAccount != null) {
+        AddAccountDialog(
+            onDismiss = { addVisible = false },
+            onSave = onAddAccount,
+        )
+    }
 }
 
 /**
@@ -191,6 +231,120 @@ private fun StatusBadge(status: GatewayAccountStatus) {
         text = GatewayStatusText.label(status),
         textColor = color,
     )
+}
+
+
+/**
+ * 添加账号的弹窗（文档 §9.3 的第三级：填完 → 保存）。
+ *
+ * ## 为什么没有「渠道下拉」这一级
+ *
+ * 内置家（21 家）的地址与协议实现要等 P5 的 Rust 内核，现在下拉里只会有「自定义」一项 ——
+ * 一个只有一项的下拉是假交互。等内置家清单就位，这里加一行下拉即可。
+ *
+ * ## 保存失败必须原样显示原因
+ *
+ * 校验/加密/落库三处失败的原因不同（地址格式、密钥不可用、数据库），
+ * 统一成「保存失败」会让用户完全不知道改哪里。
+ */
+@Composable
+private fun AddAccountDialog(
+    onDismiss: () -> Unit,
+    onSave: suspend (String, String, String, String) -> Result<String>,
+) {
+    var provider by remember { mutableStateOf("custom") }
+    var baseUrl by remember { mutableStateOf("") }
+    var apiKey by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+        Card {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(text = "添加账号", style = MiuixTheme.textStyles.body1)
+                Text(
+                    text = "地址填到 /v1 那一级，例如 https://api.openai.com/v1",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(12.dp))
+                TextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "服务地址",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "API Key",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "备注名（可留空）",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = provider,
+                    onValueChange = { provider = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "provider id（默认 custom）",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                message?.let { text ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = text,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = if (failed) {
+                            MiuixTheme.colorScheme.error
+                        } else {
+                            MiuixTheme.colorScheme.primary
+                        },
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                MiuixNavigationItemWidget(
+                    title = if (busy) "保存中…" else "保存",
+                    description = "校验 → 加密 → 落库；任何一步失败都不写半条",
+                    onClick = {
+                        if (busy) return@MiuixNavigationItemWidget
+                        busy = true
+                        message = null
+                        scope.launch {
+                            val result = onSave(provider, name, baseUrl, apiKey)
+                            busy = false
+                            result.fold(
+                                onSuccess = { text ->
+                                    failed = false
+                                    message = text
+                                },
+                                onFailure = { error ->
+                                    failed = true
+                                    message = error.message ?: "保存失败",
+                                },
+                            )
+                        }
+                    },
+                )
+            }
+        }
+    }
 }
 
 /** 副标题：家名 + 冷却原因 + 倒计时 + 受限模型 + 垫底。 */
