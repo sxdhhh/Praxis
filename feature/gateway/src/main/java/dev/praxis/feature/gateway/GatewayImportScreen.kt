@@ -174,5 +174,5 @@ internal fun formatReport(report: GatewayImportReport): String {
         }
         if (detail.size > 10) lines += "…还有 " + (detail.size - 10) + " 条"
     }
-    .joinToString("\n")
+    return lines.joinToString("\n")
 }
