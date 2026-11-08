@@ -481,7 +481,18 @@ fun PraxisApp(
     val chatViewModel: dev.praxis.feature.chat.ChatViewModel =
         androidx.lifecycle.viewmodel.compose.viewModel(key = sessionId) {
             dev.praxis.feature.chat.ChatViewModel(
-                provider = dev.praxis.data.ai.SettingsBackedProvider(settingsRepository),
+                provider = dev.praxis.data.ai.SettingsBackedProvider(
+                        repository = settingsRepository,
+                        // 网关出站：与账号页共用同一个 RouteState，
+                        // 这样「清空运行状态」与真实请求看到的是同一份状态。
+                        gatewayProvider = dev.praxis.data.gateway.GatewayProvider(
+                            store = gatewayAccountStore,
+                            // modelRules 的持久化还没接（导入导出界面在 P1 剩余部分），
+                            // 所以映射为空；原生承载走 provider 表里各家声明的模型清单。
+                            modelRules = { dev.praxis.core.gateway.GatewayModelRules() },
+                            state = gatewayRouteState,
+                        ),
+                    ),
                 model = DEFAULT_MODEL,
                 toolRegistry = toolRegistry,
                 toolExecutor = toolExecutor,
@@ -667,7 +678,18 @@ fun PraxisApp(
                  */
                 titleGenerator = dev.praxis.data.ai.SettingsBackedTitleGenerator(
                     repository = settingsRepository,
-                    provider = dev.praxis.data.ai.SettingsBackedProvider(settingsRepository),
+                    provider = dev.praxis.data.ai.SettingsBackedProvider(
+                        repository = settingsRepository,
+                        // 网关出站：与账号页共用同一个 RouteState，
+                        // 这样「清空运行状态」与真实请求看到的是同一份状态。
+                        gatewayProvider = dev.praxis.data.gateway.GatewayProvider(
+                            store = gatewayAccountStore,
+                            // modelRules 的持久化还没接（导入导出界面在 P1 剩余部分），
+                            // 所以映射为空；原生承载走 provider 表里各家声明的模型清单。
+                            modelRules = { dev.praxis.core.gateway.GatewayModelRules() },
+                            state = gatewayRouteState,
+                        ),
+                    ),
                 ),
             )
         }

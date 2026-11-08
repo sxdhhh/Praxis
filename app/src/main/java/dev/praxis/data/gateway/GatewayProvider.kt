@@ -42,15 +42,15 @@ import okhttp3.OkHttpClient
  * 文档 10 要求给 core:ai 补 QuotaLimited / ContentBlocked / TokenExpired 三类，
  * 那是独立一轮的改动（会牵动所有既有 when 分支）。
  *
- * 另外，原生承载（某家清单里 id 等于对外名）暂时为空：模型目录要等 P2 的
- * 模型条目接上数据源。现在只能走映射。
+ * 原生承载来自 provider 表里各家声明的模型清单（账号文件里的 models 数组），
+ * 不是空的；但「模型目录」（含能力位、上下文长度）仍未接入，那属于 P2。
  */
 class GatewayProvider(
     private val store: GatewayAccountStore,
     /** modelRules（映射与禁用）。每次现取：用户可能刚改过配置。 */
     private val modelRules: () -> GatewayModelRules,
-    /** 内置家 id 到地址的映射；自定义家的地址在 provider 表里。 */
-    private val providerBaseUrl: (String) -> String?,
+    /** 内置家 id 到地址的映射；自定义家的地址在 provider 表里（优先查表）。 */
+    private val providerBaseUrl: (String) -> String? = { null },
     private val state: RouteState,
     private val budget: FailoverBudget = FailoverBudget(),
     private val customHeaders: List<CustomHeader> = emptyList(),
@@ -64,7 +64,8 @@ class GatewayProvider(
 
         val chain = CandidateChain.of(
             requestedModel = request.model,
-            nativeModels = emptyList(),
+            // 原生承载来自各家声明的模型清单（账号文件里的 models）。
+            nativeModels = store.nativeModels(),
             mappings = rules.toRoutingMappings(),
             defaultProvider = null,
         )
@@ -79,8 +80,9 @@ class GatewayProvider(
             )
         }
 
-        // 账号快照：运行期冷却走 RouteState，不依赖账号表的实时变化。
+        // 账号与家清单快照：运行期冷却走 RouteState，不依赖账号表的实时变化。
         val views = store.routingViews()
+        val providers = store.providers()
 
         val session = RouterSession(
             candidates = chain.candidates,
@@ -96,7 +98,11 @@ class GatewayProvider(
             val view = views.firstOrNull { it.id == attempt.accountId } ?: continue
             val credential = store.credentialOf(attempt.accountId).getOrNull() ?: continue
             val apiKey = (credential as? GatewayCredential.ApiKey)?.apiKey ?: continue
-            val baseUrl = view.baseUrlOverride ?: providerBaseUrl(attempt.provider) ?: continue
+            // 地址优先级：账号级覆盖 > 自定义家表 > 内置家清单。
+            val baseUrl = view.baseUrlOverride
+                ?: providers.firstOrNull { it.id == attempt.provider }?.baseUrl
+                ?: providerBaseUrl(attempt.provider)
+                ?: continue
 
             val provider = OpenAiCompatProvider(
                 baseUrl = baseUrl,

@@ -1,6 +1,7 @@
 package dev.praxis.core.data.gateway
 
 import dev.praxis.core.gateway.AccountView
+import dev.praxis.core.gateway.NativeModel
 import dev.praxis.core.gateway.GatewayAccountRow
 import dev.praxis.core.gateway.GatewayCredential
 import dev.praxis.core.gateway.GatewayCredentialCodec
@@ -140,6 +141,29 @@ class GatewayAccountStore(
      * hasCredentials 用「能不能解密」来判定：解不开就等同于没有凭证
      * （文档 12：Keystore 重置时不要整池崩，只让该账号不可用）。
      */
+    /** 自定义提供商（含各家声明的模型清单）。 */
+    suspend fun providers(): List<GatewayProviderEntity> = providerDao.all()
+
+    /**
+     * 各家声明的模型清单 -> 候选链的「原生承载」（文档 7.1）。
+     *
+     * ## 清单从哪来
+     *
+     * provider 表的 modelsJson：它是**账号文件里带的 models 数组**（8.2），
+     * 也就是「这家有哪些模型」的第一手信息。没有它，原生承载只能是空的，
+     * 请求就只能靠 modelRules 的映射 —— 那对大多数用户等于「一条都发不出去」。
+     *
+     * 空行与本该是数字的东西不会被当成模型名：清单里只保留非空行。
+     */
+    suspend fun nativeModels(): List<NativeModel> = providerDao.all().flatMap { provider ->
+        provider.modelsJson
+            .split('
+')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .map { NativeModel(provider = provider.id, id = it) }
+    }
+
     suspend fun routingViews(): List<AccountView> = accountDao.all().map { entity ->
         entity.toAccountView(hasCredentials = decrypt(entity.credentialsCipher) != null)
     }

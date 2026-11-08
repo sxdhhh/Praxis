@@ -30,11 +30,38 @@ import kotlinx.coroutines.flow.first
  */
 class SettingsBackedProvider(
     private val repository: SettingsRepository,
+    /**
+     * 网关出站。当前模型档案 kind = Gateway 时，整条请求转给它
+     * （文档 14.3：「GatewayProvider 接在 SettingsBackedProvider 之后」）。
+     *
+     * 可空：没有装配网关时（例如某些测试或裁剪构建）不静默降级到单账号路径 ——
+     * 那种「悄悄用别的账号发出去」的行为比直接报错危险得多。
+     */
+    private val gatewayProvider: AiProvider? = null,
 ) : AiProvider {
 
     override val displayName: String = "设置配置的 OpenAI 兼容服务"
 
     override fun stream(request: ChatRequest): Flow<AiStreamEvent> = flow {
+        // ── 网关档案：交给路由层 ──
+        //
+        // 判定用**当前档案**的 kind，而不是别的开关：用户把模型档案切到「网关」
+        // 就是「这条链路走网关」的唯一意思。
+        val profileKind = repository.modelProfiles.first().active?.kind
+            ?: dev.praxis.core.model.settings.ModelProfileKind.Single
+
+        if (profileKind == dev.praxis.core.model.settings.ModelProfileKind.Gateway) {
+            val gateway = gatewayProvider
+                ?: throw AiException(
+                    AiError(
+                        kind = AiErrorKind.INVALID_REQUEST,
+                        message = "模型档案是「网关」，但网关没有装配（构建配置问题）",
+                    ),
+                )
+            gateway.stream(request).collect { emit(it) }
+            return@flow
+        }
+
         val settings = repository.modelSettings.first()
         // ## CHAT 功能位的覆盖必须生效（2026-10-29 修）
         //
