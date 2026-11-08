@@ -125,9 +125,13 @@ class OpenAiCompatProvider(
         response.use { resp ->
             if (!resp.isSuccessful) {
                 val errText = runCatching { resp.body?.string() }.getOrNull().orEmpty()
+                // 用分类器读正文，而不是只看状态码（文档 §7.4 的产出点）：
+                // 429 可能是「额度耗尽」也可能只是限速；401 可能是密钥错也可能是令牌过期。
+                // 只读状态码在这两类上必然误判，而误判的代价是**罚错账号**。
                 throw AiException(
-                    AiError.fromHttpCode(
-                        code = resp.code,
+                    AiError(
+                        kind = dev.praxis.core.gateway.UpstreamErrorClassifier
+                            .classify(resp.code, errText),
                         message = "HTTP ${resp.code}: ${errText.take(300)}",
                         retryAfterMillis = resp.header("Retry-After")?.toLongOrNull()?.times(1000),
                     ),
@@ -488,10 +492,32 @@ class OpenAiCompatProvider(
                 events += AiStreamEvent.ToolCalls(calls)
             }
 
+            val finishReason = choice["finish_reason"]?.jsonPrimitive?.contentOrNull
+
+            // ── 内容拦截（文档 §7.4）──
+            //
+            // 上游几乎总是用 **HTTP 200 + finish_reason: content_filter** 表达拦截，
+            // 所以只看状态码永远不会命中这一类。
+            //
+            // 只在「一个字都没吐」时抛：非流式下此刻还什么都没交给上层，抛出去可以安全换家；
+            // 若已经有内容，丢掉它去换家只会让用户白等一次 —— 那种情况保留 Done，由上层展示。
+            if (events.isEmpty()) {
+                val blocked = dev.praxis.core.gateway.UpstreamErrorClassifier
+                    .classify(200, raw.take(512), finishReason) ==
+                    AiErrorKind.CONTENT_BLOCKED
+                if (blocked) {
+                    throw AiException(
+                        AiError(
+                            kind = AiErrorKind.CONTENT_BLOCKED,
+                            message = "上游以内容策略拦截了这次生成（finish_reason=" +
+                                (finishReason ?: "null") + "）",
+                        ),
+                    )
+                }
+            }
+
             // 结束事件。非流式一定补一次 Done，否则上层状态机停在 Connecting。
-            events += AiStreamEvent.Done(
-                choice["finish_reason"]?.jsonPrimitive?.contentOrNull,
-            )
+            events += AiStreamEvent.Done(finishReason)
             return events
         }
 
