@@ -85,6 +85,16 @@ test suites: 118   tests: 1247   failed: 9
 
 较 87328ae：套件 +1、用例 +13（`UpstreamErrorClassifierTest`，CI 上 13 条 PASSED）；
 `OpenAiCompatProviderNonStreamingTest` 5 条在 `:app` per-class 步骤执行、无 FAILED。
+
+流式拦截接线后（提交 **c7a10e5**，2026-11-09）：
+
+```
+build   success
+verify  success
+test suites: 118   tests: 1252   failed: 9
+```
+
+较 dadaff5：用例 +5（`OpenAiStreamAssemblerTest` 的流式拦截五条），套件数不变、失败数不变。
 `GenerateImageToolTest`（10 条）在「Unit tests (:app, per class)」那步执行并通过
 （10 条 STARTED 之后直接 BUILD SUCCESSFUL、无 FAILED），但它**不进汇总行** ——
 因为「Summarize JVM test results」排在 per-class 那两步之前（既有管线顺序，非本次引入）。
@@ -139,8 +149,10 @@ test suites: 118   tests: 1247   failed: 9
    （13 例单测）—— 正文标记优先、状态码兜底；`finish_reason` 是内容拦截的权威信号。
    接线两处：HTTP 错误路径改用它（429+配额正文 → 额度耗尽；401+过期标记 → 令牌过期；413/上下文超限 → 不换号）；
    非流式 `emitNonStreaming` 在「content_filter 且一个字都没吐」时抛 `CONTENT_BLOCKED`。
-   **仍有缺口**：流式 SSE 路径的 `content_filter` 还没转成异常 —— 需要在累积器里记「是否已吐内容」，
-   否则会破坏既有的「已吐字不换号」语义。下一轮做。
+   流式 SSE 路径也已接线（提交 **c7a10e5**）：`OpenAiStreamAssembler.blockedWithoutOutput()`
+   = 「finish_reason 命中拦截 + 无正文 + 无工具调用」三项同时成立；provider 在 `finish()` 之前判，
+   **已吐内容时不算**（收不回来，判成拦截只会让用户丢掉半截回答、换家后从头再来）。
+   判定字面量抽成 `core:ai` 的 `ContentFilterReason`，`core:gateway` 的分类器改为引用它。
 8. **token 预算限流**：7.2 只实现了每账号与每家的 RPM，token 预算需要 P3 的请求记录表
 9. **P3 及之后**：协议编码器、报表、日志并入、系统设置、代理、云同步、Rust 内核、签到框架、AGPL 转换
 
