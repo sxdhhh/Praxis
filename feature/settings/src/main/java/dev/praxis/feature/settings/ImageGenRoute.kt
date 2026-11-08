@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.praxis.feature.settings.common.SettingsList
 import dev.praxis.core.imagegen.ChipsetTier
 import dev.praxis.core.imagegen.EngineAvailability
 import dev.praxis.core.imagegen.ImageGenEngineSource
@@ -80,8 +81,8 @@ fun ImageGenRoute(
         probe = ProbeUi.Done(probeEngine())
     }
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
+    SettingsList(
+        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         item(key = "__intro__") {

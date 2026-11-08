@@ -12,6 +12,7 @@ import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.praxis.feature.settings.common.SettingsList
 import dev.praxis.core.imagegen.ImageDownloadState
 import dev.praxis.core.imagegen.ImageModel
 import dev.praxis.ui.widgets.MiuixNavigationItemWidget
@@ -44,8 +45,8 @@ fun ImageGenModelsRoute(
 ) {
     val runningId = (state as? ImageDownloadState.Running)?.modelId
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
+    SettingsList(
+        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         item(key = "__header__") {

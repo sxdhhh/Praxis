@@ -1,6 +1,7 @@
 package dev.praxis.feature.gateway
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -85,9 +86,15 @@ fun GatewayAccountsScreen(
     var batchMode by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var addVisible by remember { mutableStateOf(false) }
+    // 顶栏是浮层：内容要能滚到它下面（否则渐进模糊采不到内容，退化成一块实色）。
+    val topInset = dev.praxis.ui.design.component.LocalTopBarInset.current
+    // 底栏同理：滚动终点必须抬高，否则最后一项被压住看不见。
+    val scrollLimit = dev.praxis.ui.design.component.LocalScrollBottomLimit.current
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(2.dp),
+        contentPadding = PaddingValues(top = topInset, bottom = 24.dp + scrollLimit),
     ) {
         if (onAddAccount != null) {
             item(key = "__add_account__") {
