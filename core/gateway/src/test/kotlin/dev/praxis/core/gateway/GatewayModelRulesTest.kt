@@ -76,8 +76,8 @@ class GatewayModelRulesTest {
 
         val encoded = GatewayModelRulesCodec.encode(rules)
 
-        assertTrue(encoded.contains(""disabled""))
-        assertTrue(encoded.contains(""enabled": false") || encoded.contains(""enabled":false"))
+        assertTrue("disabled 这条规则要写出来", encoded.contains("disabled"))
+        assertEquals("显式 false 要保留", rules.disabled, GatewayModelRulesCodec.parse(encoded).getOrThrow().disabled)
     }
 
     @Test
