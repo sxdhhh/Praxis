@@ -336,7 +336,7 @@ private fun AddAccountDialog(
                                 },
                                 onFailure = { error ->
                                     failed = true
-                                    message = error.message ?: "保存失败",
+                                    message = error.message ?: "保存失败"
                                 },
                             )
                         }
