@@ -1206,7 +1206,11 @@ fun PraxisApp(
                 imageGenModels = imageGenCatalog,
                 imageGenInstalledIds = imageGenInstalledIds,
                 imageGenDownloadState = imageGenDownloadState,
-                onDownloadImageGenModel = { model -> imageGenDownloadManager.start(model) },
+                // 下载交给前台服务：几 GB 的包要跑很久，用户必然切走，
+                // 页面作用域里的协程会被系统回收。服务里再调 manager.start()。
+                onDownloadImageGenModel = { model ->
+                    dev.praxis.data.imagegen.ImageModelDownloadService.start(appContext, model.id)
+                },
                 onCancelImageGenDownload = { imageGenDownloadManager.cancel() },
                 onClearGatewayRuntime = { ids ->
                     // 运行期状态是内存里的，清掉就是真的清掉；随后触发一次重算。

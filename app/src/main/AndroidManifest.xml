@@ -179,6 +179,12 @@
             android:name="dev.praxis.data.attachment.ScreenCaptureService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+        <!-- 模型下载：几 GB 的包要跑几分钟到几十分钟，用户必然会切走。
+             dataSync 类型 + FOREGROUND_SERVICE_DATA_SYNC 权限（manifest 顶部已声明）。 -->
+        <service
+            android:name="dev.praxis.data.imagegen.ImageModelDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <service
             android:name="dev.praxis.data.attachment.PraxisNotificationListener"
             android:exported="false"
