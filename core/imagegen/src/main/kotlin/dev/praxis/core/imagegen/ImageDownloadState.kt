@@ -37,6 +37,11 @@ sealed interface ImageDownloadState {
             InsufficientSpace,
             /** 传输/解压失败。 */
             Transport,
+            /**
+             * 被策略挡下（如「仅 Wi-Fi 下载」而当前在流量）。**不是错误**，
+             * 是用户自己定的规矩生效了 —— 文案要说清是哪条规矩、怎么改。
+             */
+            Blocked,
         }
     }
 

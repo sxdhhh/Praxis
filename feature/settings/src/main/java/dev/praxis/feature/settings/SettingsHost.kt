@@ -142,6 +142,11 @@ fun SettingsHost(
     imageGenCurrentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
     onSelectImageGenTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
     imageGenModelsRootPath: String = "",
+    /** 下载设置（下载源 + 仅 Wi-Fi，文档 §7.2）。 */
+    imageDownloadSettings: dev.praxis.core.imagegen.ImageDownloadSettings =
+        dev.praxis.core.imagegen.ImageDownloadSettings(),
+    onImageDownloadSettingsChange:
+        (dev.praxis.core.imagegen.ImageDownloadSettings) -> Unit = {},
     imageGenModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
     imageGenInstalledIds: Set<String> = emptySet(),
     imageGenDownloadState: dev.praxis.core.imagegen.ImageDownloadState =
@@ -312,6 +317,8 @@ fun SettingsHost(
             imageGenCurrentTarget = imageGenCurrentTarget,
             onSelectImageGenTarget = onSelectImageGenTarget,
             imageGenModelsRootPath = imageGenModelsRootPath,
+            imageDownloadSettings = imageDownloadSettings,
+            onImageDownloadSettingsChange = onImageDownloadSettingsChange,
             imageGenModels = imageGenModels,
             imageGenInstalledIds = imageGenInstalledIds,
             imageGenDownloadState = imageGenDownloadState,
@@ -470,6 +477,11 @@ private fun SettingsPageBody(
     imageGenCurrentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
     onSelectImageGenTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
     imageGenModelsRootPath: String = "",
+    /** 下载设置（下载源 + 仅 Wi-Fi，文档 §7.2）。 */
+    imageDownloadSettings: dev.praxis.core.imagegen.ImageDownloadSettings =
+        dev.praxis.core.imagegen.ImageDownloadSettings(),
+    onImageDownloadSettingsChange:
+        (dev.praxis.core.imagegen.ImageDownloadSettings) -> Unit = {},
     imageGenModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
     imageGenInstalledIds: Set<String> = emptySet(),
     imageGenDownloadState: dev.praxis.core.imagegen.ImageDownloadState =
@@ -691,6 +703,8 @@ private fun SettingsPageBody(
             currentTarget = imageGenCurrentTarget,
             onSelectTarget = onSelectImageGenTarget,
             modelsRootPath = imageGenModelsRootPath,
+            downloadSettings = imageDownloadSettings,
+            onDownloadSettingsChange = onImageDownloadSettingsChange,
             modifier = modifier,
         )
         PraxisRoute.SettingsGateway -> dev.praxis.feature.gateway.GatewayRoute(

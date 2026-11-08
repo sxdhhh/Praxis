@@ -385,11 +385,41 @@ val appModule = module {
         dev.praxis.data.imagegen.OkHttpRemoteImageGenerator()
     }
     single {
+        val settings = get<SettingsRepository>()
+        val context = androidContext()
+        // 设置读一次解一次：坏内容**不悄悄用默认源**（那会让用户以为换的镜像没生效），
+        // 而是由闸门挡下并让他去设置页重设。
+        suspend fun readDownloadSettings(): Result<dev.praxis.core.imagegen.ImageDownloadSettings>? =
+            dev.praxis.core.imagegen.ImageDownloadSettingsCodec
+                .decode(settings.imageDownloadSettingsJson.first())
+
         dev.praxis.data.imagegen.ImageModelDownloadManager(
             downloader = get(),
             // 模型目录与引擎认的路径一致：<files>/models/<id>/。
-            modelsRoot = java.io.File(androidContext().filesDir, "models"),
+            modelsRoot = java.io.File(context.filesDir, "models"),
             scope = get(),
+            downloadGuard = {
+                val decoded = readDownloadSettings()
+                if (decoded != null && decoded.isFailure) {
+                    "下载设置读不出来（内容坏了），请到「本地生图 → 下载源」重设"
+                } else {
+                    val downloads = decoded?.getOrNull()
+                        ?: dev.praxis.core.imagegen.ImageDownloadSettings()
+                    if (downloads.wifiOnly &&
+                        !dev.praxis.data.imagegen.NetworkStatus.isOnUnmeteredWifi(context)
+                    ) {
+                        "「仅 Wi-Fi 下载」开着，当前不在 Wi-Fi。" +
+                            "可在「本地生图 → 下载源」里关掉，或切到 Wi-Fi"
+                    } else {
+                        null
+                    }
+                }
+            },
+            baseUrl = {
+                // 闸门已挡住坏内容，这里取不到就用默认源（不会真正被用到）。
+                readDownloadSettings()?.getOrNull()?.baseUrl
+                    ?: dev.praxis.core.imagegen.ImageDownloadSettings.DEFAULT_BASE_URL
+            },
         )
     }
 

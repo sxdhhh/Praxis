@@ -67,7 +67,7 @@ class ModelDownloaderTest {
         val root = tmp.newFolder("models")
         val plan = ImageDownloadPlanner.plan(root, zipModel())
         val bytes = zipOf("unet.mnn" to "weights", "tokenizer.txt" to "tok")
-        val downloader = ModelDownloader(baseUrl = "") { ByteArrayInputStream(bytes) }
+        val downloader = ModelDownloader() { ByteArrayInputStream(bytes) }
 
         val result = downloader.download(plan) { }
 
@@ -84,7 +84,7 @@ class ModelDownloaderTest {
         val root = tmp.newFolder("models")
         val plan = ImageDownloadPlanner.plan(root, zipModel())
         val bytes = zipOf("AnythingV5/unet.mnn" to "w", "AnythingV5/tok.txt" to "t")
-        ModelDownloader(baseUrl = "") { ByteArrayInputStream(bytes) }.download(plan) { }
+        ModelDownloader() { ByteArrayInputStream(bytes) }.download(plan) { }
 
         assertTrue(File(plan.targetDir, "unet.mnn").isFile)
         assertFalse(File(plan.targetDir, "AnythingV5").exists())
@@ -94,7 +94,7 @@ class ModelDownloaderTest {
     fun `多文件包逐个下载后写标记文件`() {
         val root = tmp.newFolder("models")
         val plan = ImageDownloadPlanner.plan(root, multiModel())
-        val downloader = ModelDownloader(baseUrl = "") { url ->
+        val downloader = ModelDownloader() { url ->
             ByteArrayInputStream((if (url.endsWith("unet.bin")) "u" else "c").toByteArray())
         }
 
@@ -115,7 +115,7 @@ class ModelDownloaderTest {
         // 直接造一个巨额需求：本机磁盘不可能有这么多空闲。
         val plan = base.copy(requiredBytes = 1_000_000_000_000_000_000L)
         var opened = false
-        val downloader = ModelDownloader(baseUrl = "") { opened = true; ByteArrayInputStream(ByteArray(0)) }
+        val downloader = ModelDownloader() { opened = true; ByteArrayInputStream(ByteArray(0)) }
 
         val result = downloader.download(plan) { }
 
@@ -128,7 +128,7 @@ class ModelDownloaderTest {
     fun `中途失败会清理残留并让 isInstalled 保持为假`() {
         val root = tmp.newFolder("models")
         val plan = ImageDownloadPlanner.plan(root, multiModel())
-        val downloader = ModelDownloader(baseUrl = "") { url ->
+        val downloader = ModelDownloader() { url ->
             if (url.endsWith("clip.bin")) throw IOException("网络断了") else ByteArrayInputStream("u".toByteArray())
         }
 
@@ -145,7 +145,7 @@ class ModelDownloaderTest {
         val plan = ImageDownloadPlanner.plan(root, zipModel())
         val bytes = zipOf("../evil.txt" to "pwn")
 
-        val result = ModelDownloader(baseUrl = "") { ByteArrayInputStream(bytes) }.download(plan) { }
+        val result = ModelDownloader() { ByteArrayInputStream(bytes) }.download(plan) { }
 
         assertTrue(result is DownloadResult.Failed)
         assertFalse("越界文件不能落到模型目录外", File(root, "evil.txt").exists())
@@ -158,7 +158,7 @@ class ModelDownloaderTest {
         val base = ImageDownloadPlanner.plan(root, multiModel())
         val plan = base.copy(requiredBytes = null)
         val progress = mutableListOf<DownloadProgress>()
-        val downloader = ModelDownloader(baseUrl = "") { ByteArrayInputStream(ByteArray(4096)) }
+        val downloader = ModelDownloader() { ByteArrayInputStream(ByteArray(4096)) }
 
         downloader.download(plan) { progress += it }
 
@@ -172,7 +172,7 @@ class ModelDownloaderTest {
         val root = tmp.newFolder("models")
         val plan = ImageDownloadPlanner.plan(root, multiModel())
         var progressed = 0
-        val downloader = ModelDownloader(baseUrl = "") { ByteArrayInputStream(ByteArray(300_000)) }
+        val downloader = ModelDownloader() { ByteArrayInputStream(ByteArray(300_000)) }
 
         val result = downloader.download(
             plan = plan,
@@ -192,7 +192,7 @@ class ModelDownloaderTest {
         val plan = base.copy(requiredBytes = null)
         val bytes = zipOf("unet.mnn" to "w")
 
-        val result = ModelDownloader(baseUrl = "") { ByteArrayInputStream(bytes) }.download(plan) { }
+        val result = ModelDownloader() { ByteArrayInputStream(bytes) }.download(plan) { }
 
         assertTrue(result is DownloadResult.Completed)
         assertTrue("必须标出「空间无法预估」", (result as DownloadResult.Completed).spaceWasUnknown)

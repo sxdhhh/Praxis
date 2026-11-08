@@ -68,7 +68,6 @@ sealed interface DownloadResult {
  * 单测可以喂 ByteArrayInputStream（包括现造的 zip），把解压、改名、清理、zip-slip 防护全跑一遍。
  */
 class ModelDownloader(
-    private val baseUrl: String = DEFAULT_BASE_URL,
     /** 打开远端文件的输入流（阻塞；调用方保证在 IO 线程）。 */
     private val openStream: (String) -> InputStream = defaultOpenStream(),
 ) {
@@ -80,6 +79,12 @@ class ModelDownloader(
      */
     fun download(
         plan: ImageDownloadPlan,
+        /**
+         * 下载源根地址（设置页可改，见 §7.2）。默认值保住单测与既有调用。
+         *
+         * 每次调用传入而不是构造时固定：用户换了镜像源，下一次下载就该走新源。
+         */
+        baseUrl: String = DEFAULT_BASE_URL,
         /**
          * 每写一块检查一次「要不要停」。
          *

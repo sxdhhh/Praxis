@@ -37,6 +37,17 @@ class ImageModelDownloadManager(
     private val modelsRoot: File,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /**
+     * 下载前的闸门：返回 null = 放行；返回一句话 = 拒绝原因。
+     *
+     * 「仅 Wi-Fi 下载」这类策略需要 Context（网络类型）与设置（开关），
+     * 两者都在 :app —— 所以闸门由外部注入，管理器只管「被挡下就如实报」。
+     */
+    private val downloadGuard: suspend () -> String? = { null },
+    /** 当前下载源（设置页可改）。 */
+    private val baseUrl: suspend () -> String = {
+        dev.praxis.core.imagegen.ImageDownloadSettings.DEFAULT_BASE_URL
+    },
 ) {
 
     private val _state = MutableStateFlow<ImageDownloadState>(ImageDownloadState.Idle)
@@ -59,10 +70,22 @@ class ImageModelDownloadManager(
         cancelRequested = false
         _state.value = ImageDownloadState.Running(model.id, null)
         job = scope.launch {
+            // 闸门在取计划之前：被策略挡下时连目录都不用建。
+            val blocked = downloadGuard()
+            if (blocked != null) {
+                _state.value = ImageDownloadState.Failed(
+                    modelId = model.id,
+                    reason = ImageDownloadState.Failed.Reason.Blocked,
+                    detail = blocked,
+                )
+                return@launch
+            }
             val plan = ImageDownloadPlanner.plan(modelsRoot, model)
+            val source = baseUrl()
             val result = withContext(io) {
                 downloader.download(
                     plan = plan,
+                    baseUrl = source,
                     onProgress = { progress ->
                         _state.value = ImageDownloadState.Running(model.id, progress)
                     },

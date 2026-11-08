@@ -672,6 +672,18 @@ class SettingsRepository(
         put(KEY_GATEWAY_ROUTING_POLICY, text)
 
     /**
+     * 模型下载设置（文档 §7.2）：下载源 + 仅 Wi-Fi。
+     *
+     * 只有这两项 —— 文档那页还画了并发数与代理，但它们 сейчас 读不到（见
+     * `core:imagegen` 的 ImageDownloadSettings KDoc），所以不存。
+     */
+    val imageDownloadSettingsJson: Flow<String?> =
+        dataStore.data.map { it[KEY_IMAGEGEN_DOWNLOAD] }
+
+    suspend fun setImageDownloadSettingsJson(text: String) =
+        put(KEY_IMAGEGEN_DOWNLOAD, text)
+
+    /**
      * 用户改写过的**内置人格**（覆盖 Praxis 出厂那段）。空串 = 用出厂人格。
      *
      * ## 为什么要单独一个键，而不是并进 [setSystemPrompt]
@@ -1372,6 +1384,9 @@ private val KEY_IMAGEGEN_TARGET = stringPreferencesKey("imagegen_target")
 
 /** 网关选路策略（顺序/轮询 + 粘性），见 [SettingsRepository.gatewayRoutingPolicyJson]。 */
 private val KEY_GATEWAY_ROUTING_POLICY = stringPreferencesKey("gateway_routing_policy")
+
+/** 模型下载设置（下载源 + 仅 Wi-Fi），见 [SettingsRepository.imageDownloadSettingsJson]。 */
+private val KEY_IMAGEGEN_DOWNLOAD = stringPreferencesKey("imagegen_download")
 
 /**
  * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。

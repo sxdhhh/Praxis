@@ -581,6 +581,17 @@ fun PraxisApp(
 
     // 与 generate_image 工具共用同一个探活实例（Koin 单例）。
     // 各建一份会出现「设置页说已连接、工具说不可用」这种自相矛盾的观感。
+    // 下载设置（下载源 + 仅 Wi-Fi）。配置坏了时这里退回默认值，但**下载闸门会挡住**
+    // 并给出「内容坏了，请重设」的原因（见 AppModule 里的 downloadGuard）。
+    val imageDownloadSettingsJson by settingsRepository.imageDownloadSettingsJson
+        .collectAsState(initial = null)
+    val imageDownloadSettings = remember(imageDownloadSettingsJson) {
+        dev.praxis.core.imagegen.ImageDownloadSettingsCodec
+            .decode(imageDownloadSettingsJson)
+            ?.getOrNull()
+            ?: dev.praxis.core.imagegen.ImageDownloadSettings()
+    }
+
     val imageGenEngineLocator: dev.praxis.data.imagegen.EngineLocator =
         org.koin.compose.koinInject()
     // 与工具共用同一条进度总线（工具写、聊天层读）。
@@ -1416,6 +1427,14 @@ fun PraxisApp(
                     }
                 },
                 imageGenModelsRootPath = imageGenModelsRoot.absolutePath,
+                imageDownloadSettings = imageDownloadSettings,
+                onImageDownloadSettingsChange = { updated ->
+                    coroutineScope.launch {
+                        settingsRepository.setImageDownloadSettingsJson(
+                            dev.praxis.core.imagegen.ImageDownloadSettingsCodec.encode(updated),
+                        )
+                    }
+                },
                 imageGenModels = imageGenCatalog,
                 imageGenInstalledIds = imageGenInstalledIds,
                 imageGenDownloadState = imageGenDownloadState,

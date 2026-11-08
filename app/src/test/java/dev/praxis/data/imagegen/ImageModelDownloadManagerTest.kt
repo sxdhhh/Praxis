@@ -53,7 +53,7 @@ class ImageModelDownloadManagerTest {
     }
 
     private fun manager(openStream: (String) -> InputStream) = ImageModelDownloadManager(
-        downloader = ModelDownloader(baseUrl = "", openStream = openStream),
+        downloader = ModelDownloader(openStream = openStream),
         modelsRoot = tmp.newFolder(),
         scope = CoroutineScope(Dispatchers.Default),
     )

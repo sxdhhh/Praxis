@@ -105,6 +105,10 @@ class ImageModelDownloadService : Service() {
                             finishWith("空间不足：" + state.detail, failed = true)
                         ImageDownloadState.Failed.Reason.Transport ->
                             finishWith("下载失败：" + state.detail, failed = true)
+                        // 被「仅 Wi-Fi」这类策略挡下：不是错误，是用户自己定的规矩生效了。
+                        // 通知仍然是终态（可划掉），但文案不带「失败」二字。
+                        ImageDownloadState.Failed.Reason.Blocked ->
+                            finishWith(state.detail, failed = false)
                     }
                     ImageDownloadState.Idle -> Unit
                 }

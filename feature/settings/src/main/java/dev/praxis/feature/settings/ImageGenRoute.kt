@@ -1,5 +1,9 @@
 package dev.praxis.feature.settings
 
+import androidx.compose.material.icons.outlined.CloudDownload
+import dev.praxis.ui.widgets.MiuixSwitchWidget
+import dev.praxis.ui.widgets.MiuixAnimatedDialog
+import top.yukonga.miuix.kmp.basic.TextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -65,6 +69,10 @@ fun ImageGenRoute(
     onSelectTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
     /** 模型目录的绝对路径（只读展示，方便用户自己放文件）。 */
     modelsRootPath: String,
+    /** 下载设置（文档 §7.2）：下载源 + 仅 Wi-Fi。 */
+    downloadSettings: dev.praxis.core.imagegen.ImageDownloadSettings =
+        dev.praxis.core.imagegen.ImageDownloadSettings(),
+    onDownloadSettingsChange: (dev.praxis.core.imagegen.ImageDownloadSettings) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // 组合局部变量只能在组合期读一次、闭包捕获；写进 onClick 的 lambda 里会在点击时越界
@@ -74,6 +82,7 @@ fun ImageGenRoute(
     var probeTick by remember { mutableStateOf(0) }
     var probe by remember { mutableStateOf<ProbeUi>(ProbeUi.Probing) }
     var targetPickerVisible by remember { mutableStateOf(false) }
+    var sourceDialogVisible by remember { mutableStateOf(false) }
 
     // 进页面探一次；点「重新检测」把 tick 加一即重探。
     LaunchedEffect(probeTick) {
@@ -260,6 +269,57 @@ fun ImageGenRoute(
         }
 
         // ── 还没做的部分 ──
+        // ── 下载源（§7.2）──
+        item(key = "__download_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.CloudDownload,
+                title = "下载源",
+                subtitle = "从哪下模型、什么时候允许下",
+            )
+        }
+        item(key = "__download_source__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "下载源",
+                    description = downloadSettings.baseUrl + "（点这里更换）",
+                    onClick = { sourceDialogVisible = true },
+                )
+            }
+        }
+        item(key = "__download_wifi__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixSwitchWidget(
+                    title = "仅 Wi-Fi 下载",
+                    description = "几 GB 的包走流量代价不小；关掉后移动网络也能下",
+                    checked = downloadSettings.wifiOnly,
+                    onCheckedChange = { enabled ->
+                        onDownloadSettingsChange(downloadSettings.copy(wifiOnly = enabled))
+                    },
+                )
+            }
+        }
+        item(key = "__download_note__") {
+            BareCard {
+                Text(
+                    text = "文档那页还画了「并发下载数」与「代理」，这两项目前读不到：" +
+                        "下载器是逐个文件顺序下的（改并发要先解决多 .part 同时写与进度合并），" +
+                        "而 Praxis 还没有全局代理设置。所以不放这两个开关。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+
         item(key = "__plan_title__") {
             SettingsSectionHeader(
                 icon = Icons.Outlined.Tune,
@@ -279,6 +339,17 @@ fun ImageGenRoute(
                 }
             }
         }
+    }
+
+    if (sourceDialogVisible) {
+        DownloadSourceDialog(
+            settings = downloadSettings,
+            onDismiss = { sourceDialogVisible = false },
+            onConfirm = { updated ->
+                onDownloadSettingsChange(updated)
+                sourceDialogVisible = false
+            },
+        )
     }
 
     ImageGenTargetDialog(
@@ -345,3 +416,78 @@ private val PLAN_LINES = listOf(
     "画布 / 采样 / 性能 / 输出：那些参数现在只能由 AI 通过工具改",
     "诊断：上次启动耗时、引擎日志尾巴",
 )
+
+/**
+ * 下载源弹窗（文档 §7.2）。
+ *
+ * ## 校验用 core 的规则，不在页面里写一遍
+ *
+ * `ImageDownloadSettingsRules` 已经覆盖「必须有 http/https、尾部斜杠归一化」
+ * （9 例单测）。页面再写一份必然与它漂移 —— 那种漂移的表现是「页面说没问题、下载却拼错地址」。
+ */
+@Composable
+private fun DownloadSourceDialog(
+    settings: dev.praxis.core.imagegen.ImageDownloadSettings,
+    onDismiss: () -> Unit,
+    onConfirm: (dev.praxis.core.imagegen.ImageDownloadSettings) -> Unit,
+) {
+    var baseUrl by remember { mutableStateOf(settings.baseUrl) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+        Card {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(text = "下载源", style = MiuixTheme.textStyles.body1)
+                Text(
+                    text = "内置清单里的路径会拼在它后面；换镜像站就改这里",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(12.dp))
+                TextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "https://github.com/",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                error?.let { text ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = text,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.error,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                MiuixNavigationItemWidget(
+                    title = "保存",
+                    description = "地址要以 http:// 或 https:// 开头",
+                    onClick = {
+                        if (!dev.praxis.core.imagegen.ImageDownloadSettingsRules
+                                .isValidBaseUrl(baseUrl)
+                        ) {
+                            error = "地址要以 http:// 或 https:// 开头"
+                        } else {
+                            onConfirm(
+                                settings.copy(
+                                    baseUrl = dev.praxis.core.imagegen.ImageDownloadSettingsRules
+                                        .normalizeBaseUrl(baseUrl),
+                                ),
+                            )
+                        }
+                    },
+                )
+                MiuixNavigationItemWidget(
+                    title = "恢复默认",
+                    description = dev.praxis.core.imagegen.ImageDownloadSettings.DEFAULT_BASE_URL,
+                    onClick = {
+                        baseUrl = dev.praxis.core.imagegen.ImageDownloadSettings.DEFAULT_BASE_URL
+                        error = null
+                    },
+                )
+            }
+        }
+    }
+}
