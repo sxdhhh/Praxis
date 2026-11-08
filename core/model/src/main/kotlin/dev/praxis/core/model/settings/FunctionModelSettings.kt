@@ -66,6 +66,25 @@ enum class FunctionSlot(
         title = "Grep 检索",
         description = "为代码检索做规划与结果筛选",
     ),
+
+    /**
+     * 生图（docs/PORTING-IMAGEGEN.md §7.3）。
+     *
+     * ## 为什么这一项不是「假入口」
+     *
+     * 这个枚举的约定是「列出来却点不动，就是假入口」。生图有**真实调用点**：
+     * `generate_image` 工具会读 `imagegen_target` 决定走本地引擎还是远端 images 端点。
+     *
+     * ## 为什么它不直接用 [FunctionModelOverride]
+     *
+     * 那个类型是「模型 + 服务商」的远端语义，塞不进本地模型 id。所以这一行只是**入口**，
+     * 选完写回独立的 `imagegen_target` 键（`core:imagegen` 的 ImageGenTarget）。
+     */
+    IMAGE(
+        key = "image",
+        title = "生图",
+        description = "生成图片；可选本地已下载模型，或任意服务商的生图模型",
+    ),
     ;
 
     companion object {

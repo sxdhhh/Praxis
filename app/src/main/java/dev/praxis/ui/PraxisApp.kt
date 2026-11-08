@@ -481,11 +481,6 @@ fun PraxisApp(
 
     // 下载完成后重读一次文件系统：装好的模型立刻出现在列表里，不用重启 App（文档 §7.3）。
     var imageGenRefreshTick by remember { mutableStateOf(0) }
-    LaunchedEffect(imageGenDownloadState) {
-        if (imageGenDownloadState is dev.praxis.core.imagegen.ImageDownloadState.Completed) {
-            imageGenRefreshTick += 1
-        }
-    }
     val imageGenCatalog = remember(imageGenSocModel) {
         dev.praxis.core.imagegen.ImageModelCatalog.builtin(imageGenSocModel)
     }
@@ -500,6 +495,36 @@ fun PraxisApp(
     val imageGenInstalledNames = remember(imageGenCatalog, imageGenInstalledIds) {
         imageGenCatalog.filter { model -> model.id in imageGenInstalledIds }.map { it.name }
     }
+
+    LaunchedEffect(imageGenDownloadState) {
+        val downloadState = imageGenDownloadState
+        if (downloadState is dev.praxis.core.imagegen.ImageDownloadState.Completed) {
+            imageGenRefreshTick += 1
+            // 装完自动选中（文档 §7.3 的三条规则；规则本身在 core:imagegen 有单测）。
+            val decoded = dev.praxis.core.imagegen.ImageGenTargetCodec
+                .decode(settingsRepository.imageGenTargetJson.first())
+            // 配置坏了（decoded 是 failure）时**不动它** —— 覆盖掉等于把用户的原文丢了。
+            if (decoded == null || decoded.isSuccess) {
+                val current = decoded?.getOrNull()
+                val chosen = dev.praxis.core.imagegen.ImageGenTargetSelection.afterInstall(
+                    current = current,
+                    newModelId = downloadState.modelId,
+                    localModelExists = { id ->
+                        val model = imageGenCatalog.firstOrNull { it.id == id }
+                        model != null &&
+                            dev.praxis.core.imagegen.ImageModelCatalog
+                                .isInstalled(imageGenModelsRoot, model)
+                    },
+                )
+                if (chosen != current) {
+                    settingsRepository.setImageGenTargetJson(
+                        dev.praxis.core.imagegen.ImageGenTargetCodec.encode(chosen),
+                    )
+                }
+            }
+        }
+    }
+
     val imageGenEngineLocator = remember { dev.praxis.data.imagegen.EngineLocator() }
 
     // 运行时权限申请。回调不逐条比对结果，统一 refresh() 回读系统真值 ——

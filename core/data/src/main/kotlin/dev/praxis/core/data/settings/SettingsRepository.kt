@@ -649,6 +649,17 @@ class SettingsRepository(
     suspend fun setGatewayEnabled(enabled: Boolean) = put(KEY_GATEWAY_ENABLED, enabled)
 
     /**
+     * 生图目标（docs/PORTING-IMAGEGEN.md §7.3）：本地模型 id 或服务商生图模型。
+     *
+     * 存 JSON 原文而不是拆成几列：它是 `core:imagegen` 的 `ImageGenTarget`（sealed），
+     * 编解码在那边（`ImageGenTargetCodec`，有单测）。解不开时**保留原文**，
+     * 由界面提示「配置坏了」—— 不能假装没配过，那会静默把用户选的模型换掉。
+     */
+    val imageGenTargetJson: Flow<String?> = dataStore.data.map { it[KEY_IMAGEGEN_TARGET] }
+
+    suspend fun setImageGenTargetJson(text: String) = put(KEY_IMAGEGEN_TARGET, text)
+
+    /**
      * 用户改写过的**内置人格**（覆盖 Praxis 出厂那段）。空串 = 用出厂人格。
      *
      * ## 为什么要单独一个键，而不是并进 [setSystemPrompt]
@@ -1343,6 +1354,9 @@ private val KEY_GATEWAY_MODEL_RULES = stringPreferencesKey("gateway_model_rules"
  * 所以默认打开不影响任何用单配置档案的人；关掉它必须让整条链路停用。
  */
 private val KEY_GATEWAY_ENABLED = booleanPreferencesKey("gateway_enabled")
+
+/** 生图目标（本地模型或服务商模型）的 JSON 原文，见 [SettingsRepository.imageGenTargetJson]。 */
+private val KEY_IMAGEGEN_TARGET = stringPreferencesKey("imagegen_target")
 
 /**
  * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。
