@@ -43,10 +43,10 @@ P0 全部完成；P1 的纯逻辑部分（路由引擎 + 失败切换 + 账号�
 | RoutePlanner.kt | 7.2 过滤 + 7.3 排序 | 18 |
 | FailoverLoop.kt | 7.4 + 12 换号上限 | 13 |
 | AutoContinuePolicy.kt | 7.5 自动续写 | 10 |
-| GatewayCredential.kt | 6.1 凭证两种形态 | 7 |
+| GatewayCredential.kt | 6.1 凭证两种形态 | 5 |
 | GatewayStatusText.kt | 9.0 三态灯与倒计时 | 10 |
 | GatewayAccountStatus.kt | 9.0 状态推导 | 10 |
-| GatewayAccountRow.kt | 界面行模型 | 4 |
+| GatewayAccountRow.kt | 界面行模型 | 2 |
 
 账号池存储层在 core:data：GatewayAccountStore 落库、凭证加密边界、行模型组装，共 11 例；
 模型条目表（gateway_model，v12 到 v13）与账号表、提供商表（v11 到 v12）各有映射测试。
@@ -67,29 +67,36 @@ P0 全部完成；P1 的纯逻辑部分（路由引擎 + 失败切换 + 账号�
 4. 模型管理页、路由页
 5. 令牌预算限流：7.2 第 6 行只实现了每账号与每家的 RPM；token 预算需要 P3 的请求记录表才有数据源
 6. P3 及之后：协议编码器（Anthropic 与 Responses）、报表、日志并入、系统设置、代理、云同步、Rust 内核与 JNI、签到框架、AGPL 转换
-7. 全局开关 gateway_enabled：文档 11 末尾要求「每阶段结束都要能回滚，gateway_enabled = false 时必须与现在的行为完全一致」。这一条我**没有实现**——目前没有任何总开关，网关只在用户主动进设置页、且档案切到「网关」时才起作用，但没有一个「一键回到移植前行为」的闸。做它需要一个 DataStore 键 + 设置页开关 + 模型页与选路两处都遵守它，是一整轮的量
+7. 批量动作只实现了「清空运行状态」。文档 9.3 列的测试、导出、删除三个批量动作要等 P1 的请求通道与导入导出界面，
+   现在不放假按钮 —— 点了没反应比没有按钮更糟
+8. 全局开关 gateway_enabled：文档 11 末尾要求「每阶段结束都要能回滚，gateway_enabled = false 时必须与现在的行为完全一致」。这一条我**没有实现**——目前没有任何总开关，网关只在用户主动进设置页、且档案切到「网关」时才起作用，但没有一个「一键回到移植前行为」的闸。做它需要一个 DataStore 键 + 设置页开关 + 模型页与选路两处都遵守它，是一整轮的量
 
-## 五、对文档的有意偏离（每条都说明原因）
+## 五、曾经偏离、已按文档改正
+
+| 项 | 原来 | 现在 | 原因 |
+|---|---|---|---|
+| 分区头 | 用 miuix SmallTitle + Card 代替 SettingsSectionHeader | **已按文档用 SettingsSectionHeader**：把该控件从 feature:settings 提到 ui:widgets 公开面 | 文档 9.0 要求「不许自写控件、用仓库已有控件」，同时又要求照抄这个结构。两条放在一起，唯一不违反的做法就是把它提到公开面 |
+| 多选批量 | 未实现（MiuixSelectableRow 是 internal，跨模块引用不到） | **已按文档实现**：该控件已提到 ui:widgets 公开面，账号页多选进入批量模式 | 同上 |
+
+## 六、仍然存在的有意偏离（每条都说明原因）
 
 | # | 文档要求 | 实际做法 | 原因 |
 |---|---|---|---|
-| 1 | 9.0：分区用 SettingsSectionHeader | miuix SmallTitle + Card | 那个控件是 feature:settings 内部件，网关模块引用会造成 feature 到 feature 的依赖。若把它提到 ui:widgets 公开面，可以改回文档写法 |
-| 2 | 9.3：多选批量模式用 MiuixSelectableRow | 未实现批量模式 | 该控件是 internal（模块私有），跨模块引用不到。同样需要先提到公开面 |
-| 3 | 10：GatewayAccountStore 放 app/data/gateway | 放 core:data/gateway | KeystoreCipher 与两张表的 DAO 都在 core:data；放 :app 既拿不到它们的可见性，也失去纯 JVM 单测的可能 |
+| 1 | 10：GatewayAccountStore 放 app/data/gateway | 放 core:data/gateway | KeystoreCipher 与两张表的 DAO 都在 core:data；放 :app 既拿不到它们的可见性，也失去纯 JVM 单测的可能 |
 | 4 | 6.5：RouteState 只列了读方法与 onFailure | 补了 markSink、markLimit、breakerUntil | 7.4 的「还有额度时另加垫底」与「429 冷却到重置时刻」没有写入口就实现不了；breakerOpen 只给布尔，界面要显示「还有多久恢复」答不了 |
-| 5 | 6.4：gateway_retry_count（单账号内重试） | 未实现 | 7.4 每一类失败都直接给了动作，没有一类写着先原地重试一次；硬塞等于自己发明语义 |
-| 6 | 7.2 第 4 行把 sink 列在冷却过滤器里 | 按软降级实现（仍可用、排最后） | 7.3 又要求 sink 排到队尾。若在过滤阶段就滤掉，那句排序规则永远没有作用对象 |
+| 3 | 6.4：gateway_retry_count（单账号内重试） | 未实现 | 7.4 每一类失败都直接给了动作，没有一类写着先原地重试一次；硬塞等于自己发明语义 |
+| 4 | 7.2 第 4 行把 sink 列在冷却过滤器里 | 按软降级实现（仍可用、排最后） | 7.3 又要求 sink 排到队尾。若在过滤阶段就滤掉，那句排序规则永远没有作用对象 |
 | 7 | 8.4 的键名在熔断与压缩两组只写了前后缀 | 按「组前缀 + 后缀」拼全名 | 若网关真实键名不同，它们会出现在导入报告的 unknownKeys 里，不会静默丢失；宁可报告多一行，也不猜两套名字 |
-| 8 | KeystoreCipher 既有约定：加密失败就存明文 | 网关凭证加密失败则整次导入失败 | 那正是兜底式设计：用户以为密钥加密了，实际明文躺在库里 |
+| 6 | KeystoreCipher 既有约定：加密失败就存明文 | 网关凭证加密失败则整次导入失败 | 那正是兜底式设计：用户以为密钥加密了，实际明文躺在库里 |
 
-## 六、已知风险
+## 七、已知风险
 
 1. 180 例测试从未执行过（见第二节）。推送后必须核对 CI 的 build 与 verify。
 2. Room 迁移只在编译期被验证过：v11 到 v12、v12 到 v13 都是新增表、走自动迁移，但 Room 真正的 schema 校验发生在打开数据库时。需要一台装过旧版本的设备启动一次才能确认。
 3. 账号页的 Koin 接线与 Compose 代码从未编译过。
 4. 缺全局回滚闸（见第四节第 7 条）：万一网关路径出问题，用户没有「关掉它」的开关，只能把模型档案切回非网关档案。
 
-## 七、下一步建议顺序
+## 八、下一步建议顺序
 
 1. 推送并核对 CI；红了先修
 2. 用一台装过 v11 的设备启动一次，确认迁移不崩

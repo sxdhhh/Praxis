@@ -266,7 +266,9 @@ fun PraxisApp(
     var gatewayAccountRows by remember {
         mutableStateOf<List<dev.praxis.core.gateway.GatewayAccountRow>>(emptyList())
     }
-    LaunchedEffect(Unit) {
+    // 批量清空运行状态之后要重算一遍行，否则界面上的灯不会变。
+    var gatewayRowsRefresh by remember { mutableStateOf(0) }
+    LaunchedEffect(gatewayRowsRefresh) {
         gatewayAccountRows = gatewayAccountStore.accountRows(
             state = gatewayRouteState,
             // 家名的翻译表要等 P1 的家清单；先用 id 原样显示，不编一个假名字。
@@ -1053,6 +1055,11 @@ fun PraxisApp(
             else -> dev.praxis.feature.settings.SettingsHost(
                 route = route,
                 gatewayAccountRows = gatewayAccountRows,
+                onClearGatewayRuntime = { ids ->
+                    // 运行期状态是内存里的，清掉就是真的清掉；随后触发一次重算。
+                    ids.forEach { gatewayRouteState.onSuccess(it) }
+                    gatewayRowsRefresh += 1
+                },
                 repository = settingsRepository,
                 versionName = versionName,
                 versionCode = versionCode,

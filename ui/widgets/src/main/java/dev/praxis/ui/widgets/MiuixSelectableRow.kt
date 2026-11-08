@@ -25,7 +25,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 按压缩放反馈，裸 Row 需自己补齐这些才能和列表其余行对齐。
  */
 @Composable
-internal fun MiuixSelectableRow(
+fun MiuixSelectableRow(
     text: String,
     isSelected: Boolean,
     onClick: () -> Unit,

@@ -19,6 +19,8 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
 
+    // 分区头要传 ImageVector，图标来自 extended 包（与 ModelScreen 同源）。
+    implementation(libs.compose.material.icons.extended)
     api(platform(libs.compose.bom))
     api(libs.compose.ui)
 }

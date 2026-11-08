@@ -1,4 +1,4 @@
-package dev.praxis.feature.settings.ai
+package dev.praxis.ui.widgets
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +21,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 分区头部：图标 + 标题 + 可选副标题。
+ *
+ * ## 为什么它从 feature:settings 搬到了 ui:widgets
+ *
+ * 原本它是 feature:settings 的 internal 件。网关页（另一个 feature 模块）也要
+ * 用同一套分区头，而 docs/PORTING-GATEWAY.md 9.0 明写「不许自写控件、用仓库
+ * 已有控件」，同时又要求照抄这个结构。两条要求放在一起，唯一不违反的做法就是
+ * 把它提到 ui:widgets 的公开面 —— 而不是在网关页里再抄一份长得像的东西。
  *
  * ## 1:1 对齐 Operit `SettingsSectionHeader`
  *
@@ -56,7 +63,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * @param subtitle 一句话说明这个分区管什么（可选）
  */
 @Composable
-internal fun SettingsSectionHeader(
+fun SettingsSectionHeader(
     icon: ImageVector,
     title: String,
     subtitle: String? = null,

@@ -9,11 +9,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.outlined.Construction
+import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.outlined.Insights
 import dev.praxis.ui.navigation.LocalNavigator
 import dev.praxis.ui.navigation.PraxisRoute
 import dev.praxis.ui.widgets.MiuixNavigationItemWidget
+import dev.praxis.ui.widgets.SettingsSectionHeader
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -44,7 +49,11 @@ fun GatewayRoute(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         item(key = "__intro__") {
-            SmallTitle("网关")
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Hub,
+                title = "网关",
+                subtitle = "多个上游账号汇成一个入口",
+            )
         }
 
         item(key = "__intro_card__") {
@@ -60,7 +69,11 @@ fun GatewayRoute(
 
         // ── 账号（P1）──
         item(key = "__accounts_title__") {
-            SmallTitle("账号")
+            SettingsSectionHeader(
+                icon = Icons.Outlined.AccountCircle,
+                title = "账号",
+                subtitle = "谁参与选路、谁在冷却",
+            )
         }
         item(key = "__accounts_card__") {
             Card(
@@ -83,7 +96,11 @@ fun GatewayRoute(
 
         // ── 今日流量（P3）──
         item(key = "__traffic_title__") {
-            SmallTitle("今日流量")
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Insights,
+                title = "今日流量",
+                subtitle = "请求数与失败数",
+            )
         }
         item(key = "__traffic_card__") {
             GatewayCard {
@@ -103,7 +120,11 @@ fun GatewayRoute(
 
         // ── 进度：明确列出还没做的部分 ──
         item(key = "__plan_title__") {
-            SmallTitle("后续阶段")
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Construction,
+                title = "后续阶段",
+                subtitle = "还没做的部分，如实列出",
+            )
         }
         item(key = "__plan_card__") {
             GatewayCard {

@@ -70,6 +70,12 @@ fun SettingsHost(
      * 调用方的选择，不是这一层替他决定的。
      */
     gatewayAccountRows: List<dev.praxis.core.gateway.GatewayAccountRow> = emptyList(),
+    /**
+     * 批量清空这些账号的运行期状态（退避/垫底/限额）。
+     *
+     * 没有默认值：这是会真的改状态的操作，不该有一个「忘了传就静默无效」的默认实现。
+     */
+    onClearGatewayRuntime: (List<String>) -> Unit,
     repository: SettingsRepository,
     versionName: String,
     versionCode: Int,
@@ -513,6 +519,7 @@ private fun SettingsPageBody(
             rows = gatewayAccountRows,
             onMove = { _, _ -> },
             onOpenAccount = { },
+            onClearRuntime = onClearGatewayRuntime,
             modifier = modifier,
         )
         is PraxisRoute.PluginEntry -> dev.praxis.feature.settings.plugin.PluginEntryScreen(

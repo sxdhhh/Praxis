@@ -42,6 +42,7 @@ import dev.praxis.core.model.settings.ThinkingEffort
 import dev.praxis.core.model.settings.ApiProvider
 import dev.praxis.core.model.settings.ModelProfileKind
 import dev.praxis.core.model.settings.ModelSettings
+import dev.praxis.ui.widgets.SettingsSectionHeader
 import dev.praxis.ui.navigation.LocalNavigator
 import dev.praxis.ui.navigation.PraxisRoute
 import dev.praxis.ui.widgets.MiuixBadge
