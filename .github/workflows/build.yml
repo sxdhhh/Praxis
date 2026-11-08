@@ -300,6 +300,7 @@ jobs:
             :core:ai:test \
             :core:data:test \
             :core:gateway:test \
+            :core:imagegen:test \
             :core:goal:test \
             :core:linux:test \
             :core:memory:test \
@@ -394,8 +395,12 @@ jobs:
         run: |
           set +e
           failed=0
+          # 这份清单是**白名单**：新加的测试类不写进来就永远不跑。
+          # （2026-11-08 踩过：core:imagegen 与 GenerateImageToolTest 都没登记，
+          #   CI 绿色但新增的 65 条测试一条没执行、汇总行数字纹丝不动。）
           for CT in MemoryPortImplTest ToolWorkflowPortTest HardLinkParseTest \
-                    ProotLoaderStagingTest SessionShutdownTest WiringGuardTest; do
+                    ProotLoaderStagingTest SessionShutdownTest WiringGuardTest \
+                    GenerateImageToolTest; do
             echo "::group::$CT"
             timeout --signal=KILL 240 ./gradlew :app:testDebugUnitTest \
               --tests "*$CT" --stacktrace
