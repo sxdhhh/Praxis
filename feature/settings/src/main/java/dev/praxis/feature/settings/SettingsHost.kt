@@ -76,6 +76,8 @@ fun SettingsHost(
      * 没有默认值：这是会真的改状态的操作，不该有一个「忘了传就静默无效」的默认实现。
      */
     onClearGatewayRuntime: (List<String>) -> Unit,
+    /** 网关对外模型清单（模型页在选择器里用）。 */
+    gatewayModelOptions: List<dev.praxis.core.ai.AiModelOption> = emptyList(),
     /** 导入页的四段报告（预检结果；null = 还没解析）。 */
     gatewayImportReport: dev.praxis.core.gateway.GatewayImportReport? = null,
     /** 导入页的落库结果文案。 */
@@ -224,6 +226,7 @@ fun SettingsHost(
             gatewayImportReport = gatewayImportReport,
             gatewayImportResult = gatewayImportResult,
             gatewayImportError = gatewayImportError,
+            gatewayModelOptions = gatewayModelOptions,
             gatewayImportBusy = gatewayImportBusy,
             onImportFromClipboard = onImportFromClipboard,
             onConfirmGatewayImport = onConfirmGatewayImport,
@@ -337,6 +340,7 @@ private fun SettingsPageBody(
     gatewayAccountRows: List<dev.praxis.core.gateway.GatewayAccountRow> = emptyList(),
     /** 批量清空运行期状态（见 [SettingsHost] 上的同名参数）。 */
     onClearGatewayRuntime: (List<String>) -> Unit = {},
+    gatewayModelOptions: List<dev.praxis.core.ai.AiModelOption> = emptyList(),
     gatewayImportReport: dev.praxis.core.gateway.GatewayImportReport? = null,
     gatewayImportResult: String? = null,
     gatewayImportError: String? = null,
@@ -349,6 +353,7 @@ private fun SettingsPageBody(
     when (route) {
         // ── 模型与提示词：决定「AI 怎么说话」 ──
         PraxisRoute.SettingsModel -> ModelRoute(
+            gatewayModels = gatewayModelOptions,
             repository = repository,
             modifier = modifier,
             modelCatalogFetcher = modelCatalogFetcher,

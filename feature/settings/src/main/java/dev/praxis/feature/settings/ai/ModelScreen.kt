@@ -155,6 +155,13 @@ import dev.praxis.ui.widgets.FoldableContent
 fun ModelScreen(
     settings: ModelSettings,
     apiKeyMasked: String,
+    /**
+     * 网关对外模型清单（文档 9.1 的 gatewayModels）。
+     *
+     * kind = Gateway 时用它填选择器：模型来自网关，用户只选不填。
+     * 与 Single 模式下拉取来的 [models] 是两回事 —— 那个要发网络请求，这个不用。
+     */
+    gatewayModels: List<dev.praxis.core.ai.AiModelOption> = emptyList(),
     onSave: (
         baseUrl: String,
         /**
@@ -763,8 +770,13 @@ fun ModelScreen(
                     if (activeKind == ModelProfileKind.Gateway) {
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "网关配置的模型来自网关的对外模型清单；" +
-                                "网关里还没有模型，暂时可以手动填写模型名。",
+                            text = if (gatewayModels.isEmpty()) {
+                                "网关的对外模型清单是空的：先导入账号（各家声明的模型会进清单）" +
+                                    "或导入 modelRules（映射别名会进清单）。现在也可以手动填写模型名。"
+                            } else {
+                                "清单里的 " + gatewayModels.size + " 个名字来自网关：" +
+                                    "各家声明的模型 + 你配的映射别名。点上面的「选择模型」挑。"
+                            },
                             style = MiuixTheme.textStyles.footnote1,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
@@ -1282,7 +1294,8 @@ fun ModelScreen(
     // 代价：弹窗关闭后组件仍然在组合树里（只是不挂 window），
     // 那点开销远小于「动画播不出来」。
     ModelPickerDialog(
-        options = models,
+        // 网关档案下用网关的对外清单：它不需要网络请求，也不该显示「拉取」。
+        options = if (activeKind == ModelProfileKind.Gateway) gatewayModels else models,
         // 可见性交给组件自己带进带出（见上面的说明）。
         visible = showModelPicker,
         // 把已保存的池子传进去（弹窗要据此显示哪些勾上了）。

@@ -72,6 +72,8 @@ fun ModelRoute(
      * 里不必拖进 OkHttp。
      */
     modelCatalogFetcher: dev.praxis.core.ai.ModelCatalogFetcher? = null,
+    /** 网关对外模型清单；:app 从账号池与 modelRules 算出（见 GatewayModelCatalog）。 */
+    gatewayModels: List<dev.praxis.core.ai.AiModelOption> = emptyList(),
 ) {
     val modelSettings by repository.modelSettings.collectAsState(
         initial = ModelSettings(),
@@ -125,6 +127,7 @@ fun ModelRoute(
     }
 
     ModelScreen(
+            gatewayModels = gatewayModels,
         settings = modelSettings,
         advanced = advanced,
         apiKeyMasked = keyMasked.value,

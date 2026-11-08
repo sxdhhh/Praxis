@@ -306,6 +306,19 @@ fun PraxisApp(
         )
     }
 
+    // 网关对外模型清单：各家声明的模型 + 映射别名（去重、大小写不敏感）。
+    var gatewayModelOptions by remember {
+        mutableStateOf<List<dev.praxis.core.ai.AiModelOption>>(emptyList())
+    }
+    LaunchedEffect(gatewayRowsRefresh, gatewayModelRulesJson) {
+        gatewayModelOptions = dev.praxis.core.gateway.GatewayModelCatalog
+            .visibleNames(
+                nativeModels = gatewayAccountStore.nativeModels(),
+                mappings = gatewayModelRules.toRoutingMappings(),
+            )
+            .map { dev.praxis.core.ai.AiModelOption(id = it, name = it) }
+    }
+
     /**
      * 终端会话快照端口。
      *
@@ -1119,6 +1132,7 @@ fun PraxisApp(
                     ids.forEach { gatewayRouteState.onSuccess(it) }
                     gatewayRowsRefresh += 1
                 },
+                gatewayModelOptions = gatewayModelOptions,
                 gatewayImportBusy = gatewayImportBusy,
                 gatewayImportReport = gatewayImportReport,
                 gatewayImportResult = gatewayImportResult,
