@@ -525,7 +525,10 @@ fun PraxisApp(
         }
     }
 
-    val imageGenEngineLocator = remember { dev.praxis.data.imagegen.EngineLocator() }
+    // 与 generate_image 工具共用同一个探活实例（Koin 单例）。
+    // 各建一份会出现「设置页说已连接、工具说不可用」这种自相矛盾的观感。
+    val imageGenEngineLocator: dev.praxis.data.imagegen.EngineLocator =
+        org.koin.compose.koinInject()
 
     // 运行时权限申请。回调不逐条比对结果，统一 refresh() 回读系统真值 ——
     // 多权限、部分授予时逐条比对必错。

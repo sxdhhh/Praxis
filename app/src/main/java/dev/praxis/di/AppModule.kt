@@ -13,6 +13,7 @@ import dev.praxis.core.tool.ToolRegistry
 import dev.praxis.core.tool.builtin.FileTools
 import dev.praxis.data.ai.OpenAiCompatProvider
 import dev.praxis.data.db.SessionDao
+import kotlinx.coroutines.flow.first
 import org.koin.android.ext.koin.androidContext
 import org.koin.dsl.module
 
@@ -369,6 +370,10 @@ val appModule = module {
         )
     }
     single { dev.praxis.data.imagegen.ModelDownloader() }
+    // 探活：单例（设置页与工具共用同一个实例，避免两份超时配置各自为政）。
+    single { dev.praxis.data.imagegen.EngineLocator() }
+    // 生成客户端：按 ImageGenRunner 接口注册，工具只依赖接口。
+    single<dev.praxis.data.imagegen.ImageGenRunner> { dev.praxis.data.imagegen.ImageGenClient() }
     single {
         dev.praxis.data.imagegen.ImageModelDownloadManager(
             downloader = get(),
@@ -407,6 +412,45 @@ val appModule = module {
         root.mkdirs()
         ToolRegistry().apply {
             registerAll(*FileTools(root).all().toTypedArray())
+
+            // ── 本地生图（docs/PORTING-IMAGEGEN.md §5.1）──
+            //
+            // 注册是**静态**的：引擎此刻有没有起来只有运行期才知道，
+            // 所以不在这里判活 —— 工具自己会在执行时探活并回一句
+            // 「引擎不可用（端口没人应答）」的分类错误。这比「工具消失」好排查。
+            run {
+                val settings = get<SettingsRepository>()
+                val imageDir = java.io.File(androidContext().filesDir, "images")
+                val locator = get<dev.praxis.data.imagegen.EngineLocator>()
+                register(
+                    dev.praxis.tool.GenerateImageTool(
+                        runner = get(),
+                        probe = { locator.probe() },
+                        // 目标只认本地：远端目标（ImageGenTarget.Remote）走另一条路，
+                        // 本工具暂时只做本地引擎（远端 images 端点是后续工作）。
+                        modelId = {
+                            val decoded = dev.praxis.core.imagegen.ImageGenTargetCodec
+                                .decode(settings.imageGenTargetJson.first())
+                                ?.getOrNull()
+                            (decoded as? dev.praxis.core.imagegen.ImageGenTarget.Local)?.modelId
+                        },
+                        // 档位校验暂时只做全局范围（256~1024）：目录里每个模型只记了一个
+                        // 默认尺寸，拿它当「唯一可用档位」会把 512x768 这类合法请求拦掉。
+                        availableSizes = { emptyList() },
+                        saveImage = { bytes ->
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                if (!imageDir.exists()) imageDir.mkdirs()
+                                val file = java.io.File(
+                                    imageDir,
+                                    "gen_" + System.currentTimeMillis() + ".jpg",
+                                )
+                                file.writeBytes(bytes)
+                                file.absolutePath
+                            }
+                        },
+                    ),
+                )
+            }
 
             // ## Linux 容器工具（AI 可调用 Kali）
             //

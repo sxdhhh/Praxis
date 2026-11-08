@@ -60,7 +60,7 @@ class GenerateImageToolTest {
     private fun tool(
         runner: ImageGenRunner,
         probe: suspend () -> EngineAvailability = available,
-        modelId: () -> String? = { "anythingv5" },
+        modelId: suspend () -> String? = { "anythingv5" },
         sizes: () -> List<Pair<Int, Int>> = { emptyList() },
         saved: MutableList<ByteArray> = mutableListOf(),
     ) = GenerateImageTool(

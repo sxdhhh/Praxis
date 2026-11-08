@@ -53,8 +53,12 @@ class GenerateImageTool(
     private val runner: ImageGenRunner,
     /** 探活；注入成 lambda 是为了让工具在单测里不必起 HTTP。 */
     private val probe: suspend () -> EngineAvailability,
-    /** 当前选中的本地模型；null = 还没选。 */
-    private val modelId: () -> String?,
+    /**
+     * 当前选中的本地模型；null = 还没选（或选的是远端目标）。
+     *
+     * suspend：目标存在 `imagegen_target`（DataStore），读它是挂起操作。
+     */
+    private val modelId: suspend () -> String?,
     /** 该模型的可用分辨率档位；空 = 自由画布（不做档位校验）。 */
     private val availableSizes: () -> List<Pair<Int, Int>> = { emptyList() },
     /** 落盘：返回绝对路径。放成 lambda 让工具不碰 Context。 */
