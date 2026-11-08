@@ -12,6 +12,17 @@ sealed interface RouteOutcome {
     /** 一个候选都没有：全被过滤掉了。带上每一条的跳过原因。 */
     data class NoCandidate(val skipped: List<SkippedAttempt>) : RouteOutcome
 
+    /**
+     * 有候选，但本轮能试的组合都试过了。
+     *
+     * 与 [NoCandidate] 分开：前者是「一个都没得选」（要引导去配账号），
+     * 后者是「试过了都不行」（要说清是哪些、为什么）。
+     */
+    data class Exhausted(
+        val tried: List<String>,
+        val lastKind: FailureKind?,
+    ) : RouteOutcome
+
     /** 有候选，但接连失败后决定不再试。 */
     data class GaveUp(
         val reason: String,
@@ -55,6 +66,20 @@ class RouterSession(
     /** 需要重新登录的账号（401 续期之后仍然失败）。由调用方决定怎么落库。 */
     private val reloginAccounts = mutableSetOf<String>()
 
+    /**
+     * 本轮已经试过的 (账号, 上游模型)。
+     *
+     * ## 为什么必须有这个集合
+     *
+     * 7.4 的表里，凭证过期（401）与内容拦截都写着**不冷却账号**。于是「换号」
+     * 这个动作在过滤条件里没有任何东西能保证它真的换 —— 同一个账号会立刻又被
+     * 选出来，原地死循环（这是我写完第一版、被自己的用例抓出来的）。
+     *
+     * 键是「账号 + 上游模型」而不是只有账号：同一个账号换一个模型仍可能成功，
+     * 那是另一条候选，不该被误排除。
+     */
+    private val tried = mutableSetOf<Pair<String, String>>()
+
     /** 已经成功用过的账号（会话粘性的来源）。 */
     var stickyAfterSuccess: String? = null
         private set
@@ -86,11 +111,24 @@ class RouterSession(
             stickyAccountId = null
         }
 
-        val attempt = plan.attempts.firstOrNull()
+        val remaining = plan.attempts.filter { candidate ->
+            (candidate.accountId to candidate.wireModel) !in tried
+        }
+
+        val attempt = remaining.firstOrNull()
         if (attempt == null) {
-            lastOutcome = RouteOutcome.NoCandidate(plan.skipped)
+            lastOutcome = if (plan.attempts.isEmpty()) {
+                RouteOutcome.NoCandidate(plan.skipped)
+            } else {
+                RouteOutcome.Exhausted(
+                    tried = tried.map { it.first + "/" + it.second },
+                    lastKind = lastKind,
+                )
+            }
             return null
         }
+
+        tried += attempt.accountId to attempt.wireModel
         return attempt
     }
 
