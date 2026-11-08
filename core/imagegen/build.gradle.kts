@@ -12,6 +12,10 @@ dependencies {
     // 本模块对外只交出 String（ImageGenRequest.toJson）与 ByteArray（complete 的图字节），
     // kotlinx.serialization 的 JsonObject / JsonPrimitive 不会漏进调用方的编译期。
     implementation(libs.kotlinx.serialization.json)
+    // 生图进度要走 StateFlow 给聊天层订阅（§6.1：20~60 秒没有反馈，用户会以为卡死）。
+    // api 而不是 implementation：`ImageGenProgressBus.state` 的类型 StateFlow 会出现在
+    // 调用方的编译期（:app 与 :feature:chat 都要读它）。
+    api(libs.kotlinx.coroutines.core)
 
     testImplementation(libs.junit)
 }

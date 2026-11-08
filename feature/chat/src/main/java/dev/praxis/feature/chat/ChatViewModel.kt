@@ -76,6 +76,13 @@ class ChatViewModel(
      */
     private val memoryPort: MemoryPort? = null,
     /**
+     * 生图进度总线（文档 §6.1）。null = 不订阅（单测与纯 UI 预览用）。
+     *
+     * 为什么走总线而不是给 execute 加进度回调：工具的执行是黑盒 suspend 函数，
+     * 而回调 lambda 要从 :app 穿到 :feature:chat 再进工具，三四层且每一层都要改签名。
+     */
+    private val imageGenProgress: dev.praxis.core.imagegen.ImageGenProgressBus? = null,
+    /**
      * 已启用技能拼成的提示词片段（可为空）。
      *
      * 用 `suspend () -> String` 而不是 String：技能列表可能在设置页被改，
@@ -2633,11 +2640,41 @@ class ChatViewModel(
             )
         }
 
-        val executions = executor.executeAll(
-            invocations = invocations,
-            context = context,
-            askHandler = null, // 弹框征询在本轮不做，ASK 会降级为拒绝。
-        )
+        // 长任务要能看到「在动」（文档 §6.1：20~60 秒没有反馈，用户会以为卡死并杀掉 App）。
+        // 工具一边跑一边把进度写到总线上，这里在**执行期间**并发订阅，把进度写进那张
+        // 正在跑的工具卡 —— 不动卡片结构，也不改任何 UI 签名。
+        val executions = kotlinx.coroutines.coroutineScope {
+            val watcher = imageGenProgress?.let { bus ->
+                launch {
+                    bus.state.collect { progress ->
+                        val line = imageGenProgressLine(progress) ?: return@collect
+                        _state.update { current ->
+                            val card = current.bubbles.lastOrNull { bubble ->
+                                bubble.role == BubbleRole.Tool &&
+                                    bubble.tool?.name == "generate_image" &&
+                                    bubble.tool?.result == null
+                            } ?: return@update current
+                            current.copy(
+                                bubbles = current.bubbles.map { bubble ->
+                                    if (bubble.id == card.id) {
+                                        bubble.copy(text = line)
+                                    } else {
+                                        bubble
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            val result = executor.executeAll(
+                invocations = invocations,
+                context = context,
+                askHandler = null, // 弹框征询在本轮不做，ASK 会降级为拒绝。
+            )
+            watcher?.cancel()
+            result
+        }
 
         // 结果按调用顺序逐条落库 + 渲染。
         //
@@ -4650,6 +4687,24 @@ class ChatViewModel(
      * 所以文本更新改走 [ChatState.streamingText]（见 `applyStreamText`），
      * 本函数只负责**结构**字段（role / streaming / tool / timestamp）。
      */
+    /**
+     * 进度写成工具卡上的一行字（文档 §6.1）。
+     *
+     * 总量未知时只说「生图中…」—— 不编百分比（与下载进度同一条纪律）。
+     */
+    private fun imageGenProgressLine(
+        progress: dev.praxis.core.imagegen.ImageGenProgress?,
+    ): String? {
+        if (progress == null) return null
+        val phase = when (progress.phase) {
+            dev.praxis.core.imagegen.ImageGenProgress.Phase.Preparing -> "正在准备模型…"
+            dev.praxis.core.imagegen.ImageGenProgress.Phase.Running ->
+                progress.fraction?.let { "生图中 " + (it * 100).toInt() + "%" } ?: "生图中…"
+            dev.praxis.core.imagegen.ImageGenProgress.Phase.Saving -> "正在保存…"
+        }
+        return progress.targetLabel + " · " + phase
+    }
+
     private fun updateBubble(id: Long, transform: (ChatBubble) -> ChatBubble) {
         _state.update { current ->
             val index = current.bubbles.indexOfFirst { it.id == id }

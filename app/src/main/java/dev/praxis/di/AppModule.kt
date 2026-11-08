@@ -375,6 +375,8 @@ val appModule = module {
     // 生成客户端：按 ImageGenRunner 接口注册，工具只依赖接口。
     single<dev.praxis.data.imagegen.ImageGenRunner> { dev.praxis.data.imagegen.ImageGenClient() }
     // 远端出图（OpenAI 兼容 /v1/images/generations）。
+    // 生图进度总线（文档 §6.1）：工具往里写，聊天层从里读。
+    single { dev.praxis.core.imagegen.ImageGenProgressBus() }
     single<dev.praxis.data.imagegen.RemoteImageGenerator> {
         dev.praxis.data.imagegen.OkHttpRemoteImageGenerator()
     }
@@ -439,6 +441,7 @@ val appModule = module {
                                 ?.getOrNull()
                         },
                         remoteGenerator = get(),
+                        reportProgress = { progress -> get<dev.praxis.core.imagegen.ImageGenProgressBus>().publish(progress) },
                         apiKey = { settings.apiKey() },
                         // 档位校验暂时只做全局范围（256~1024）：目录里每个模型只记了一个
                         // 默认尺寸，拿它当「唯一可用档位」会把 512x768 这类合法请求拦掉。

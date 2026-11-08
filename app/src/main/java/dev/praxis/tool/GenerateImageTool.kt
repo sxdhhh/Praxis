@@ -68,6 +68,12 @@ class GenerateImageTool(
     private val apiKey: suspend () -> String? = { null },
     /** 该模型的可用分辨率档位；空 = 自由画布（不做档位校验）。 */
     private val availableSizes: () -> List<Pair<Int, Int>> = { emptyList() },
+    /**
+     * 进度上报（文档 §6.1）。默认不报：单测与无 UI 场景不需要它。
+     *
+     * 传 null 表示「结束了」—— 聊天层据此清掉进度条，不会留一个永远转的圈。
+     */
+    private val reportProgress: (ImageGenProgress?) -> Unit = {},
     /** 落盘：返回绝对路径。放成 lambda 让工具不碰 Context。 */
     private val saveImage: suspend (ByteArray) -> String,
 ) : Tool {
@@ -145,13 +151,18 @@ class GenerateImageTool(
         params: ImageGenParams,
         count: Int,
     ): ToolResult {
+        // 首次启动引擎要 3~10 秒，这段必须让用户看到「在动」（文档 §6.1）。
+        reportProgress(ImageGenProgress(modelId, ImageGenProgress.Phase.Preparing))
         when (val availability = probe()) {
-            is EngineAvailability.Unavailable -> return failure(
-                code = "engine_start_failed",
-                message = "生图引擎不可用（" + availability.reason.name + "）",
-                hint = availability.detail,
-                stage = ToolFailureStage.Execution,
-            )
+            is EngineAvailability.Unavailable -> {
+                reportProgress(null)
+                return failure(
+                    code = "engine_start_failed",
+                    message = "生图引擎不可用（" + availability.reason.name + "）",
+                    hint = availability.detail,
+                    stage = ToolFailureStage.Execution,
+                )
+            }
             is EngineAvailability.Available -> Unit
         }
 
@@ -162,7 +173,16 @@ class GenerateImageTool(
             var complete: ImageGenEvent.Complete? = null
             try {
                 runner.generate(attempt).collect { event ->
-                    if (event is ImageGenEvent.Complete) complete = event
+                    when (event) {
+                        is ImageGenEvent.Complete -> complete = event
+                        is ImageGenEvent.Progress -> reportProgress(
+                            ImageGenProgress(
+                                targetLabel = modelId,
+                                phase = ImageGenProgress.Phase.Running,
+                                fraction = event.value,
+                            ),
+                        )
+                    }
                 }
             } catch (error: IOException) {
                 return failure(
@@ -186,10 +206,12 @@ class GenerateImageTool(
                     stage = ToolFailureStage.Execution,
                 )
             }
+            reportProgress(ImageGenProgress(modelId, ImageGenProgress.Phase.Saving))
             val path = saveImage(result.bytes)
             saved += SavedImage(path, result.seed, result.width, result.height)
         }
 
+        reportProgress(null)
         return ToolResult(content = successJson(modelId, saved))
     }
 

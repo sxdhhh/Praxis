@@ -536,6 +536,9 @@ fun PraxisApp(
     // 各建一份会出现「设置页说已连接、工具说不可用」这种自相矛盾的观感。
     val imageGenEngineLocator: dev.praxis.data.imagegen.EngineLocator =
         org.koin.compose.koinInject()
+    // 与工具共用同一条进度总线（工具写、聊天层读）。
+    val imageGenProgressBus: dev.praxis.core.imagegen.ImageGenProgressBus =
+        org.koin.compose.koinInject()
 
     // 运行时权限申请。回调不逐条比对结果，统一 refresh() 回读系统真值 ——
     // 多权限、部分授予时逐条比对必错。
@@ -651,6 +654,8 @@ fun PraxisApp(
                 toolExecutor = toolExecutor,
                 toolContext = toolContext,
                 permissionSnapshotProvider = { permissionState.snapshot() },
+                // 生图进度：工具写、ViewModel 读（文档 §6.1）。
+                imageGenProgress = imageGenProgressBus,
                 chatRepository = chatPersistence,
                 sessionId = sessionId,
                 memoryPort = memoryPort,
