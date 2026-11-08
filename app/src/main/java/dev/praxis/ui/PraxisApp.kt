@@ -271,6 +271,8 @@ fun PraxisApp(
     val gatewayModelRulesJson by settingsRepository.gatewayModelRulesJson.collectAsState(
         initial = null,
     )
+    // 网关总开关（文档 §11 末尾的回滚闸）。默认 true；判定收在 core:gateway 的 GatewayGate。
+    val gatewayEnabled by settingsRepository.gatewayEnabled.collectAsState(initial = true)
     val gatewayModelRulesParse = remember(gatewayModelRulesJson) {
         gatewayModelRulesJson?.let {
             dev.praxis.core.gateway.GatewayModelRulesCodec.parse(it)
@@ -1152,6 +1154,10 @@ fun PraxisApp(
             else -> dev.praxis.feature.settings.SettingsHost(
                 route = route,
                 gatewayAccountRows = gatewayAccountRows,
+                gatewayEnabled = gatewayEnabled,
+                onGatewayEnabledChange = { enabled ->
+                    coroutineScope.launch { settingsRepository.setGatewayEnabled(enabled) }
+                },
                 onClearGatewayRuntime = { ids ->
                     // 运行期状态是内存里的，清掉就是真的清掉；随后触发一次重算。
                     ids.forEach { gatewayRouteState.onSuccess(it) }

@@ -50,7 +50,27 @@ class SettingsBackedProvider(
         val profileKind = repository.modelProfiles.first().active?.kind
             ?: dev.praxis.core.model.settings.ModelProfileKind.Single
 
-        if (profileKind == dev.praxis.core.model.settings.ModelProfileKind.Gateway) {
+        // ── 总开关（文档 §11 末尾的回滚闸）──
+        //
+        // 判定收在 core:gateway 的 GatewayGate（四种组合有单测），这里只把结果变成行为。
+        val route = dev.praxis.core.gateway.GatewayGate.decide(
+            profileIsGateway = profileKind == dev.praxis.core.model.settings.ModelProfileKind.Gateway,
+            gatewayEnabled = repository.gatewayEnabled.first(),
+        )
+
+        if (route == dev.praxis.core.gateway.OutboundRoute.GatewayDisabled) {
+            // 刻意**不**回落到单配置路径：网关档案上没有 baseUrl / apiKey（它们属于账号池），
+            // 回落等于拿空地址发请求；更糟的是将来若加了「保底账号」，
+            // 用户以为只是停用网关，请求却被悄悄从别的账号发了出去。
+            throw AiException(
+                AiError(
+                    kind = AiErrorKind.INVALID_REQUEST,
+                    message = "网关总开关已关闭。请在「设置 → 网关」里重新打开，或把模型档案切回单配置。",
+                ),
+            )
+        }
+
+        if (route == dev.praxis.core.gateway.OutboundRoute.Gateway) {
             val gateway = gatewayProvider
                 ?: throw AiException(
                     AiError(

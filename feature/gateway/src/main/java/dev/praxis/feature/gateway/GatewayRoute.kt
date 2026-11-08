@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.Insights
 import dev.praxis.ui.navigation.LocalNavigator
 import dev.praxis.ui.navigation.PraxisRoute
 import dev.praxis.ui.widgets.MiuixNavigationItemWidget
+import dev.praxis.ui.widgets.MiuixSwitchWidget
 import dev.praxis.ui.widgets.SettingsSectionHeader
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
@@ -43,6 +44,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 fun GatewayRoute(
     /** 账号池里的账号数（:app 从数据库读出来传进来）。 */
     accountCount: Int = 0,
+    /** 网关总开关（文档 §11 末尾的回滚闸）。 */
+    gatewayEnabled: Boolean = true,
+    onGatewayEnabledChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val navigator = LocalNavigator.current
@@ -65,6 +69,26 @@ fun GatewayRoute(
                         "由网关决定这次请求走哪个账号。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+
+        // ── 总开关（文档 §11 末尾的回滚闸）──
+        item(key = "__master_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Hub,
+                title = "总开关",
+                subtitle = "关掉 = 回到没有网关时的行为",
+            )
+        }
+        item(key = "__master_switch__") {
+            GatewayCard {
+                MiuixSwitchWidget(
+                    title = "启用网关",
+                    description = "关闭后，模型档案切到「网关」会明确提示已停用，" +
+                        "不会改走别的账号或别的地址",
+                    checked = gatewayEnabled,
+                    onCheckedChange = onGatewayEnabledChange,
                 )
             }
         }

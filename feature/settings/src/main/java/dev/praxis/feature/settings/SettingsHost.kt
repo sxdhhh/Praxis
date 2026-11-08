@@ -106,6 +106,9 @@ fun SettingsHost(
     gatewayExportError: String? = null,
     /** 触发导出；true = 含凭证。 */
     onExportGateway: (Boolean) -> Unit = {},
+    /** 网关总开关（文档 §11 末尾的回滚闸）。 */
+    gatewayEnabled: Boolean = true,
+    onGatewayEnabledChange: (Boolean) -> Unit = {},
     repository: SettingsRepository,
     versionName: String,
     versionCode: Int,
@@ -252,6 +255,8 @@ fun SettingsHost(
             gatewayExportText = gatewayExportText,
             gatewayExportError = gatewayExportError,
             onExportGateway = onExportGateway,
+            gatewayEnabled = gatewayEnabled,
+            onGatewayEnabledChange = onGatewayEnabledChange,
             pluginRuntime = pluginRuntime,
             capturedEntries = capturedEntries,
             activationFailures = activationFailures,
@@ -376,6 +381,8 @@ private fun SettingsPageBody(
     gatewayExportText: String? = null,
     gatewayExportError: String? = null,
     onExportGateway: (Boolean) -> Unit = {},
+    gatewayEnabled: Boolean = true,
+    onGatewayEnabledChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     when (route) {
@@ -578,6 +585,8 @@ private fun SettingsPageBody(
         // 插件入口：页面由插件脚本的 compose_dsl 渲染。
         PraxisRoute.SettingsGateway -> dev.praxis.feature.gateway.GatewayRoute(
             accountCount = gatewayAccountRows.size,
+            gatewayEnabled = gatewayEnabled,
+            onGatewayEnabledChange = onGatewayEnabledChange,
             modifier = modifier,
         )
         // 账号页：账号池的存储层已经就绪，但还没有「添加账号」的界面（P1 剩余部分），

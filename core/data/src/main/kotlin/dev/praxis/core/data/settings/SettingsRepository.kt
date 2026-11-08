@@ -637,6 +637,18 @@ class SettingsRepository(
     suspend fun setGatewayModelRulesJson(text: String) = put(KEY_GATEWAY_MODEL_RULES, text)
 
     /**
+     * 网关总开关（文档 §11 末尾的回滚闸：`gateway_enabled = false` 时必须与移植前一致）。
+     *
+     * 默认 **true**。理由：网关只在用户把模型档案切到「网关」时才生效，
+     * 所以这个默认值不会影响任何用单配置档案的人；而关掉它必须能让整条网关链路
+     * 彻底停用 —— 判定收在 `core:gateway` 的 [dev.praxis.core.gateway.GatewayGate]，
+     * 四种组合有单测。
+     */
+    val gatewayEnabled: Flow<Boolean> = dataStore.data.map { it[KEY_GATEWAY_ENABLED] ?: true }
+
+    suspend fun setGatewayEnabled(enabled: Boolean) = put(KEY_GATEWAY_ENABLED, enabled)
+
+    /**
      * 用户改写过的**内置人格**（覆盖 Praxis 出厂那段）。空串 = 用出厂人格。
      *
      * ## 为什么要单独一个键，而不是并进 [setSystemPrompt]
@@ -1325,6 +1337,12 @@ private val KEY_SYSTEM_PROMPT = stringPreferencesKey("system_prompt")
  * 而 Flow<GatewayModelRules> 没地方放错误 —— 那会逼出一种「坏了就当没有」的兜底。
  */
 private val KEY_GATEWAY_MODEL_RULES = stringPreferencesKey("gateway_model_rules")
+
+/**
+ * 网关总开关。默认 true —— 网关只在模型档案 kind = Gateway 时才生效，
+ * 所以默认打开不影响任何用单配置档案的人；关掉它必须让整条链路停用。
+ */
+private val KEY_GATEWAY_ENABLED = booleanPreferencesKey("gateway_enabled")
 
 /**
  * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。
