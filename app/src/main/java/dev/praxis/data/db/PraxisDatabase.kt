@@ -9,6 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import dev.praxis.core.data.character.CharacterCardEntity
 import dev.praxis.core.data.character.PromptTagEntity
 import dev.praxis.core.data.gateway.GatewayAccountEntity
+import dev.praxis.core.data.gateway.GatewayModelEntity
 import dev.praxis.core.data.gateway.GatewayProviderEntity
 
 /**
@@ -39,15 +40,20 @@ import dev.praxis.core.data.gateway.GatewayProviderEntity
         PromptTagEntity::class,
         GatewayAccountEntity::class,
         GatewayProviderEntity::class,
+        GatewayModelEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
     // v11 -> v12：只新增两张表，没有任何列变更 —— 用自动迁移让 Room
     // 从 v11 的导出 schema 自己生成建表 SQL。手写 SQL 只要有一处列顺序或
     // NOT NULL 与实体对不上，运行期打开数据库就会报 identity hash 不匹配，
     // 而那种错误在编译期完全看不出来。
+    // v12 -> v13：新增 gateway_model（结构化模型条目）。同样是只加表、无列变更，
+    // 继续走自动迁移 —— 手写建表 SQL 与实体对不上时，运行期打开数据库才会报
+    // identity hash 不匹配，编译期看不出来。
     autoMigrations = [
         AutoMigration(from = 11, to = 12),
+        AutoMigration(from = 12, to = 13),
     ],
 )
 abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.CharacterDatabase {
@@ -63,6 +69,7 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
     // ── 网关账号池（实体与 DAO 定义在 :core:data）───────────────
     abstract fun gatewayAccountDao(): dev.praxis.core.data.gateway.GatewayAccountDao
     abstract fun gatewayProviderDao(): dev.praxis.core.data.gateway.GatewayProviderDao
+    abstract fun gatewayModelDao(): dev.praxis.core.data.gateway.GatewayModelDao
 
     /**
      * 事务入口。
