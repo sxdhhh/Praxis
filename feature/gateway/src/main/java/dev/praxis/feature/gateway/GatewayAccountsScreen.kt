@@ -82,7 +82,7 @@ fun GatewayAccountsScreen(
                 GatewayCard {
                     MiuixNavigationItemWidget(
                         title = if (batchMode) "退出多选" else "多选",
-                        description = if (batchMode) "清空选中账号的运行状态" else null,
+                        description = if (batchMode) "退出并取消选择" else "选择多个账号一起操作",
                         onClick = {
                             batchMode = !batchMode
                             if (!batchMode) selected = emptySet()
