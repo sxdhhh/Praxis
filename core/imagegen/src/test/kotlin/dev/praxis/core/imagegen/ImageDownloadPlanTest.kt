@@ -87,8 +87,15 @@ class ImageDownloadPlanTest {
             listOf("unet.bin.part", "clip.bin.part"),
             plan.partPaths.map { it.name },
         )
-        assertTrue(plan.zipTempFile.name.endsWith(".part"))
+        // 多文件包没有「整包 zip」，所以临时名是空串（清理清单会跳过它）。
+        assertEquals("", plan.zipTempName)
         assertEquals("z_image_turbo_extract", plan.extractTempDir.name)
+
+        // 单 zip 包的临时名必须与下载时真正写出的 .part 同名，否则失败清理删不掉。
+        val zipPlan = ImageDownloadPlanner.plan(tmp.newFolder("models2"), zipModel())
+        assertEquals("AnythingV5.zip.part", zipPlan.zipTempName)
+        assertTrue(zipPlan.zipTempFile.name.endsWith(".part"))
+        assertTrue(DownloadCleanup.staleFiles(zipPlan).any { it.name == "AnythingV5.zip.part" })
     }
 
     @Test

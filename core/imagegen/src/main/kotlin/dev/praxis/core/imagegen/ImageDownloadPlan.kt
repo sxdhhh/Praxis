@@ -98,7 +98,13 @@ object ImageDownloadPlanner {
             targetDir = dir,
             isZip = zip,
             targets = targets,
-            zipTempName = model.id + ".zip" + ImageDownloadPlan.PART_SUFFIX,
+            // 必须与下载时真正写出的 .part 同名（<远端文件名>.part），
+            // 否则失败清理删不掉它，下次预检会把残留算进占用。
+            zipTempName = if (zip) {
+                targets.first().localName + ImageDownloadPlan.PART_SUFFIX
+            } else {
+                ""
+            },
             extractTempName = model.id + "_extract",
             markerFileName = if (zip) "" else ImageModelCatalog.markerFileName(model.ditKind),
             requiredBytes = ModelSize.parse(model.approximateSize),
@@ -163,7 +169,9 @@ object SpaceCheck {
 object DownloadCleanup {
 
     fun staleFiles(plan: ImageDownloadPlan): List<File> =
-        plan.partPaths + plan.zipTempFile
+        plan.partPaths + listOfNotNull(
+            plan.zipTempFile.takeIf { plan.zipTempName.isNotEmpty() },
+        )
 
     /** 需要整目录删除的临时解压目录。 */
     fun staleDirs(plan: ImageDownloadPlan): List<File> = listOf(plan.extractTempDir)

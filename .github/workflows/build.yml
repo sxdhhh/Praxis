@@ -400,7 +400,8 @@ jobs:
           #   CI 绿色但新增的 65 条测试一条没执行、汇总行数字纹丝不动。）
           for CT in MemoryPortImplTest ToolWorkflowPortTest HardLinkParseTest \
                     ProotLoaderStagingTest SessionShutdownTest WiringGuardTest \
-                    GenerateImageToolTest OpenAiCompatProviderNonStreamingTest; do
+                    GenerateImageToolTest OpenAiCompatProviderNonStreamingTest \
+                    ModelDownloaderTest; do
             echo "::group::$CT"
             timeout --signal=KILL 240 ./gradlew :app:testDebugUnitTest \
               --tests "*$CT" --stacktrace
