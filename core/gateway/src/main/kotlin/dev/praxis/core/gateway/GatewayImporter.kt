@@ -3,14 +3,37 @@ package dev.praxis.core.gateway
 import kotlinx.serialization.json.Json
 
 /**
- * 网关配置导入：解析 + 出报告。
+ * 一份可执行的导入计划：既能落库的东西，也是给用户看的报告。
  *
- * ## 本期只出报告（P0）
+ * ## 为什么要「计划」而不只是「报告」
  *
- * 文档 §11 的 P0 产出写的是「GatewayImporter/Exporter（只出报告）」。
- * 也就是：**先证明能读懂网关的导出文件，再谈落库**。落库要等 P1 的账号表。
- * 这样做的价值是：导入格式错了会在这一层立刻暴露，而不是等表建好才发现
- * 字段对不上。
+ * P0 只要报告（先证明读得懂）。等 P1 有账号表之后，调用方真正需要的是
+ * 「哪些账号该写进去」——如果那时再重新解析一遍，两处规则就会各自演化。
+ * 所以现在就把 accepted 和 report 一起交出去，规则只有一份。
+ */
+data class GatewayImportPlan(
+    /** 通过全部检查的账号：新增与更新都在里面（是否覆盖由 id 是否已存在决定）。 */
+    val accepted: List<GatewayAccountFile>,
+    /** 账号文件里带出来的自定义提供商（按 id 去重，保持首次出现的顺序）。 */
+    val providers: List<GatewayCustomProvider>,
+    val report: GatewayImportReport,
+)
+
+/**
+ * 网关账号文件导入：解析 + 过滤 + 出计划。
+ *
+ * ## 两个入口，一份规则
+ *
+ * - [prepare]：交出「哪些账号该写进去」+ 报告（P1 落库用）
+ * - [report]：只要报告（P0 的用法）
+ *
+ * report 是 prepare 的一层薄委托。规则只写一遍，否则两处会各自演化 ——
+ * 那种分歧的表现是「报告说导入了 5 个，实际只写进去 3 个」。
+ *
+ * ## 为什么先只出报告，再落库
+ *
+ * 文档 §11 的 P0 产出就是「只出报告」：先证明能读懂网关的导出文件，再谈写库。
+ * 导入格式错了会在这一层立刻暴露，而不是等表建好才发现字段对不上。
  */
 object GatewayImporter {
 
@@ -38,11 +61,13 @@ object GatewayImporter {
      * @param existingIds 已存在的账号 id（同 id 记为「更新」，文档 §8.6）
      * @param knownProviders Praxis 认识的 provider id；`custom-*` 一律放行
      */
-    fun report(
+    fun prepare(
         files: Map<String, String>,
         existingIds: Set<String>,
         knownProviders: Set<String>,
-    ): GatewayImportReport {
+    ): GatewayImportPlan {
+        val accepted = mutableListOf<GatewayAccountFile>()
+        val providers = mutableListOf<GatewayCustomProvider>()
         val added = mutableListOf<GatewayImportReport.Item>()
         val updated = mutableListOf<GatewayImportReport.Item>()
         val skipped = mutableListOf<GatewayImportReport.Item>()
@@ -95,14 +120,29 @@ object GatewayImporter {
                 name = display,
                 reason = if (duplicate) "可能是重复账号（同提供商与同地址）" else null,
             )
+            accepted += file
+            file.customProviders.forEach { provider ->
+                if (providers.none { it.id == provider.id }) providers += provider
+            }
             if (file.id in existingIds) updated += item else added += item
         }
 
-        return GatewayImportReport(
-            added = added,
-            updated = updated,
-            skipped = skipped,
-            failed = failed,
+        return GatewayImportPlan(
+            accepted = accepted,
+            providers = providers,
+            report = GatewayImportReport(
+                added = added,
+                updated = updated,
+                skipped = skipped,
+                failed = failed,
+            ),
         )
     }
+
+    /** 只要报告时的便捷入口（P0 的用法）。规则与 [prepare] 同一份。 */
+    fun report(
+        files: Map<String, String>,
+        existingIds: Set<String>,
+        knownProviders: Set<String>,
+    ): GatewayImportReport = prepare(files, existingIds, knownProviders).report
 }

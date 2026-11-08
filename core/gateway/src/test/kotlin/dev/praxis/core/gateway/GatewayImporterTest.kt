@@ -127,4 +127,72 @@ class GatewayImporterTest {
         assertEquals(2, report.added.size)
         assertEquals(1, report.added.count { it.reason != null })
     }
+
+    // ── 导入计划（P1 落库用，2026-11-08）──
+
+    @Test
+    fun 计划里的账号与报告的段一致() {
+        val plan = GatewayImporter.prepare(
+            files = mapOf(
+                "a.json" to file(id = "a1"),
+                "b.json" to file(id = "a2"),
+            ),
+            existingIds = setOf("a2"),
+            knownProviders = known,
+        )
+
+        assertEquals(1, plan.report.added.size)
+        assertEquals(1, plan.report.updated.size)
+        // 新增与更新都该落库，所以都在 accepted 里。
+        assertEquals(listOf("a1", "a2"), plan.accepted.map { it.id }.sorted())
+    }
+
+    @Test
+    fun 被跳过的账号不在计划里() {
+        val plan = GatewayImporter.prepare(
+            files = mapOf(
+                "ok.json" to file(id = "a1"),
+                "oauth.json" to file(id = "a2", apiKey = null, accessToken = "at-1"),
+            ),
+            existingIds = emptySet(),
+            knownProviders = known,
+        )
+
+        assertEquals(listOf("a1"), plan.accepted.map { it.id })
+        assertEquals(1, plan.report.skipped.size)
+    }
+
+    @Test
+    fun 自定义提供商按_id_去重() {
+        val withProvider = """
+            {
+              "format": "agent2api-account",
+              "id": "a1",
+              "provider": "custom-abc",
+              "name": "一号",
+              "apiKey": "k",
+              "customProviders": [ { "id": "custom-abc", "name": "我的中转" } ]
+            }
+        """.trimIndent()
+        val sameProvider = withProvider.replaceFirst("a1", "a2")
+
+        val plan = GatewayImporter.prepare(
+            files = mapOf("1.json" to withProvider, "2.json" to sameProvider),
+            existingIds = emptySet(),
+            knownProviders = known,
+        )
+
+        assertEquals("同一个自定义家只该登记一次", 1, plan.providers.size)
+        assertEquals(2, plan.accepted.size)
+    }
+
+    @Test
+    fun report_与_prepare_用的是同一份规则() {
+        val files = mapOf("a.json" to file(id = "a1"))
+
+        val direct = GatewayImporter.report(files, emptySet(), known)
+        val viaPlan = GatewayImporter.prepare(files, emptySet(), known).report
+
+        assertEquals("两处规则一旦分家，报告与落库就会对不上", direct, viaPlan)
+    }
 }
