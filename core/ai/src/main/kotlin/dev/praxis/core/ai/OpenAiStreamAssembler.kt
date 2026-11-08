@@ -148,6 +148,23 @@ class OpenAiStreamAssembler(
     /** 已累积的文本（供非流式场景拼接）。 */
     fun accumulatedText(): String = textBuffer.toString()
 
+    /** 上游给的原始 finish_reason（拦截判定用）。 */
+    fun finishReasonOrNull(): String? = finishReason
+
+    /**
+     * 上游以内容策略拦截了这次生成，且**一个字都没吐**（文档 §7.4）。
+     *
+     * 三项同时成立才算：`finish_reason` 命中拦截、没有正文、没有工具调用。
+     *
+     * ## 为什么「已吐内容」时不算
+     *
+     * 已经下发的正文收不回来。此时判成异常，等于让用户丢掉已经看到的那半截回答去换家，
+     * 而换家之后内容会**从头再来**一遍 —— 观感是「答到一半突然重说」。
+     * 所以这一档保留正常结束，由上层显示。
+     */
+    fun blockedWithoutOutput(): Boolean =
+        ContentFilterReason.matches(finishReason) && textBuffer.isEmpty() && toolBuckets.isEmpty()
+
     /**
      * 累积一片 tool_call 分片，并返回一条进度事件。
      *
@@ -182,4 +199,19 @@ class OpenAiStreamAssembler(
             ),
         )
     }
+}
+
+/**
+ * `finish_reason` 里的内容拦截判定。
+ *
+ * 单独抽出来是为了让 **core:ai（流式累积器）** 与 **core:gateway（失败分类器）**
+ * 用同一份字面量 —— 两处各写一遍，迟早一处加了一种写法而另一处没加，
+ * 表现是「同一次拦截在非流式被判成拦截、在流式却当成正常结束」。
+ */
+object ContentFilterReason {
+
+    private val VALUES = setOf("content_filter", "content_policy_violation")
+
+    fun matches(reason: String?): Boolean =
+        reason != null && reason.lowercase() in VALUES
 }

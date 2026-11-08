@@ -185,6 +185,20 @@ class OpenAiCompatProvider(
                 assembler.feed(payload).forEach { emit(it) }
             }
 
+            // ── 内容拦截（文档 §7.4，流式这一支）──
+            //
+            // 上游用 HTTP 200 + finish_reason=content_filter 表达拦截，此时流正常结束、没有报错。
+            // 在 finish() 之前判：此刻还没下发 Done，抛出去上层可以安全换家。
+            // 已经吐过内容时为 false（见 blockedWithoutOutput 的说明），不打断正常回复。
+            if (assembler.blockedWithoutOutput()) {
+                throw AiException(
+                    AiError(
+                        kind = AiErrorKind.CONTENT_BLOCKED,
+                        message = "上游以内容策略拦截了这次生成（finish_reason=" +
+                            (assembler.finishReasonOrNull() ?: "null") + "）",
+                    ),
+                )
+            }
             assembler.finish().forEach { emit(it) }
         }
     }.flowOn(Dispatchers.IO)

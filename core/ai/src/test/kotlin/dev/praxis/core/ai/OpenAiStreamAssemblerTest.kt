@@ -1,6 +1,7 @@
 package dev.praxis.core.ai
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -132,6 +133,48 @@ class OpenAiStreamAssemblerTest {
         a.feed("""{"choices":[{"delta":{},"finish_reason":"stop"}]}""")
         val done = a.finish().filterIsInstance<AiStreamEvent.Done>().single()
         assertEquals("stop", done.finishReason)
+    }
+
+    @Test
+    fun `content filter with no output is reported as blocked`() {
+        // 上游用 HTTP 200 + finish_reason=content_filter 表达拦截：流正常结束、没有报错。
+        val a = OpenAiStreamAssembler()
+        a.feed("""{"choices":[{"delta":{},"finish_reason":"content_filter"}]}""")
+        assertTrue(a.blockedWithoutOutput())
+        assertEquals("content_filter", a.finishReasonOrNull())
+    }
+
+    @Test
+    fun `content filter after some text is not treated as blocked`() {
+        // 已经下发的正文收不回来：判成拦截只会让用户丢掉半截回答、换家后从头再来。
+        val a = OpenAiStreamAssembler()
+        a.feed(delta("半截回答"))
+        a.feed("""{"choices":[{"delta":{},"finish_reason":"content_filter"}]}""")
+        assertFalse(a.blockedWithoutOutput())
+    }
+
+    @Test
+    fun `content filter with tool calls only is not treated as blocked`() {
+        val a = OpenAiStreamAssembler()
+        a.feed(toolChunk("""{"index":0,"id":"call_a","function":{"name":"read_file","arguments":"{}"}}"""))
+        a.feed("""{"choices":[{"delta":{},"finish_reason":"content_filter"}]}""")
+        assertFalse(a.blockedWithoutOutput())
+    }
+
+    @Test
+    fun `normal finish is not treated as blocked`() {
+        val a = OpenAiStreamAssembler()
+        a.feed("""{"choices":[{"delta":{},"finish_reason":"stop"}]}""")
+        assertFalse(a.blockedWithoutOutput())
+        // 连 finish_reason 都没有时也不能误判
+        assertFalse(OpenAiStreamAssembler().blockedWithoutOutput())
+    }
+
+    @Test
+    fun `content policy violation spelling is also recognized`() {
+        val a = OpenAiStreamAssembler()
+        a.feed("""{"choices":[{"delta":{},"finish_reason":"content_policy_violation"}]}""")
+        assertTrue(a.blockedWithoutOutput())
     }
 
     @Test

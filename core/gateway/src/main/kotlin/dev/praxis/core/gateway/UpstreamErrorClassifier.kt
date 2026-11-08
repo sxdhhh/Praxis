@@ -81,10 +81,10 @@ object UpstreamErrorClassifier {
      */
     fun classify(status: Int, body: String, finishReason: String? = null): AiErrorKind {
         val text = body.lowercase()
-        val reason = finishReason?.lowercase()
 
         // ① 内容拦截：finish_reason 是权威信号。
-        if (reason == "content_filter" || reason == "content_policy_violation") {
+        //    判定与 core:ai 的流式累积器共用 [ContentFilterReason]，避免两处字面量漂移。
+        if (dev.praxis.core.ai.ContentFilterReason.matches(finishReason)) {
             return AiErrorKind.CONTENT_BLOCKED
         }
 
