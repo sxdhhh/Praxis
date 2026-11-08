@@ -105,6 +105,9 @@ object GatewayExportPlanner {
             notes += "没有可导出的网关配置：路由与模型映射都是空的"
         }
 
+        if (routing == null) {
+            notes += "路由/重试/超时配置未包含：Praxis 还没有持久化这些设置项（状态文档 五）"
+        }
         notes += "apiKeys 未包含：Praxis 还没有网关 Key 功能（文档 5.6，P6）"
         notes += "praxis-gateway-backup.json 未产出：完整档案备份还没实现"
         if (includeSecrets) {
