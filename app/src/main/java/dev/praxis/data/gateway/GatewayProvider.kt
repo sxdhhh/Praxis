@@ -88,7 +88,8 @@ class GatewayProvider(
             candidates = chain.candidates,
             accounts = { views },
             state = state,
-            needsImages = false,
+            // 带图请求要先按能力位过滤（文档 13 的验收项，也是 #408 一次白撞 9 次的原因）。
+            needsImages = request.messages.any { it.images.isNotEmpty() },
             budget = budget,
         )
 
