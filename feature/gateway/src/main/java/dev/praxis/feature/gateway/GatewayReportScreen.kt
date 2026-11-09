@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import dev.praxis.ui.widgets.MiuixAnimatedDialog
 import top.yukonga.miuix.kmp.basic.TextField
+import dev.praxis.ui.widgets.MiuixIntNumberPickerWidget
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -187,8 +189,8 @@ private fun RetentionDialog(
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit,
 ) {
-    var days by remember { mutableStateOf(current.toString()) }
-    var error by remember { mutableStateOf<String?>(null) }
+    // 滑块：1~365 天，非法值不可表达（此前用文本框 + 解析，还得处理"填了中文"）。
+    var days by remember { mutableIntStateOf(current.coerceIn(1, 365)) }
 
     MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
         Card {
@@ -200,34 +202,21 @@ private fun RetentionDialog(
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
-                Spacer(Modifier.height(10.dp))
-                TextField(
+                MiuixIntNumberPickerWidget(
+                    title = "保留天数",
+                    description = "越早的记录在下次启动时被清掉",
                     value = days,
+                    startInt = 1,
+                    endInt = 365,
+                    valueSuffix = " 天",
                     onValueChange = { days = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "天数（1~365）",
-                    useLabelAsPlaceholder = true,
-                    singleLine = true,
                 )
-                error?.let { text ->
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = text,
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = MiuixTheme.colorScheme.error,
-                    )
-                }
                 Spacer(Modifier.height(10.dp))
                 MiuixNavigationItemWidget(
                     title = "保存",
                     description = "下次启动生效",
                     onClick = {
-                        val parsed = days.trim().toIntOrNull()
-                        if (parsed == null) {
-                            error = "要填数字"
-                        } else {
-                            onConfirm(dev.praxis.core.gateway.GatewayRetention.parseDays(parsed))
-                        }
+                        onConfirm(dev.praxis.core.gateway.GatewayRetention.parseDays(days))
                     },
                 )
             }

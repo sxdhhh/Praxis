@@ -8,6 +8,8 @@ import dev.praxis.ui.widgets.MiuixAnimatedDialog
 import top.yukonga.miuix.kmp.basic.TextField
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import dev.praxis.ui.widgets.MiuixIntNumberPickerWidget
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Spacer
@@ -558,7 +560,10 @@ private fun DownloadSourceDialog(
     onConfirm: (dev.praxis.core.imagegen.ImageDownloadSettings) -> Unit,
 ) {
     var baseUrl by remember { mutableStateOf(settings.baseUrl) }
-    var concurrency by remember { mutableStateOf(settings.concurrency.toString()) }
+    // 滑块：取值被限制在 1~4，不需要解析与夹取（此前用文本框 + toIntOrNull）。
+    var concurrency by remember {
+        mutableIntStateOf(settings.concurrency.coerceIn(1, dev.praxis.core.imagegen.ImageDownloadSettings.MAX_CONCURRENCY))
+    }
     var error by remember { mutableStateOf<String?>(null) }
 
     MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
@@ -579,14 +584,14 @@ private fun DownloadSourceDialog(
                     useLabelAsPlaceholder = true,
                     singleLine = true,
                 )
-                Spacer(Modifier.height(8.dp))
-                TextField(
+                MiuixIntNumberPickerWidget(
+                    title = "同时下载几个文件",
+                    description = "手机上的瓶颈通常是带宽，2 路就够；再高收益很小",
                     value = concurrency,
+                    startInt = 1,
+                    endInt = dev.praxis.core.imagegen.ImageDownloadSettings.MAX_CONCURRENCY,
+                    valueSuffix = " 路",
                     onValueChange = { concurrency = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "同时下载几个文件（1~4）",
-                    useLabelAsPlaceholder = true,
-                    singleLine = true,
                 )
                 error?.let { text ->
                     Spacer(Modifier.height(8.dp))
@@ -599,28 +604,20 @@ private fun DownloadSourceDialog(
                 Spacer(Modifier.height(12.dp))
                 MiuixNavigationItemWidget(
                     title = "保存",
-                    description = "地址要以 http:// 或 https:// 开头；并发数超出 1~4 会夹到边界",
+                    description = "地址要以 http:// 或 https:// 开头",
                     onClick = {
                         if (!dev.praxis.core.imagegen.ImageDownloadSettingsRules
                                 .isValidBaseUrl(baseUrl)
                         ) {
                             error = "地址要以 http:// 或 https:// 开头"
                         } else {
-                            val parsed = concurrency.trim().toIntOrNull()
-                            if (parsed == null) {
-                                // 并发数不是用户精确输入（是 1~4 的选择），但「填了字」要如实拦下。
-                                error = "并发数要填数字（1~4）"
-                            } else {
-                                onConfirm(
-                                    settings.copy(
-                                        baseUrl = dev.praxis.core.imagegen.ImageDownloadSettingsRules
-                                            .normalizeBaseUrl(baseUrl),
-                                        concurrency = dev.praxis.core.imagegen
-                                            .ImageDownloadSettingsRules
-                                            .normalizeConcurrency(parsed),
-                                    ),
-                                )
-                            }
+                            onConfirm(
+                                settings.copy(
+                                    baseUrl = dev.praxis.core.imagegen.ImageDownloadSettingsRules
+                                        .normalizeBaseUrl(baseUrl),
+                                    concurrency = concurrency,
+                                ),
+                            )
                         }
                     },
                 )

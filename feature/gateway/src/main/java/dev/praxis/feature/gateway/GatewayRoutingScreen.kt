@@ -7,6 +7,8 @@ import androidx.compose.runtime.setValue
 import dev.praxis.ui.widgets.MiuixAnimatedDialog
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.Card
+import dev.praxis.ui.widgets.MiuixIntNumberPickerWidget
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
@@ -283,10 +285,14 @@ fun GatewayRoutingScreen(
 /**
  * 熔断参数弹窗（文档 §9.4 的三个数值）。
  *
- * ## 为什么用文本框而不是步进器
+ * ## 用 `MiuixIntNumberPickerWidget`（滑块）而不是文本框
  *
- * 仓库里没有 `MiuixNumPicker` 的封装，自写一个步进器就违反了「不自写控件」这条纪律。
- * 文本框是既有控件，配一句范围说明足够用；数值不合理（<=0）时**不保存并说明**。
+ * 这三个值都是**有界的小整数**，滑块天然把取值限制在合法区间里 ——
+ * 用户不可能填出「0 次」或「三次」这种需要再报错的东西。
+ *
+ * 此前这里用的是文本框 + 保存时校验，那是我**误判「仓库没有数值控件」**造成的：
+ * `ui/widgets/MiuixNumPickerWidget.kt` 一直都在（函数名 `MiuixIntNumberPickerWidget`），
+ * 文档 §9.0 的控件表里也明确列了它。
  */
 @Composable
 private fun FaultParamsDialog(
@@ -294,80 +300,72 @@ private fun FaultParamsDialog(
     onDismiss: () -> Unit,
     onConfirm: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit,
 ) {
+    // 滑块把取值限制在区间里，所以这里**不需要 error 状态** —— 非法值不可表达。
+    // 初始值也夹一次：老配置里可能存着区间外的数（比如 cooldown 5 分钟 = 300 秒没问题，
+    // 但阈值存了 0 就有可能来自手改过的设置文件）。
     var threshold by remember {
-        mutableStateOf(policy.breakerFailureThreshold.toString())
+        mutableIntStateOf(policy.breakerFailureThreshold.coerceIn(1, 20))
     }
     var cooldownSeconds by remember {
-        mutableStateOf((policy.breakerOpenMillis / 1000).toString())
+        mutableIntStateOf((policy.breakerOpenMillis / 1000).coerceIn(10L, 600L).toInt())
     }
     var successes by remember {
-        mutableStateOf(policy.breakerSuccessThreshold.toString())
+        mutableIntStateOf(policy.breakerSuccessThreshold.coerceIn(1, 10))
     }
-    var error by remember { mutableStateOf<String?>(null) }
 
     MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
         Card {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(text = "熔断参数", style = MiuixTheme.textStyles.body1)
+            // 滑块自带 16dp 内边距，这里只留纵向间距，避免双重缩进。
+            Column(modifier = Modifier.padding(vertical = 12.dp)) {
                 Text(
-                    text = "三个值都必须大于 0；改完从下一次判定开始生效（不会重置已有的冷却）",
+                    text = "熔断参数",
+                    style = MiuixTheme.textStyles.body1,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                Text(
+                    text = "改完从下一次判定开始生效（不会重置已有的冷却）",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
-                Spacer(Modifier.height(12.dp))
-                TextField(
+                MiuixIntNumberPickerWidget(
+                    title = "连续失败多少次后打开",
                     value = threshold,
+                    startInt = 1,
+                    endInt = 20,
+                    valueSuffix = " 次",
                     onValueChange = { threshold = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "连续失败多少次后打开",
-                    useLabelAsPlaceholder = true,
-                    singleLine = true,
                 )
-                Spacer(Modifier.height(8.dp))
-                TextField(
+                MiuixIntNumberPickerWidget(
+                    title = "打开后保持多久",
+                    description = "这段时间里不会再选它",
                     value = cooldownSeconds,
+                    startInt = 10,
+                    endInt = 600,
+                    valueSuffix = " 秒",
                     onValueChange = { cooldownSeconds = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "打开后保持多少秒",
-                    useLabelAsPlaceholder = true,
-                    singleLine = true,
                 )
-                Spacer(Modifier.height(8.dp))
-                TextField(
+                MiuixIntNumberPickerWidget(
+                    title = "恢复所需的成功次数",
+                    description = "当前实现只记录，不据此自动恢复",
                     value = successes,
+                    startInt = 1,
+                    endInt = 10,
+                    valueSuffix = " 次",
                     onValueChange = { successes = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "恢复所需的成功次数（当前只记录）",
-                    useLabelAsPlaceholder = true,
-                    singleLine = true,
                 )
-                error?.let { text ->
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = text,
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = MiuixTheme.colorScheme.error,
-                    )
-                }
                 Spacer(Modifier.height(12.dp))
                 MiuixNavigationItemWidget(
                     title = "保存",
                     description = "不重置已有的冷却与熔断状态",
                     onClick = {
-                        val t = threshold.trim().toIntOrNull()
-                        val c = cooldownSeconds.trim().toLongOrNull()
-                        val s = successes.trim().toIntOrNull()
-                        if (t == null || c == null || s == null || t <= 0 || c <= 0 || s <= 0) {
-                            error = "三个值都必须是大于 0 的整数"
-                        } else {
-                            onConfirm(
-                                policy.copy(
-                                    breakerFailureThreshold = t,
-                                    breakerOpenMillis = c * 1000L,
-                                    breakerSuccessThreshold = s,
-                                ),
-                            )
-                        }
+                        onConfirm(
+                            policy.copy(
+                                breakerFailureThreshold = threshold,
+                                breakerOpenMillis = cooldownSeconds * 1000L,
+                                breakerSuccessThreshold = successes,
+                            ),
+                        )
                     },
                 )
             }
@@ -387,7 +385,12 @@ private fun budgetText(tokens: Long): String {
  * ## 0 是「不限」，不是一个特殊的错误值
  *
  * 默认就是不限：给个默认额度会让用户在完全不知情的情况下撞上「额度用完了」。
- * 校验用 core 的 `GatewayTokenBudgetRules`（与判定侧同一套边界）。
+ *
+ * ## 上限为什么以「k tokens」为单位
+ *
+ * 滑块是整数步进的（`MiuixIntNumberPickerWidget`）。真实预算是十万到百万量级，
+ * 用 1 为单位会让「每个像素跳几千」且读数毫无意义；用 k（0~2000k）既保留了
+ * 合理精度，显示的也是人能读的数字。存进设置时再乘 1000。
  */
 @Composable
 private fun BudgetDialog(
@@ -395,64 +398,56 @@ private fun BudgetDialog(
     onDismiss: () -> Unit,
     onConfirm: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit,
 ) {
-    var tokens by remember { mutableStateOf(policy.tokenBudgetPerAccount.toString()) }
-    var hours by remember { mutableStateOf(policy.budgetWindowHours.toString()) }
-    var error by remember { mutableStateOf<String?>(null) }
+    // 单位是 k tokens；0 = 不限。
+    var tokensK by remember {
+        mutableIntStateOf((policy.tokenBudgetPerAccount / 1000L).coerceIn(0L, 2000L).toInt())
+    }
+    var hours by remember { mutableIntStateOf(policy.budgetWindowHours.coerceIn(1, 720)) }
 
     MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
         Card {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(text = "token 预算", style = MiuixTheme.textStyles.body1)
+            Column(modifier = Modifier.padding(vertical = 12.dp)) {
                 Text(
-                    text = "每个账号在窗口内用满这个数，就不再选它（填 0 表示不限）。" +
-                        "窗口是滚动的：从此刻往回数这么多小时。",
+                    text = "token 预算",
+                    style = MiuixTheme.textStyles.body1,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                Text(
+                    text = "每个账号在窗口内用满这个数就不再选它。" +
+                        "统计只含真实请求，连通性测试不计入。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
-                Spacer(Modifier.height(12.dp))
-                TextField(
-                    value = tokens,
-                    onValueChange = { tokens = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "每账号上限（token，0 = 不限）",
-                    useLabelAsPlaceholder = true,
-                    singleLine = true,
+                MiuixIntNumberPickerWidget(
+                    title = "每个账号的上限",
+                    description = "0 就是不限",
+                    value = tokensK,
+                    startInt = 0,
+                    endInt = 2000,
+                    valueSuffix = "k tokens",
+                    onValueChange = { tokensK = it },
                 )
-                Spacer(Modifier.height(8.dp))
-                TextField(
+                MiuixIntNumberPickerWidget(
+                    title = "窗口长度",
+                    description = "滚动的：从此刻往回数这么多小时",
                     value = hours,
+                    startInt = 1,
+                    endInt = 720,
+                    valueSuffix = " 小时",
                     onValueChange = { hours = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "窗口（小时，1~720）",
-                    useLabelAsPlaceholder = true,
-                    singleLine = true,
                 )
-                error?.let { text ->
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = text,
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = MiuixTheme.colorScheme.error,
-                    )
-                }
                 Spacer(Modifier.height(12.dp))
                 MiuixNavigationItemWidget(
                     title = "保存",
                     description = "统计只含真实请求（连通性测试不计入）",
                     onClick = {
-                        val parsedTokens = tokens.trim().toLongOrNull() ?: -1L
-                        val parsedHours = hours.trim().toIntOrNull() ?: -1
-                        val candidate = policy.copy(
-                            tokenBudgetPerAccount = parsedTokens,
-                            budgetWindowHours = parsedHours,
+                        onConfirm(
+                            policy.copy(
+                                tokenBudgetPerAccount = tokensK * 1000L,
+                                budgetWindowHours = hours,
+                            ),
                         )
-                        val invalid = dev.praxis.core.gateway.GatewayTokenBudgetRules
-                            .validate(candidate.toTokenBudget())
-                        if (invalid != null) {
-                            error = invalid
-                        } else {
-                            onConfirm(candidate)
-                        }
                     },
                 )
             }
