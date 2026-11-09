@@ -135,6 +135,10 @@ fun SettingsHost(
         dev.praxis.core.gateway.GatewayRoutingPolicy(),
     gatewayRoutingPolicyBroken: Boolean = false,
     onGatewayPolicyChange: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit = {},
+    /** 路由回放（文档 §5.5）：现取最近若干条决策（内存列表，没有 Flow）。 */
+    gatewayReplayEntries: () -> List<dev.praxis.core.gateway.RouteReplayEntry> = {
+        emptyList()
+    },
     /** 添加账号（null = 未接线，页面不画入口）。 */
     onAddGatewayAccount: (suspend (String, String, String, String) -> Result<String>)? = null,
     /** 测试连接（地址 / Key）。null = 未接线。 */
@@ -348,6 +352,7 @@ fun SettingsHost(
             gatewayRoutingPolicy = gatewayRoutingPolicy,
             gatewayRoutingPolicyBroken = gatewayRoutingPolicyBroken,
             onGatewayPolicyChange = onGatewayPolicyChange,
+            gatewayReplayEntries = gatewayReplayEntries,
             gatewayModelError = gatewayModelError,
             onAddGatewayAccount = onAddGatewayAccount,
             onTestGatewayAccount = onTestGatewayAccount,
@@ -524,6 +529,10 @@ private fun SettingsPageBody(
         dev.praxis.core.gateway.GatewayRoutingPolicy(),
     gatewayRoutingPolicyBroken: Boolean = false,
     onGatewayPolicyChange: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit = {},
+    /** 路由回放（文档 §5.5）：现取最近若干条决策（内存列表，没有 Flow）。 */
+    gatewayReplayEntries: () -> List<dev.praxis.core.gateway.RouteReplayEntry> = {
+        emptyList()
+    },
     /** 添加账号（null = 未接线，页面不画入口）。 */
     onAddGatewayAccount: (suspend (String, String, String, String) -> Result<String>)? = null,
     /** 测试连接（地址 / Key）。null = 未接线。 */
@@ -833,6 +842,7 @@ private fun SettingsPageBody(
             policy = gatewayRoutingPolicy,
             policyBroken = gatewayRoutingPolicyBroken,
             onPolicyChange = onGatewayPolicyChange,
+            replayEntriesProvider = gatewayReplayEntries,
             entries = gatewayQueueEntries,
             accountNames = gatewayAccountNames,
             modifier = modifier,

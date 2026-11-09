@@ -654,6 +654,15 @@ fun PraxisApp(
         gatewayUsageStore.purgeBefore(cutoff)
     }
 
+    // 路由回放（文档 §5.5）：进程内最近若干条决策。
+    val routeReplayLog: dev.praxis.core.gateway.RouteReplayLog =
+        org.koin.compose.koinInject()
+    // 每次进路由页时重读一次（它是内存里的列表，没有 Flow 可观察）。
+    var routeReplayTick by remember { mutableStateOf(0) }
+    val routeReplayEntries = remember(routeReplayTick, gatewayRowsRefresh) {
+        routeReplayLog.recent()
+    }
+
     // ── 自定义提供商（文档 §5.3）──
     //
     // 三件事共用一份状态：页面列表、地址解析（providerBaseUrl）、以及添加/删除后的刷新。
@@ -862,6 +871,7 @@ fun PraxisApp(
                             },
                             // 预算判定要的「窗口内各账号用量」：每次请求前查一次。
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
+                            replayLog = routeReplayLog,
                             state = gatewayRouteState,
                         ),
                     ),
@@ -1075,6 +1085,7 @@ fun PraxisApp(
                             },
                             // 预算判定要的「窗口内各账号用量」：每次请求前查一次。
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
+                            replayLog = routeReplayLog,
                         ),
                     ),
                 ),
@@ -1673,6 +1684,8 @@ fun PraxisApp(
                 gatewayModelOptions = gatewayModelOptions,
                 gatewayQueueModelName = modelSettings.activeModel,
                 gatewayQueueEntries = gatewayQueueEntries,
+                // 现取：回放是内存列表，进页面时读到的就是最新的（含刚失败那次）。
+                gatewayReplayEntries = { routeReplayLog.recent() },
                 gatewayAccountNames = gatewayAccountRows.associate { it.id to it.name },
                 gatewayImportBusy = gatewayImportBusy,
                 gatewayImportReport = gatewayImportReport,

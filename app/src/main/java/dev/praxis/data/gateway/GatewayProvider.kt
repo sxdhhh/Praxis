@@ -75,6 +75,12 @@ class GatewayProvider(
      * 装配点在 AppModule / PraxisApp。
      */
     private val accountSpend: suspend (sinceMillis: Long) -> Map<String, Long> = { emptyMap() },
+    /**
+     * 路由回放（文档 §5.5 的降级形态）：记下最近若干次决策，供路由页排障。
+     *
+     * null = 不记（单测与不关心排障的调用点）。
+     */
+    private val replayLog: dev.praxis.core.gateway.RouteReplayLog? = null,
     private val customHeaders: List<CustomHeader> = emptyList(),
     private val client: OkHttpClient = OkHttpClient(),
 ) : AiProvider {
@@ -201,6 +207,15 @@ class GatewayProvider(
                 }
                 session.onSuccess(attempt)
                 record(success = true, status = dev.praxis.core.gateway.GatewayUsageRules.STATUS_OK, error = null)
+                replayLog?.record(
+                    dev.praxis.core.gateway.RouteReplayEntry(
+                        model = request.model,
+                        tried = listOf(attempt.accountId + "/" + attempt.wireModel),
+                        skipped = emptyList(),
+                        outcome = "成功",
+                        atMillis = System.currentTimeMillis(),
+                    ),
+                )
                 return@flow
             } catch (e: AiException) {
                 if (e.error.kind == AiErrorKind.CANCELLED) throw e
@@ -230,6 +245,28 @@ class GatewayProvider(
                     success = false,
                     status = dev.praxis.core.gateway.GatewayUsageRules.STATUS_NO_RESPONSE,
                     error = e.error.message,
+                )
+                // 失败时的回放最有价值：用户问的就是「这次为什么没走那个账号」。
+                val outcome = session.outcome()
+                replayLog?.record(
+                    dev.praxis.core.gateway.RouteReplayEntry(
+                        model = request.model,
+                        tried = (outcome as? dev.praxis.core.gateway.RouteOutcome.Exhausted)
+                            ?.tried.orEmpty(),
+                        skipped = (outcome as? dev.praxis.core.gateway.RouteOutcome.NoCandidate)
+                            ?.skipped.orEmpty(),
+                        outcome = when (outcome) {
+                            is dev.praxis.core.gateway.RouteOutcome.NoCandidate ->
+                                "没有可用候选（都被过滤了）"
+                            is dev.praxis.core.gateway.RouteOutcome.Exhausted ->
+                                "试完所有候选（最后失败：" +
+                                    (outcome.lastKind?.name ?: "未知") + "）"
+                            is dev.praxis.core.gateway.RouteOutcome.GaveUp ->
+                                "放弃换号：" + outcome.reason
+                            null -> "失败：" + e.error.message,
+                        },
+                        atMillis = System.currentTimeMillis(),
+                    ),
                 )
             }
             throw e

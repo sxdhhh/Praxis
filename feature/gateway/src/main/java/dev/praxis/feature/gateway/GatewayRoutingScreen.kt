@@ -66,6 +66,20 @@ fun GatewayRoutingScreen(
     /** 策略配置读不出来（坏内容）。true 时页面顶部明说，不静默用默认值。 */
     policyBroken: Boolean = false,
     onPolicyChange: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit = {},
+    /**
+     * 路由回放（文档 §5.5 的降级形态）：最近若干次决策。
+     *
+     * 只在内存里，所以**进程重启后是空的** —— 这一点写在页面上，
+     * 否则用户会以为「回放坏了」。
+     */
+    /**
+     * 现取回放条目（不是 List）：回放是**内存里的列表，没有可观察的 Flow**，
+     * 用 List 就得靠调用方猜什么时候重算（猜错就是「明明刚发过请求，这页还是空的」）。
+     * 每次组合读一次，进这一页就是最新的。
+     */
+    replayEntriesProvider: () -> List<dev.praxis.core.gateway.RouteReplayEntry> = {
+        emptyList()
+    },
     modifier: Modifier = Modifier,
 ) {
     // 顶栏是浮层：内容要能滚到它下面（否则渐进模糊采不到内容，退化成一块实色）。
@@ -74,6 +88,8 @@ fun GatewayRoutingScreen(
     val scrollLimit = dev.praxis.ui.design.component.LocalScrollBottomLimit.current
     var faultDialogVisible by remember { mutableStateOf(false) }
     var budgetDialogVisible by remember { mutableStateOf(false) }
+    // 每次组合现取一次（见 replayEntriesProvider 的说明）。
+    val replayEntries = replayEntriesProvider()
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -143,6 +159,62 @@ fun GatewayRoutingScreen(
                         onPolicyChange(policy.copy(stickyEnabled = enabled))
                     },
                 )
+            }
+        }
+
+        // ── 回放（§5.5 的降级形态）──
+        item(key = "__routing_replay_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.AltRoute,
+                title = "最近的路由决策",
+                subtitle = "排障用：只看内存里最近 50 条，重启后是空的",
+            )
+        }
+        item(key = "__routing_replay__") {
+            GatewayCard {
+                if (replayEntries.isEmpty()) {
+                    Text(
+                        text = "还没有记录。发一次请求（失败的那次最有用）就会出现。",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                } else {
+                    replayEntries.forEachIndexed { index, entry ->
+                        Column(modifier = Modifier.padding(top = if (index == 0) 0.dp else 10.dp)) {
+                            Text(
+                                text = entry.model + " · " + entry.outcome,
+                                style = MiuixTheme.textStyles.body2,
+                            )
+                            Text(
+                                text = replayTimeText(entry.atMillis),
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                            if (entry.tried.isNotEmpty()) {
+                                Text(
+                                    text = "尝试：" + entry.tried.joinToString("、"),
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                            if (entry.skipped.isNotEmpty()) {
+                                Text(
+                                    text = "跳过：" + entry.skipped.joinToString("、") { skipped ->
+                                        skipped.accountId + "（" +
+                                            dev.praxis.core.gateway.GatewayQueue.reasonText(
+                                                skipped.reason,
+                                            ) + "）"
+                                    },
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -454,3 +526,9 @@ private fun BudgetDialog(
         }
     }
 }
+
+/** 回放条目里的时刻（本地时区，秒级就够）。 */
+private fun replayTimeText(atMillis: Long): String =
+    java.time.Instant.ofEpochMilli(atMillis)
+        .atZone(java.time.ZoneId.systemDefault())
+        .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm:ss"))

@@ -98,6 +98,9 @@ val appModule = module {
     }
     single { get<PraxisDatabase>().gatewayUsageDao() }
 
+    // 路由回放（文档 §5.5）：进程内最近 50 条决策，单例才能跨请求累积。
+    single { dev.praxis.core.gateway.RouteReplayLog() }
+
     // 长按保存到相册（生图文档 P2）：:feature:chat 声明端口，这里给实现。
     single<dev.praxis.feature.chat.ImageGalleryPort> {
         dev.praxis.data.imagegen.GalleryImagePort(androidContext())
