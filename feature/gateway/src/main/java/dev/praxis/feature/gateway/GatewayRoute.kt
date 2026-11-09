@@ -182,17 +182,16 @@ fun GatewayRoute(
             )
         }
         item(key = "__traffic_card__") {
-            GatewayCard {
-                Text(
-                    text = "暂无请求记录",
-                    style = MiuixTheme.textStyles.body1,
-                    color = MiuixTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = "请求统计要等网关真正转发请求之后才有数据（P3）。",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 4.dp),
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "报表",
+                    description = "今日 / 近 7 天 / 近 30 天的请求数与 token",
+                    onClick = { navigator.push(PraxisRoute.SettingsGatewayReport) },
                 )
             }
         }
