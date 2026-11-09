@@ -922,6 +922,9 @@ fun PraxisApp(
                             // 所以映射为空；原生承载走 provider 表里各家声明的模型清单。
                             modelRules = { dev.praxis.core.gateway.GatewayModelRules() },
                             state = gatewayRouteState,
+                            // 请求记录：这是**第二处**构造点（另一个 ViewModel），
+                            // 两处都要接，否则只有一半请求进报表。
+                            recordUsage = { draft -> gatewayUsageStore.record(draft) },
                         ),
                     ),
                 ),
