@@ -3,6 +3,10 @@ package dev.praxis.tool
 import dev.praxis.core.imagegen.ImageGenEvent
 import dev.praxis.core.imagegen.ImageGenParams
 import dev.praxis.core.imagegen.ImageGenParamsRules
+import dev.praxis.core.imagegen.ImageGenAvailability
+import dev.praxis.core.imagegen.ImageGenDownscale
+import dev.praxis.core.imagegen.ImageGenError
+import dev.praxis.core.imagegen.ImageGenErrorClassifier
 import dev.praxis.core.imagegen.ImageGenDefaults
 import dev.praxis.core.imagegen.ImageGenProgress
 import dev.praxis.core.imagegen.ImageGenTarget
@@ -83,6 +87,13 @@ class GenerateImageTool(
      * suspend：设置存在 DataStore。
      */
     private val imageDefaults: suspend () -> ImageGenDefaults = { ImageGenDefaults() },
+    /**
+     * 本机能不能跑本地生图（文档 §9 的设备门控）。
+     *
+     * 默认 [ImageGenAvailability.NpuCapable] = **放行**：门控的目的是把确定不行的
+     * 说清楚，而不是把没接线的环境挡掉。:app 会注入真实判定。
+     */
+    private val availability: () -> ImageGenAvailability = { ImageGenAvailability.NpuCapable },
     /** 落盘：返回绝对路径。放成 lambda 让工具不碰 Context。 */
     private val saveImage: suspend (ByteArray) -> String,
 ) : Tool {
@@ -165,51 +176,49 @@ class GenerateImageTool(
     ): ToolResult {
         // 首次启动引擎要 3~10 秒，这段必须让用户看到「在动」（文档 §6.1）。
         reportProgress(ImageGenProgress(modelId, ImageGenProgress.Phase.Preparing))
-        when (val availability = probe()) {
+        // 局部变量名不能叫 availability —— 那是本类的属性（设备门控），会被遮蔽。
+        when (val engineState = probe()) {
             is EngineAvailability.Unavailable -> {
                 reportProgress(null)
                 return failure(
                     code = "engine_start_failed",
-                    message = "生图引擎不可用（" + availability.reason.name + "）",
-                    hint = availability.detail,
+                    message = "生图引擎不可用（" + engineState.reason.name + "）",
+                    hint = engineState.detail,
                     stage = ToolFailureStage.Execution,
                 )
             }
             is EngineAvailability.Available -> Unit
         }
 
+        // 设备门控（文档 §9）：确定跑不了的，别去撞引擎 —— 那样用户会看到
+        // 「生成失败」而不是「这台设备不支持」，两种提示该做的事完全不同。
+        when (val gate = availability()) {
+            is ImageGenAvailability.Unsupported -> {
+                reportProgress(null)
+                return failure(
+                    code = ImageGenError.CODE_UNSUPPORTED_DEVICE,
+                    message = "这台设备跑不了本地生图",
+                    hint = gate.reason,
+                    stage = ToolFailureStage.Execution,
+                )
+            }
+            // CpuOnly 只是慢，不挡：门控的目的是说清「确定不行」，不是筛性能。
+            else -> Unit
+        }
+
         val saved = mutableListOf<SavedImage>()
         for (index in 0 until count) {
             // 指定了 seed 时逐张递增：否则「一次出 3 张」会得到 3 张一模一样的图。
             val attempt = params.copy(seed = params.seed?.plus(index.toLong()))
-            var complete: ImageGenEvent.Complete? = null
-            try {
-                runner.generate(attempt).collect { event ->
-                    when (event) {
-                        is ImageGenEvent.Complete -> complete = event
-                        is ImageGenEvent.Progress -> reportProgress(
-                            ImageGenProgress(
-                                targetLabel = modelId,
-                                phase = ImageGenProgress.Phase.Running,
-                                fraction = event.value,
-                            ),
-                        )
-                    }
-                }
-            } catch (error: IOException) {
-                return failure(
-                    code = "engine_start_failed",
-                    message = "生成失败：" + (error.message ?: "传输错误"),
+            val result = when (val outcome = generateLocalOnce(attempt, modelId)) {
+                is LocalAttempt.Failed -> return failure(
+                    code = outcome.code,
+                    message = outcome.message,
                     saved = saved,
                     stage = ToolFailureStage.Execution,
                 )
+                is LocalAttempt.Done -> outcome.complete
             }
-            val result = complete ?: return failure(
-                code = "engine_start_failed",
-                message = "引擎没有返回 complete 消息",
-                saved = saved,
-                stage = ToolFailureStage.Execution,
-            )
             if (result.bytes.isEmpty()) {
                 return failure(
                     code = "engine_start_failed",
@@ -225,6 +234,81 @@ class GenerateImageTool(
 
         reportProgress(null)
         return ToolResult(content = successJson(modelId, saved))
+    }
+
+    /** 一次本地生成的结果：要么拿到 complete，要么带着分类错误返回。 */
+    private sealed interface LocalAttempt {
+        data class Done(val complete: ImageGenEvent.Complete) : LocalAttempt
+        data class Failed(val code: String, val message: String) : LocalAttempt
+    }
+
+    /**
+     * 跑一次本地生成，**OOM 时自动降一档尺寸重试一次**（文档 §12）。
+     *
+     * ## 为什么只重试一次
+     *
+     * 降档解决的是「这一次的尺寸超出可用显存」。降两次意味着连续两次误判
+     * （比如真正的原因是模型没加载成功），而那时用户已经等了两轮。
+     * 所以：降一次；再失败就如实报 OOM，并把「已试过降档」写进消息。
+     *
+     * ## 为什么靠正文关键词判 OOM
+     *
+     * 引擎与驱动对 OOM 的措辞不统一，而且是 HTTP 500 + 正文的形式回来的
+     * （[dev.praxis.data.imagegen.ImageGenClient] 现在会把正文带出来）。
+     */
+    private suspend fun generateLocalOnce(
+        params: ImageGenParams,
+        modelId: String,
+    ): LocalAttempt {
+        var current = params
+        var downscaled = false
+        while (true) {
+            var complete: ImageGenEvent.Complete? = null
+            try {
+                runner.generate(current).collect { event ->
+                    when (event) {
+                        is ImageGenEvent.Complete -> complete = event
+                        is ImageGenEvent.Progress -> reportProgress(
+                            ImageGenProgress(
+                                targetLabel = modelId,
+                                phase = ImageGenProgress.Phase.Running,
+                                fraction = event.value,
+                            ),
+                        )
+                    }
+                }
+            } catch (error: IOException) {
+                val text = error.message
+                val smaller = if (!downscaled && ImageGenErrorClassifier.isOutOfMemory(text)) {
+                    ImageGenDownscale.smaller(current.width, current.height)
+                } else {
+                    null
+                }
+                if (smaller != null) {
+                    downscaled = true
+                    current = current.copy(width = smaller.first, height = smaller.second)
+                    continue
+                }
+                return if (ImageGenErrorClassifier.isOutOfMemory(text)) {
+                    LocalAttempt.Failed(
+                        ImageGenError.CODE_OOM,
+                        "显存不足" + (if (downscaled) "，已降到 " + current.width + "×" +
+                            current.height + " 仍然失败" else "") +
+                            "：" + (text ?: "引擎未给出原因"),
+                    )
+                } else {
+                    LocalAttempt.Failed(
+                        ImageGenError.CODE_ENGINE_START_FAILED,
+                        "生成失败：" + (text ?: "传输错误"),
+                    )
+                }
+            }
+            val finished = complete ?: return LocalAttempt.Failed(
+                ImageGenError.CODE_ENGINE_START_FAILED,
+                "引擎没有返回 complete 消息",
+            )
+            return LocalAttempt.Done(finished)
+        }
     }
 
     /**

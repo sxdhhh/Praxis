@@ -58,7 +58,18 @@ class ImageGenClient(
         try {
             call.execute().use { response ->
                 if (!response.isSuccessful) {
-                    throw IOException("生成请求失败：HTTP " + response.code)
+                    // **正文必须带上**：引擎把失败原因写在正文里（OOM 的措辞就在那儿），
+                    // 只报状态码会让上层无法分类 —— 而「OOM 自动降一档重试」
+                    // （文档 §12）完全依赖这个分类。
+                    val detail = runCatching { response.body?.string() }
+                        .getOrNull()
+                        .orEmpty()
+                        .trim()
+                        .take(300)
+                    throw IOException(
+                        "生成请求失败：HTTP " + response.code +
+                            if (detail.isBlank()) "" else "：" + detail,
+                    )
                 }
                 val source = response.body?.source()
                     ?: throw IOException("生成响应没有 body")

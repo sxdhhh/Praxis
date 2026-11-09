@@ -151,6 +151,9 @@ fun SettingsHost(
         )
     },
     imageGenSocModel: String = "",
+    /** 设备门控（文档 §9）：能不能跑本地生图。 */
+    imageGenAvailability: dev.praxis.core.imagegen.ImageGenAvailability =
+        dev.praxis.core.imagegen.ImageGenAvailability.NpuCapable,
     imageGenInstalledModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
     /** 当前选中的生图目标（imagegen_target 解码后的值）。 */
     imageGenCurrentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
@@ -344,6 +347,7 @@ fun SettingsHost(
             onAddGatewayModel = onAddGatewayModel,
             imageGenProbeEngine = imageGenProbeEngine,
             imageGenSocModel = imageGenSocModel,
+            imageGenAvailability = imageGenAvailability,
             imageGenInstalledModels = imageGenInstalledModels,
             imageGenCurrentTarget = imageGenCurrentTarget,
             onSelectImageGenTarget = onSelectImageGenTarget,
@@ -521,6 +525,9 @@ private fun SettingsPageBody(
         )
     },
     imageGenSocModel: String = "",
+    /** 设备门控（文档 §9）：能不能跑本地生图。 */
+    imageGenAvailability: dev.praxis.core.imagegen.ImageGenAvailability =
+        dev.praxis.core.imagegen.ImageGenAvailability.NpuCapable,
     imageGenInstalledModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
     /** 当前选中的生图目标（imagegen_target 解码后的值）。 */
     imageGenCurrentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
@@ -761,6 +768,7 @@ private fun SettingsPageBody(
         PraxisRoute.SettingsImageGen -> ImageGenRoute(
             probeEngine = imageGenProbeEngine,
             socModel = imageGenSocModel,
+            availability = imageGenAvailability,
             installedModels = imageGenInstalledModels,
             currentTarget = imageGenCurrentTarget,
             onSelectTarget = onSelectImageGenTarget,

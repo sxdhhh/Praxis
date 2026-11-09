@@ -501,10 +501,28 @@ val appModule = module {
                 val settings = get<SettingsRepository>()
                 val imageDir = java.io.File(androidContext().filesDir, "images")
                 val locator = get<dev.praxis.data.imagegen.EngineLocator>()
+                // 生图相关的两样东西在这里先算出来：下面**三处**都要用
+                // （工具的设备门控、模型目录、以及 set/list 工具）。
+                //
+                // 放在这一行之后而不是各自就近声明：`run { }` 里是顺序作用域，
+                // 后声明的名字在前面的 lambda 里不可见（这里栽过一次）。
+                val imageModelsRoot = java.io.File(androidContext().filesDir, "models")
+                val soc = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    android.os.Build.SOC_MODEL
+                } else {
+                    android.os.Build.HARDWARE
+                }
                 register(
                     dev.praxis.tool.GenerateImageTool(
                         runner = get(),
                         probe = { locator.probe() },
+                        // 设备门控（文档 §9）：ABI 与芯片型号都在 :app 才能读到。
+                        availability = {
+                            dev.praxis.core.imagegen.ImageGenAvailabilityRules.decide(
+                                abis = android.os.Build.SUPPORTED_ABIS.toList(),
+                                socModel = soc,
+                            )
+                        },
                         // 目标决定走哪条路（文档 §5.4）：本地引擎或远端 images 端点。
                         // 配置坏了（decode 返回 failure）时这里给 null —— 工具会回「还没选」，
                         // 而设置页会把「配置坏了」单独提示出来（两边显式不同，不互相掩盖）。
@@ -571,13 +589,6 @@ val appModule = module {
                     ),
                 )
 
-                // ── 让 AI 改持久配置 + 列出模型（文档 §5.6）──
-                val imageModelsRoot = java.io.File(androidContext().filesDir, "models")
-                val soc = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                    android.os.Build.SOC_MODEL
-                } else {
-                    android.os.Build.HARDWARE
-                }
                 val imageGenDefaultsPort: suspend () -> dev.praxis.core.imagegen.ImageGenDefaults = {
                     dev.praxis.core.imagegen.ImageGenDefaultsCodec
                         .decode(settings.imageGenDefaultsJson.first())

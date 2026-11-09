@@ -529,6 +529,18 @@ fun PraxisApp(
 
     // 下载完成后重读一次文件系统：装好的模型立刻出现在列表里，不用重启 App（文档 §7.3）。
     var imageGenRefreshTick by remember { mutableStateOf(0) }
+    /**
+     * 设备门控（文档 §9）：能不能跑本地生图。
+     *
+     * ABI 与芯片型号只有 :app 读得到，所以判定在这里做一次，往下传结果。
+     */
+    val imageGenAvailability = remember(imageGenSocModel) {
+        dev.praxis.core.imagegen.ImageGenAvailabilityRules.decide(
+            abis = android.os.Build.SUPPORTED_ABIS.toList(),
+            socModel = imageGenSocModel,
+        )
+    }
+
     val imageGenCatalog = remember(imageGenSocModel) {
         dev.praxis.core.imagegen.ImageModelCatalog.builtin(imageGenSocModel)
     }
@@ -1558,6 +1570,7 @@ fun PraxisApp(
                 },
                 imageGenProbeEngine = { imageGenEngineLocator.probe() },
                 imageGenSocModel = imageGenSocModel,
+                imageGenAvailability = imageGenAvailability,
                 imageGenInstalledModels = imageGenInstalledModels,
                 imageGenCurrentTarget = imageGenCurrentTarget,
                 onSelectImageGenTarget = { target ->

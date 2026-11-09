@@ -70,6 +70,9 @@ fun ImageGenRoute(
     probeEngine: suspend () -> EngineAvailability,
     /** 本机芯片型号原值（`Build.SOC_MODEL`，API < 31 回落 `Build.HARDWARE`）。 */
     socModel: String,
+    /** 设备门控（文档 §9）：能不能跑本地生图。 */
+    availability: dev.praxis.core.imagegen.ImageGenAvailability =
+        dev.praxis.core.imagegen.ImageGenAvailability.NpuCapable,
     /** 已安装的模型（选择器要用 id）。 */
     installedModels: List<dev.praxis.core.imagegen.ImageModel>,
     /** 当前选中的生图目标；null = 还没选。 */
@@ -277,6 +280,16 @@ fun ImageGenRoute(
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 6.dp),
                 )
+                // 设备门控（文档 §9）：把「确定跑不了」和「只能慢跑」都提前说清楚，
+                // 而不是等用户点生成之后看到一句「生成失败」。
+                imageGenAvailabilityText(availability)?.let { text ->
+                    Text(
+                        text = text,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
                 Text(
                     text = "模型目录：" + modelsRootPath,
                     style = MiuixTheme.textStyles.footnote1,
@@ -776,4 +789,22 @@ private fun DiagnosticRow(title: String, value: String) {
             )
         }
     }
+}
+
+/**
+ * 设备门控的提示语（文档 §9 的「不可用原因展示」）。
+ *
+ * @return null = 一切正常（不画这一行，避免页面上多一句没用的废话）。
+ */
+private fun imageGenAvailabilityText(
+    availability: dev.praxis.core.imagegen.ImageGenAvailability,
+): String? = when (availability) {
+    is dev.praxis.core.imagegen.ImageGenAvailability.NpuCapable -> null
+    // 「只能慢跑」与「完全不行」必须分开说：前者用户还想用，后者他要换设备或换方案。
+    is dev.praxis.core.imagegen.ImageGenAvailability.CpuOnly ->
+        "本地生图只能用 CPU 包：认不出这台设备的 NPU 档位（" +
+            (availability.soc ?: "芯片型号未知") + "），出图会明显更慢。" +
+            "远端服务商生图不受影响。"
+    is dev.praxis.core.imagegen.ImageGenAvailability.Unsupported ->
+        "这台设备跑不了本地生图：" + availability.reason + "。远端服务商生图不受影响。"
 }
