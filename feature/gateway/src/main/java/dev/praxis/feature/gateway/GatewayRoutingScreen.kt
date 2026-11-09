@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
@@ -77,6 +78,10 @@ fun GatewayRoutingScreen(
      * 用 List 就得靠调用方猜什么时候重算（猜错就是「明明刚发过请求，这页还是空的」）。
      * 每次组合读一次，进这一页就是最新的。
      */
+    /** 路由组（文档 §5.5）：把跨家的几个组合并成一个对外名。 */
+    routeGroups: List<dev.praxis.core.gateway.GatewayRouteGroup> = emptyList(),
+    onAddRouteGroup: (dev.praxis.core.gateway.GatewayRouteGroup) -> Unit = {},
+    onRemoveRouteGroup: (String) -> Unit = {},
     replayEntriesProvider: () -> List<dev.praxis.core.gateway.RouteReplayEntry> = {
         emptyList()
     },
@@ -88,6 +93,7 @@ fun GatewayRoutingScreen(
     val scrollLimit = dev.praxis.ui.design.component.LocalScrollBottomLimit.current
     var faultDialogVisible by remember { mutableStateOf(false) }
     var budgetDialogVisible by remember { mutableStateOf(false) }
+    var groupDialogVisible by remember { mutableStateOf(false) }
     // 每次组合现取一次（见 replayEntriesProvider 的说明）。
     val replayEntries = replayEntriesProvider()
 
@@ -158,6 +164,51 @@ fun GatewayRoutingScreen(
                     onCheckedChange = { enabled ->
                         onPolicyChange(policy.copy(stickyEnabled = enabled))
                     },
+                )
+            }
+        }
+
+        // ── 路由组（§5.5）──
+        item(key = "__routing_groups_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Rule,
+                title = "路由组",
+                subtitle = "把跨家的几个组合并成一个对外名",
+            )
+        }
+        item(key = "__routing_groups__") {
+            GatewayCard {
+                if (routeGroups.isEmpty()) {
+                    Text(
+                        text = "还没有组。加一个之后，模型页填那个对外名就会按组内顺序试。",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                } else {
+                    routeGroups.forEachIndexed { index, group ->
+                        Column(modifier = Modifier.padding(top = if (index == 0) 0.dp else 10.dp)) {
+                            Text(text = group.name, style = MiuixTheme.textStyles.body2)
+                            Text(
+                                text = group.members.joinToString("、") { member ->
+                                    member.provider + "/" + member.model
+                                } + "　（点这里删除）",
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier
+                                    .padding(top = 2.dp)
+                                    .clickable { onRemoveRouteGroup(group.name) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item(key = "__routing_groups_add__") {
+            GatewayCard {
+                MiuixNavigationItemWidget(
+                    title = "添加路由组",
+                    description = "对外名 + 成员（每行一个，写成 家/模型）",
+                    onClick = { groupDialogVisible = true },
                 )
             }
         }
@@ -338,6 +389,17 @@ fun GatewayRoutingScreen(
             onConfirm = { updated ->
                 onPolicyChange(updated)
                 budgetDialogVisible = false
+            },
+        )
+    }
+
+    if (groupDialogVisible) {
+        AddRouteGroupDialog(
+            existing = routeGroups,
+            onDismiss = { groupDialogVisible = false },
+            onConfirm = { group ->
+                onAddRouteGroup(group)
+                groupDialogVisible = false
             },
         )
     }
@@ -532,3 +594,99 @@ private fun replayTimeText(atMillis: Long): String =
     java.time.Instant.ofEpochMilli(atMillis)
         .atZone(java.time.ZoneId.systemDefault())
         .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm:ss"))
+
+/**
+ * 添加路由组：对外名 + 成员（每行「家/模型」）。
+ *
+ * 成员用「家/模型」这种紧凑写法而不是两个输入框一排：
+ * 一个组通常三五个成员，一行一个更好读也更好改（粘贴一串就行）。
+ * 校验交给 core 的 `GatewayRouteGroupRules`（与存储侧同一套）。
+ */
+@Composable
+private fun AddRouteGroupDialog(
+    existing: List<dev.praxis.core.gateway.GatewayRouteGroup>,
+    onDismiss: () -> Unit,
+    onConfirm: (dev.praxis.core.gateway.GatewayRouteGroup) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var members by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+        Card {
+            Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                Text(
+                    text = "添加路由组",
+                    style = MiuixTheme.textStyles.body1,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                Text(
+                    text = "模型页填「对外名」就会按成员顺序试；成员写成 家/模型，" +
+                        "例如 openai/gpt-4o-mini。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                Spacer(Modifier.height(10.dp))
+                TextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    label = "对外名（如 fast）",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = members,
+                    onValueChange = { members = it },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    label = "成员（每行一个，家/模型）",
+                    useLabelAsPlaceholder = true,
+                    minLines = 3,
+                )
+                error?.let { text ->
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = text,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                MiuixNavigationItemWidget(
+                    title = "保存",
+                    description = "同一个对外名不能再建一次",
+                    onClick = {
+                        val parsed = members.split("\n")
+                            .map { it.trim() }
+                            .filter { it.isNotEmpty() }
+                            .map { line ->
+                                val slash = line.indexOf("/")
+                                if (slash <= 0) {
+                                    dev.praxis.core.gateway.RouteGroupMember("", "")
+                                } else {
+                                    dev.praxis.core.gateway.RouteGroupMember(
+                                        provider = line.substring(0, slash).trim(),
+                                        model = line.substring(slash + 1).trim(),
+                                    )
+                                }
+                            }
+                        val draft = dev.praxis.core.gateway.GatewayRouteGroup(
+                            name = name,
+                            members = parsed,
+                        )
+                        val invalid = dev.praxis.core.gateway.GatewayRouteGroupRules
+                            .validate(draft, existing)
+                        if (invalid != null) {
+                            error = invalid.userMessage()
+                        } else {
+                            onConfirm(dev.praxis.core.gateway.GatewayRouteGroupRules.normalize(draft))
+                        }
+                    },
+                )
+            }
+        }
+    }
+}

@@ -76,10 +76,19 @@ object CandidateChain {
         mappings: List<ModelMapping>,
         /** mapping.provider 为空时的默认家；null 表示没有默认家。 */
         defaultProvider: String?,
+        /**
+         * 路由组（文档 §5.5）。命中时**优先于映射**：
+         * 组是更明确的「对外名」概念，而且天然多对多。
+         */
+        groups: List<GatewayRouteGroup> = emptyList(),
     ): CandidateChainResult {
         val requested = requestedModel.trim()
         if (requested.isEmpty()) {
             return CandidateChainResult(emptyList(), emptyList())
+        }
+
+        GatewayRouteGroupCodec.candidatesFor(requested, groups)?.let { members ->
+            return CandidateChainResult(members, emptyList())
         }
 
         val matchedMappings = mappings.filter { it.enabled && it.alias.equals(requested, ignoreCase = true) }

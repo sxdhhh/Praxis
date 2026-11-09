@@ -136,6 +136,10 @@ fun SettingsHost(
     gatewayRoutingPolicyBroken: Boolean = false,
     onGatewayPolicyChange: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit = {},
     /** 路由回放（文档 §5.5）：现取最近若干条决策（内存列表，没有 Flow）。 */
+    /** 路由组（文档 §5.5）。 */
+    gatewayRouteGroups: List<dev.praxis.core.gateway.GatewayRouteGroup> = emptyList(),
+    onAddGatewayRouteGroup: (dev.praxis.core.gateway.GatewayRouteGroup) -> Unit = {},
+    onRemoveGatewayRouteGroup: (String) -> Unit = {},
     gatewayReplayEntries: () -> List<dev.praxis.core.gateway.RouteReplayEntry> = {
         emptyList()
     },
@@ -353,6 +357,9 @@ fun SettingsHost(
             gatewayRoutingPolicyBroken = gatewayRoutingPolicyBroken,
             onGatewayPolicyChange = onGatewayPolicyChange,
             gatewayReplayEntries = gatewayReplayEntries,
+            gatewayRouteGroups = gatewayRouteGroups,
+            onAddGatewayRouteGroup = onAddGatewayRouteGroup,
+            onRemoveGatewayRouteGroup = onRemoveGatewayRouteGroup,
             gatewayModelError = gatewayModelError,
             onAddGatewayAccount = onAddGatewayAccount,
             onTestGatewayAccount = onTestGatewayAccount,
@@ -530,6 +537,10 @@ private fun SettingsPageBody(
     gatewayRoutingPolicyBroken: Boolean = false,
     onGatewayPolicyChange: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit = {},
     /** 路由回放（文档 §5.5）：现取最近若干条决策（内存列表，没有 Flow）。 */
+    /** 路由组（文档 §5.5）。 */
+    gatewayRouteGroups: List<dev.praxis.core.gateway.GatewayRouteGroup> = emptyList(),
+    onAddGatewayRouteGroup: (dev.praxis.core.gateway.GatewayRouteGroup) -> Unit = {},
+    onRemoveGatewayRouteGroup: (String) -> Unit = {},
     gatewayReplayEntries: () -> List<dev.praxis.core.gateway.RouteReplayEntry> = {
         emptyList()
     },
@@ -843,6 +854,9 @@ private fun SettingsPageBody(
             policyBroken = gatewayRoutingPolicyBroken,
             onPolicyChange = onGatewayPolicyChange,
             replayEntriesProvider = gatewayReplayEntries,
+            routeGroups = gatewayRouteGroups,
+            onAddRouteGroup = onAddGatewayRouteGroup,
+            onRemoveRouteGroup = onRemoveGatewayRouteGroup,
             entries = gatewayQueueEntries,
             accountNames = gatewayAccountNames,
             modifier = modifier,

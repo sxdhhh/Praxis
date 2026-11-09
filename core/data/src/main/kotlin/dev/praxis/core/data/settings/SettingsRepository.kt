@@ -716,6 +716,17 @@ class SettingsRepository(
         prefs[KEY_GATEWAY_RETENTION_DAYS]?.toIntOrNull()
     }
 
+    /**
+     * 路由组（文档 §5.5）：把跨家的几个组合并成一个对外名。
+     *
+     * 存 JSON 数组：组的数量少、结构简单，不值得为它开一张表（那还要一次迁移）。
+     */
+    val gatewayRouteGroupsJson: Flow<String?> =
+        dataStore.data.map { it[KEY_GATEWAY_ROUTE_GROUPS] }
+
+    suspend fun setGatewayRouteGroupsJson(text: String) =
+        put(KEY_GATEWAY_ROUTE_GROUPS, text)
+
     suspend fun setGatewayRequestRetentionDays(days: Int) =
         put(KEY_GATEWAY_RETENTION_DAYS, days.toString())
 
@@ -1432,6 +1443,9 @@ private val KEY_IMAGEGEN_OUTPUT = stringPreferencesKey("imagegen_output")
 
 /** 网关请求记录保留天数，见 [SettingsRepository.gatewayRequestRetentionDays]。 */
 private val KEY_GATEWAY_RETENTION_DAYS = stringPreferencesKey("gateway_request_retention_days")
+
+/** 路由组，见 [SettingsRepository.gatewayRouteGroupsJson]。 */
+private val KEY_GATEWAY_ROUTE_GROUPS = stringPreferencesKey("gateway_route_groups")
 
 /**
  * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。

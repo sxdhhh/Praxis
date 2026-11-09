@@ -391,6 +391,7 @@ fun PraxisApp(
             stickyAccountId = null,
             // 队列是**预测**，用当前策略算 —— 否则用户切到轮询后看到的次序仍是顺序的。
             policy = gatewayRoutingPolicy,
+            groups = gatewayRouteGroups,
         )
         gatewayQueueEntries = dev.praxis.core.gateway.GatewayQueue.of(plan)
     }
@@ -654,6 +655,16 @@ fun PraxisApp(
         gatewayUsageStore.purgeBefore(cutoff)
     }
 
+    // 路由组（文档 §5.5）：对外名 → 跨家成员。
+    val gatewayRouteGroupsJson by settingsRepository.gatewayRouteGroupsJson
+        .collectAsState(initial = null)
+    val gatewayRouteGroups = remember(gatewayRouteGroupsJson) {
+        dev.praxis.core.gateway.GatewayRouteGroupCodec
+            .decode(gatewayRouteGroupsJson)
+            ?.getOrNull()
+            .orEmpty()
+    }
+
     // 路由回放（文档 §5.5）：进程内最近若干条决策。
     val routeReplayLog: dev.praxis.core.gateway.RouteReplayLog =
         org.koin.compose.koinInject()
@@ -872,6 +883,7 @@ fun PraxisApp(
                             // 预算判定要的「窗口内各账号用量」：每次请求前查一次。
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                             replayLog = routeReplayLog,
+                            groups = { gatewayRouteGroups },
                             state = gatewayRouteState,
                         ),
                     ),
@@ -1086,6 +1098,7 @@ fun PraxisApp(
                             // 预算判定要的「窗口内各账号用量」：每次请求前查一次。
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                             replayLog = routeReplayLog,
+                            groups = { gatewayRouteGroups },
                         ),
                     ),
                 ),
@@ -1686,6 +1699,25 @@ fun PraxisApp(
                 gatewayQueueEntries = gatewayQueueEntries,
                 // 现取：回放是内存列表，进页面时读到的就是最新的（含刚失败那次）。
                 gatewayReplayEntries = { routeReplayLog.recent() },
+                gatewayRouteGroups = gatewayRouteGroups,
+                onAddGatewayRouteGroup = { group ->
+                    coroutineScope.launch {
+                        val updated = gatewayRouteGroups + group
+                        settingsRepository.setGatewayRouteGroupsJson(
+                            dev.praxis.core.gateway.GatewayRouteGroupCodec.encode(updated),
+                        )
+                    }
+                },
+                onRemoveGatewayRouteGroup = { name ->
+                    coroutineScope.launch {
+                        val updated = gatewayRouteGroups.filterNot {
+                            it.name.equals(name, ignoreCase = true)
+                        }
+                        settingsRepository.setGatewayRouteGroupsJson(
+                            dev.praxis.core.gateway.GatewayRouteGroupCodec.encode(updated),
+                        )
+                    }
+                },
                 gatewayAccountNames = gatewayAccountRows.associate { it.id to it.name },
                 gatewayImportBusy = gatewayImportBusy,
                 gatewayImportReport = gatewayImportReport,

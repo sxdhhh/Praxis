@@ -81,6 +81,12 @@ class GatewayProvider(
      * null = 不记（单测与不关心排障的调用点）。
      */
     private val replayLog: dev.praxis.core.gateway.RouteReplayLog? = null,
+    /**
+     * 路由组（文档 §5.5）。**每次现取**：用户在路由页加了组，下一句就该生效。
+     */
+    private val groups: () -> List<dev.praxis.core.gateway.GatewayRouteGroup> = {
+        emptyList()
+    },
     private val customHeaders: List<CustomHeader> = emptyList(),
     private val client: OkHttpClient = OkHttpClient(),
 ) : AiProvider {
@@ -96,6 +102,7 @@ class GatewayProvider(
             nativeModels = store.nativeModels(),
             mappings = rules.toRoutingMappings(),
             defaultProvider = null,
+            groups = groups(),
         )
 
         if (chain.candidates.isEmpty()) {
