@@ -132,7 +132,21 @@ test suites: 118   tests: 1252   failed: 9
 
 ## 五、明确未实现（不是忘了，是还没到）
 
-1. **内置家（21 家）**：没有地址与协议实现，导入时会被跳过并写明理由。依赖 P5 的 Rust 内核 + JNI
+1. **内置家（21 家）**：目前只接了 **2 家**（官方 `anthropic` / `openai`，见 `BuiltinProviders`）。
+   其余 19 家的地址、协议、模型清单要在 P5 的 Rust 内核里一起给 —— 我不凭印象写地址，
+   因为写错的表现是「配了账号却一直 404/401」，而用户会以为是自己填错了 key。
+
+   **协议面已就绪**（这是与 P5 解耦的那一半）：
+
+   | 协议 | 出站编码 | 入站组装 | provider | 分派 |
+   |---|---|---|---|---|
+   | OpenAI Chat | 已有 | 已有 | 已有 | 已有 |
+   | Anthropic Messages | `AnthropicRequestBuilder`（13 例） | `AnthropicStreamAssembler`（13 例） | `AnthropicProvider` | ✅ |
+   | OpenAI Responses | `ResponsesRequestBuilder`（12 例） | `ResponsesStreamAssembler`（11 例） | `ResponsesProvider` | ✅ |
+   | Images | 未做（P4） | — | — | — |
+
+   Responses 走的是自定义家 id `responses` / `openai-responses` —— 内置表里没有哪家默认走它
+   （官方 OpenAI 走 Chat 更通用）。这条写在 `ProviderProtocol` 的 KDoc 里。
 2. ~~导出~~ **已完成**（提交 7b0163c）：`GatewayExportPlanner`（计划）+ `GatewayExportWriter`（落盘）
    + 导入导出页两个入口（仅配置 / 含凭证，后者二次确认）+ `:app` 接线，CI 编译通过、15 条单测全绿。
    **设备端未复验**：还没在真机上点过「导出」、确认文件真的出现在
