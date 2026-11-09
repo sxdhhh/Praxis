@@ -12,6 +12,7 @@ import dev.praxis.core.gateway.FailoverBudget
 import dev.praxis.core.gateway.FailureKind
 import dev.praxis.core.gateway.GatewayCredential
 import dev.praxis.core.gateway.GatewayModelRules
+import dev.praxis.core.gateway.PlannedAttempt
 import dev.praxis.core.gateway.RouteState
 import dev.praxis.core.gateway.RouterSession
 import dev.praxis.core.gateway.toFailureKind
