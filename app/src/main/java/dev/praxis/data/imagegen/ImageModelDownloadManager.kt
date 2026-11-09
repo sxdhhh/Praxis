@@ -77,6 +77,7 @@ class ImageModelDownloadManager(
             // 闸门在取计划之前：被策略挡下时连目录都不用建。
             val blocked = downloadGuard()
             if (blocked != null) {
+                job = null
                 _state.value = ImageDownloadState.Failed(
                     modelId = model.id,
                     reason = ImageDownloadState.Failed.Reason.Blocked,
@@ -98,6 +99,13 @@ class ImageModelDownloadManager(
                     shouldStop = { cancelRequested },
                 )
             }
+            // 先把 job 置空再写终态：
+            //
+            // `acknowledge()` 用「有没有在跑」判断能不能回到 Idle。如果先写终态、
+            // 之后才让 job 结束，调用方（界面或测试）在这两步之间看到的是
+            //「已经有结果了，但还被当成在跑」—— 于是 acknowledge 被拒，页面卡在结果上。
+            // 这个窗口此前靠时序侥幸没暴露，加了并发下载（多一层调度）就暴露了。
+            job = null
             _state.value = when (result) {
                 is DownloadResult.Completed -> ImageDownloadState.Completed(
                     modelId = model.id,
@@ -128,8 +136,14 @@ class ImageModelDownloadManager(
         cancelRequested = true
     }
 
-    /** 回到 Idle（界面消费完终态后调用，避免旧结果一直被当成当前状态）。 */
+    /**
+     * 回到 Idle（界面消费完终态后调用，避免旧结果一直被当成当前状态）。
+     *
+     * 判定用「当前是不是正在下载」而不是 `isBusy()`：后者还包含「协程尚未收尾」，
+     * 而那个窗口里清状态是安全的 —— 终态已经写过了，之后不会再有写入。
+     */
     fun acknowledge() {
-        if (!isBusy()) _state.value = ImageDownloadState.Idle
+        if (_state.value is ImageDownloadState.Running) return
+        _state.value = ImageDownloadState.Idle
     }
 }
