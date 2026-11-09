@@ -120,6 +120,8 @@ fun PraxisApp(
 
     // ── 依赖 ─────────────────────────────────────────────────
     val toolRegistry: dev.praxis.core.tool.ToolRegistry = org.koin.compose.koinInject()
+    }
+
     val toolExecutor: dev.praxis.core.tool.ToolExecutor = org.koin.compose.koinInject()
     val toolContext: dev.praxis.core.tool.ToolContext = org.koin.compose.koinInject()
     val permissionState: dev.praxis.core.tool.ToolPermissionState = org.koin.compose.koinInject()
@@ -605,6 +607,19 @@ fun PraxisApp(
     // 请求记录写入层：GatewayProvider 每轮结束（成功或失败）落一条。
     val gatewayUsageStore: dev.praxis.data.gateway.GatewayUsageStore =
         org.koin.compose.koinInject()
+
+    // 日志页的「请求记录」视图（文档 §5.8）：按需加载，不跟着每轮刷新。
+    //
+    // 放在 gatewayUsageStore 声明**之后** —— 这个文件里已经栽过两次
+    // 「局部变量先用后声明」的编译错。
+    var gatewayRequestRecords by remember {
+        mutableStateOf<List<dev.praxis.core.gateway.GatewayRequestRecord>>(emptyList())
+    }
+    var gatewayRequestRecordsLoad by remember { mutableStateOf(0) }
+    LaunchedEffect(gatewayRequestRecordsLoad) {
+        if (gatewayRequestRecordsLoad > 0) {
+            gatewayRequestRecords = gatewayUsageStore.recentRequests()
+        }
 
     // ── 报表（文档 §9.6）──
     //
@@ -1352,6 +1367,8 @@ fun PraxisApp(
                 gatewayModelRows = gatewayModelRows,
                 gatewayReportWindows = gatewayReportWindows,
                 gatewayReportTopModels = gatewayReportTopModels,
+                gatewayRequestRecords = gatewayRequestRecords,
+                onLoadGatewayRequestRecords = { gatewayRequestRecordsLoad += 1 },
                 onRefreshGatewayReport = { gatewayReportRefresh += 1 },
                 gatewayModelError = gatewayModelError,
                 gatewayRoutingPolicy = gatewayRoutingPolicy,

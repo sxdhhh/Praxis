@@ -114,6 +114,9 @@ fun SettingsHost(
     /** 报表：三段窗口 + 按模型排行。 */
     gatewayReportWindows: List<dev.praxis.feature.gateway.GatewayReportWindowUi> = emptyList(),
     gatewayReportTopModels: List<dev.praxis.core.gateway.GatewayUsageBucket> = emptyList(),
+    /** 日志页「请求记录」视图的数据（文档 §5.8）。 */
+    gatewayRequestRecords: List<dev.praxis.core.gateway.GatewayRequestRecord> = emptyList(),
+    onLoadGatewayRequestRecords: () -> Unit = {},
     onRefreshGatewayReport: () -> Unit = {},
     /** 选路策略（顺序/轮询 + 粘性）。 */
     gatewayRoutingPolicy: dev.praxis.core.gateway.GatewayRoutingPolicy =
@@ -312,6 +315,8 @@ fun SettingsHost(
             gatewayModelRows = gatewayModelRows,
             gatewayReportWindows = gatewayReportWindows,
             gatewayReportTopModels = gatewayReportTopModels,
+            gatewayRequestRecords = gatewayRequestRecords,
+            onLoadGatewayRequestRecords = onLoadGatewayRequestRecords,
             onRefreshGatewayReport = onRefreshGatewayReport,
             gatewayRoutingPolicy = gatewayRoutingPolicy,
             gatewayRoutingPolicyBroken = gatewayRoutingPolicyBroken,
@@ -468,6 +473,9 @@ private fun SettingsPageBody(
     /** 报表：三段窗口 + 按模型排行。 */
     gatewayReportWindows: List<dev.praxis.feature.gateway.GatewayReportWindowUi> = emptyList(),
     gatewayReportTopModels: List<dev.praxis.core.gateway.GatewayUsageBucket> = emptyList(),
+    /** 日志页「请求记录」视图的数据（文档 §5.8）。 */
+    gatewayRequestRecords: List<dev.praxis.core.gateway.GatewayRequestRecord> = emptyList(),
+    onLoadGatewayRequestRecords: () -> Unit = {},
     onRefreshGatewayReport: () -> Unit = {},
     /** 选路策略（顺序/轮询 + 粘性）。 */
     gatewayRoutingPolicy: dev.praxis.core.gateway.GatewayRoutingPolicy =
@@ -790,7 +798,11 @@ private fun SettingsPageBody(
             runtime = pluginRuntime,
             modifier = modifier,
         )
-        PraxisRoute.SettingsLog -> LogScreen(modifier)
+        PraxisRoute.SettingsLog -> LogScreen(
+            modifier = modifier,
+            gatewayRequests = gatewayRequestRecords,
+            onLoadGatewayRequests = onLoadGatewayRequestRecords,
+        )
         PraxisRoute.SettingsAbout -> AboutScreen(
             versionName = versionName,
             versionCode = versionCode,

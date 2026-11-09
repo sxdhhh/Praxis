@@ -85,6 +85,29 @@ class GatewayUsageStore(
     suspend fun tokensByAccountSince(sinceMillis: Long): Map<String, Long> =
         dao.tokensByAccountSince(sinceMillis).associate { row -> row.accountId to row.tokens }
 
+    /**
+     * 最近的请求记录（日志页的「请求记录」视图）。
+     *
+     * 与报表口径不同：**包含测试请求**。报表排除它（会污染趋势），
+     * 而排障时用户点了「测试连接」就该能在这里看到那条请求。
+     */
+    suspend fun recentRequests(limit: Int = 200): List<dev.praxis.core.gateway.GatewayRequestRecord> =
+        dao.recentRequests(limit).map { row ->
+            dev.praxis.core.gateway.GatewayRequestRecord(
+                id = row.id,
+                ts = row.ts,
+                model = row.model,
+                providerId = row.providerId,
+                status = row.status,
+                error = row.error,
+                attempts = row.attempts,
+                promptTokens = row.promptTokens,
+                completionTokens = row.completionTokens,
+                durationMs = row.durationMs,
+                isTest = row.isTest,
+            )
+        }
+
     /** 保留期清理（文档 §5.7 的数据保留）。 */
     suspend fun purgeBefore(beforeMillis: Long): Int = dao.purgeRequestsBefore(beforeMillis)
 }

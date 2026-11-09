@@ -64,3 +64,30 @@ object GatewayReportFormat {
             " · 成功率 " + successRateText(summary.successRate) +
             " · " + tokenText(summary.tokens) + " tokens"
 }
+
+/**
+ * 日志页「请求记录」视图的一条（只含展示需要的字段）。
+ *
+ * ## 为什么放在 core:gateway 而不是 :app
+ *
+ * `feature:settings` 要画它，而模块方向是 `app -> feature` —— 它不能依赖 :app。
+ * 也不直接用 Room 实体：那个有 17 列，界面上只用得到 9 个，日后加列会牵动 UI。
+ */
+data class GatewayRequestRecord(
+    val id: Long,
+    val ts: Long,
+    val model: String,
+    val providerId: String?,
+    /** 200 = 成功；0 = 没拿到响应；其余为上游 HTTP 码。 */
+    val status: Int,
+    val error: String?,
+    val attempts: Int,
+    val promptTokens: Int,
+    val completionTokens: Int,
+    val durationMs: Long,
+    /** 连通性测试产生的请求：报表排除它，但这里**要显示**（排障就靠它）。 */
+    val isTest: Boolean,
+) {
+    val success: Boolean get() = status == 200
+    val totalTokens: Int get() = promptTokens + completionTokens
+}

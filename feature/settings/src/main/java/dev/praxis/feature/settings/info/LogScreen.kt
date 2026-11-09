@@ -109,7 +109,17 @@ import dev.praxis.ui.theme.PraxisRadius
  * 弹窗在这里过重，而二次点击的成本足够拦住误触）。
  */
 @Composable
-fun LogScreen(modifier: Modifier = Modifier) {
+fun LogScreen(
+    modifier: Modifier = Modifier,
+    /**
+     * 网关请求记录（文档 §5.8 的「来源筛选」）。
+     *
+     * 空列表不是「没有日志」，是「还没加载」或「真的没有请求过」——
+     * 界面要按后者说话（见下面的空态文案）。
+     */
+    gatewayRequests: List<dev.praxis.core.gateway.GatewayRequestRecord> = emptyList(),
+    onLoadGatewayRequests: () -> Unit = {},
+) {
     val topInset = LocalTopBarInset.current
     val bottomLimit = LocalScrollBottomLimit.current
     val listState = rememberLazyListState()
@@ -123,6 +133,13 @@ fun LogScreen(modifier: Modifier = Modifier) {
     var isRefreshing by remember { mutableStateOf(false) }
     // 一次性提示（清空结果 / 读取失败）。不用 Snackbar：这一页没有 Scaffold 宿主。
     var notice by remember { mutableStateOf<String?>(null) }
+    // 来源：0 = App 日志（文本文件），1 = 请求记录（Room 里的结构化记录）。
+    //
+    // 文档 §5.8 的原话是「全部 / App / 网关 / 请求记录」四档。Praxis 里
+    // **「网关」那两档其实是同一份数据**（网关日志就是请求记录的结构化视图，
+    // 网关自己不写文本日志），所以这里如实只做两档 —— 摆四档里有两档永远空，
+    // 比少两档更让人困惑。
+    var source by rememberSaveable { mutableIntStateOf(0) }
 
     LaunchedEffect(generation) {
         loading = true
@@ -184,6 +201,36 @@ fun LogScreen(modifier: Modifier = Modifier) {
                 autoFollow = false,
             ) {
                 item { Spacer(Modifier.height(12.dp)) }
+
+                item {
+                    SmallTitle("来源")
+                    Card(modifier = Modifier.padding(horizontal = 12.dp)) {
+                        Column(Modifier.padding(vertical = 4.dp)) {
+                            MiuixDropdown(
+                                items = listOf("App 日志", "请求记录"),
+                                selectedIndex = source,
+                                onSelectedIndexChange = { index ->
+                                    source = index
+                                    // 切到请求记录时拉一次：它是 Room 里的结构化数据，
+                                    // 不像文本日志那样能直接读文件。
+                                    if (index == 1) onLoadGatewayRequests()
+                                },
+                            )
+                            Text(
+                                text = if (source == 0) {
+                                    "App 自己的运行日志（按天轮转，保留 3 天）"
+                                } else {
+                                    "网关每次请求一条：成功记用量、失败记原因、取消不记"
+                                },
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            )
+                        }
+                    }
+                }
+
+                if (source == 0) {
 
                 item {
                     SmallTitle("日志文件")
@@ -266,6 +313,28 @@ fun LogScreen(modifier: Modifier = Modifier) {
                         entry = entries[i],
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp),
                     )
+                }
+                } else {
+                    item {
+                        SmallTitle("请求记录")
+                        Text(
+                            text = if (gatewayRequests.isEmpty()) {
+                                "还没有请求记录。把模型档案切到「网关」并发一条消息，这里就会出现。"
+                            } else {
+                                "共 " + gatewayRequests.size + " 条（含连通性测试）。报表页不含测试请求。"
+                            },
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(horizontal = 28.dp),
+                        )
+                    }
+
+                    items(gatewayRequests.size, key = { "req-" + gatewayRequests[it].id }) { i ->
+                        GatewayRequestCard(
+                            record = gatewayRequests[i],
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp),
+                        )
+                    }
                 }
             }
         }
@@ -555,4 +624,76 @@ private fun formatBytes(bytes: Long): String {
         unit++
     }
     return String.format("%.1f %s", value, units[unit])
+}
+
+/**
+ * 一条请求记录（日志页「请求记录」视图，文档 §5.8）。
+ *
+ * ## 为什么不显示原始报文
+ *
+ * 文档 839 行提到「debug 模式（原始报文）」，但 Praxis 没保存请求体/响应体 ——
+ * 那要另存一份（而且可能很大、含用户内容）。这里只显示结构化字段：
+ * 时间 / 模型 / 家 / 状态 / 耗时 / 用量 / 尝试次数。
+ */
+@Composable
+private fun GatewayRequestCard(
+    record: dev.praxis.core.gateway.GatewayRequestRecord,
+    modifier: Modifier = Modifier,
+) {
+    val time = remember(record.ts) {
+        java.time.Instant.ofEpochMilli(record.ts)
+            .atZone(java.time.ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm:ss"))
+    }
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = record.model,
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = if (record.success) "成功" else "失败",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = if (record.success) {
+                        MiuixTheme.colorScheme.primary
+                    } else {
+                        MiuixTheme.colorScheme.error
+                    },
+                )
+            }
+            Text(
+                text = buildString {
+                    append(time)
+                    record.providerId?.let { append(" · ").append(it) }
+                    append(" · ").append(record.durationMs).append("ms")
+                    if (record.totalTokens > 0) {
+                        append(" · ").append(record.totalTokens).append(" tokens")
+                    }
+                    if (record.attempts > 1) append(" · 试了 ").append(record.attempts).append(" 次")
+                    if (record.isTest) append(" · 连通性测试")
+                },
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            record.error?.let { message ->
+                Text(
+                    text = message,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.error,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+    }
 }

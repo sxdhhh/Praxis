@@ -139,6 +139,15 @@ interface GatewayUsageDao {
             "AND accountId IS NOT NULL GROUP BY accountId",
     )
     suspend fun tokensByAccountSince(sinceMillis: Long): List<GatewayAccountTokensRow>
+
+    /**
+     * 最近 [limit] 条请求（日志页的「请求记录」视图，文档 §5.8）。
+     *
+     * **包含** `isTest`：这是排障视图，用户点了「测试连接」之后就该能看到那条请求。
+     * 报表才排除它（那里会污染趋势）。同一个库、两个视图、口径不同 —— 是有意的。
+     */
+    @Query("SELECT * FROM gateway_request ORDER BY ts DESC LIMIT :limit")
+    suspend fun recentRequests(limit: Int): List<GatewayRequestEntity>
 }
 
 /** 汇总一行（SQL 别名对应字段）。 */
