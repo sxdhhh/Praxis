@@ -6,10 +6,21 @@
 
 ## 一、一句话现状
 
-P0 全部完成；P1 的**路由引擎、失败切换、账号池、出站 Provider、剪贴板导入**完成；P2 的**数据层与账号页**完成。
+P0 / P1 / P2 全部完成，P3 除「Images（其实已有，见 §五-1）」外全部完成：
+路由引擎、失败切换、账号池、三类错误、策略（顺序/轮询+粘性）、容错（熔断四参）、
+**token 预算**、请求记录 + 保留期、报表页、日志来源筛选、导出导入、总开关、
+**三种协议全链路**（OpenAI Chat / Anthropic Messages / OpenAI Responses）、
+调用日志、**整库备份（导出）**。
 
-**现在只有自定义家（custom-*）能真正端到端跑通。** 内置家（openai 等 21 家）的账号会被导入跳过——
-Praxis 还没有这些家的地址与协议实现，要等 P5 的 Rust 内核。这是当前最大的功能空洞。
+生图线（另一份文档）：P0a / P1 全部完成 —— 内核、模型目录、下载（含并发）、
+设置六区、槽位与持久化、三个工具、结果进对话、进度显示、自动存相册、诊断。
+
+**仍然只有 2 家内置家**（官方 `anthropic` / `openai`）。其余 19 家的地址与模型清单要等 P5
+的 Rust 内核 —— 我不凭印象写地址（写错的表现是「配了账号却一直 404/401」，而用户会
+以为是自己的 key 错了）。自定义家（`custom-*`）与这两家都能端到端跑通。
+
+**最大的未消除风险不是功能，而是「零真机验证」**：见 §十（8 项）。
+**明确不可完成的项**见 §十一（8 条，每条带解锁条件与解锁人）。
 
 ## 二、现在能走通的完整路径
 
@@ -25,7 +36,32 @@ Praxis 还没有这些家的地址与协议实现，要等 P5 的 Rust 内核。
 
 ## 三、验证与 CI 记录
 
-最近一次全绿（提交 **58cbd54**，2026-11-08，含本文件上一版之后的全部改动）：
+最近一次全绿（提交 **a683271**，2026-11-09，含备份导出与全部协议工作）：
+
+```
+build   success
+verify  success   （Lint 也过；除既有 core:plugin 债外全绿）
+test suites: 144   tests: 1481   failed: 9
+```
+
+与上一次全绿相比：**套件 137 → 144、用例 1414 → 1481**，失败数不变（9 条仍是 core:plugin 债）。
+新增的 7 个套件全部通过，包括：
+
+```
+PASSED  ProviderProtocolsTest              6
+PASSED  AnthropicRequestBuilderTest       13
+PASSED  AnthropicStreamAssemblerTest      13
+PASSED  ResponsesRequestBuilderTest       12
+PASSED  ResponsesStreamAssemblerTest      11
+PASSED  GatewayTokenBudgetTest             6
+PASSED  RoutePlannerBudgetTest             4
+PASSED  GatewayRetentionTest               6
+PASSED  BackupManifestTest                 6
+```
+
+> 注意：只改 `docs/**` 的提交**不触发 CI**（工作流有路径过滤）—— 别把「没跑」当成「漏了」。
+
+历史记录（提交 **58cbd54**，2026-11-08）：
 
 ```
 build   success   (Build + Locate APK + Upload APK 全过)
