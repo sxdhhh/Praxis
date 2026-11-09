@@ -163,12 +163,27 @@ class GatewayProvider(
                 ?: providerBaseUrl(attempt.provider)
                 ?: continue
 
-            val provider = OpenAiCompatProvider(
-                baseUrl = baseUrl,
-                apiKey = apiKey,
-                customHeaders = customHeaders,
-                client = client,
-            )
+            // 按**这一家**的协议选 provider（文档 §5.1 的四类入口）。
+            //
+            // 在换号的循环里判定：一次请求的候选可能跨协议（比如同时配了
+            // 官方 Anthropic 与某个 OpenAI 兼容中转），所以不能在外面算一次。
+            val protocol = dev.praxis.core.gateway.ProviderProtocols.of(attempt.provider)
+            val provider: dev.praxis.core.ai.AiProvider = when (protocol) {
+                dev.praxis.core.gateway.ProviderProtocol.AnthropicMessages ->
+                    dev.praxis.data.ai.AnthropicProvider(
+                        baseUrl = baseUrl,
+                        apiKey = apiKey,
+                        customHeaders = customHeaders,
+                        client = client,
+                    )
+                dev.praxis.core.gateway.ProviderProtocol.OpenAiChat ->
+                    OpenAiCompatProvider(
+                        baseUrl = baseUrl,
+                        apiKey = apiKey,
+                        customHeaders = customHeaders,
+                        client = client,
+                    )
+            }
 
             try {
                 provider.stream(request.copy(model = attempt.wireModel)).collect { event ->
