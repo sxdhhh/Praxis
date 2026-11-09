@@ -1,5 +1,6 @@
 package dev.praxis.feature.settings
 
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.CloudDownload
 import dev.praxis.ui.widgets.MiuixSwitchWidget
@@ -352,6 +353,34 @@ fun ImageGenRoute(
             }
         }
 
+        // ── 诊断（§7.1 的诊断分区，可做的那部分）──
+        //
+        // 只列**这一刻确实是事实**的东西。文档原来还画了「上次启动耗时」与
+        // 「引擎日志尾巴」，两者都拿不到：引擎是外部 App 起的（形态 A），
+        // 它的日志在它自己那边，Praxis 没有渠道去读。
+        item(key = "__diag_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.BugReport,
+                title = "诊断",
+                subtitle = "出问题时先看这几项",
+            )
+        }
+        item(key = "__diag_card__") {
+            BareCard {
+                DiagnosticRow("引擎地址", "127.0.0.1:" + 8081)
+                DiagnosticRow("模型目录", modelsRootPath)
+                DiagnosticRow(
+                    "App 日志",
+                    dev.praxis.core.data.log.PraxisLogger.logsDir?.absolutePath
+                        ?: "不可用",
+                )
+                DiagnosticRow(
+                    "引擎日志",
+                    "拿不到 —— 引擎是外部 App 起的，日志在它那边（等形态 B/C）",
+                )
+            }
+        }
+
         // ── 下载源（§7.2）──
         item(key = "__download_title__") {
             SettingsSectionHeader(
@@ -511,7 +540,7 @@ private val PLAN_LINES = listOf(
     "性能（预热 / 后端选择）：形态 A 下不适用 —— Praxis 不启动引擎，只是连一个已经在跑的引擎，" +
         "启动参数由那个外部 App 决定；等形态 B/C 落地才有东西可调",
     "输出 · 每步预览：要引擎在采样过程中推中间帧 + 一条缩略图管线（自动存相册已可用）",
-    "诊断（启动耗时 / 日志尾巴）：引擎日志在引擎那边，Praxis 这边拿不到",
+    "诊断 · 引擎日志与启动耗时：引擎是外部 App 起的，日志与启动时刻都在它那边，Praxis 拿不到（等形态 B/C）",
 )
 
 /**
@@ -724,6 +753,30 @@ private fun GenerationParamsDialog(
                     },
                 )
             }
+        }
+    }
+}
+
+/**
+ * 诊断里的一行：左标题、右取值。取值可长可短，所以单独一行而不是挤在标题里。
+ *
+ * 用 `SelectionContainer` 包着：这些路径用户往往要复制去别处用。
+ */
+@Composable
+private fun DiagnosticRow(title: String, value: String) {
+    Column(modifier = Modifier.padding(vertical = 6.dp)) {
+        Text(
+            text = title,
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Text(
+                text = value,
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(top = 2.dp),
+            )
         }
     }
 }
