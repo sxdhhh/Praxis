@@ -108,6 +108,10 @@ fun SettingsHost(
     onExportGateway: (Boolean) -> Unit = {},
     /** 网关总开关（文档 §11 末尾的回滚闸）。 */
     gatewayEnabled: Boolean = true,
+    /** 整库备份（只导出）：文档 组十六。 */
+    onBackupDatabase: () -> Unit = {},
+    /** 上次备份的结果文案。 */
+    backupMessage: String? = null,
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
@@ -317,6 +321,8 @@ fun SettingsHost(
             gatewayExportText = gatewayExportText,
             gatewayExportError = gatewayExportError,
             onExportGateway = onExportGateway,
+            onBackupDatabase = onBackupDatabase,
+            backupMessage = backupMessage,
             gatewayEnabled = gatewayEnabled,
             onGatewayEnabledChange = onGatewayEnabledChange,
             gatewayModelRows = gatewayModelRows,
@@ -478,6 +484,10 @@ private fun SettingsPageBody(
     gatewayExportError: String? = null,
     onExportGateway: (Boolean) -> Unit = {},
     gatewayEnabled: Boolean = true,
+    /** 整库备份（只导出）：文档 组十六。 */
+    onBackupDatabase: () -> Unit = {},
+    /** 上次备份的结果文案。 */
+    backupMessage: String? = null,
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
@@ -760,6 +770,8 @@ private fun SettingsPageBody(
         )
         PraxisRoute.SettingsGateway -> dev.praxis.feature.gateway.GatewayRoute(
             accountCount = gatewayAccountRows.size,
+            onBackupDatabase = onBackupDatabase,
+            backupMessage = backupMessage,
             gatewayEnabled = gatewayEnabled,
             onGatewayEnabledChange = onGatewayEnabledChange,
             modifier = modifier,

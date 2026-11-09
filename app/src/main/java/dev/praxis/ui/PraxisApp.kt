@@ -608,6 +608,21 @@ fun PraxisApp(
     val gatewayUsageStore: dev.praxis.data.gateway.GatewayUsageStore =
         org.koin.compose.koinInject()
 
+    // 整库备份（只导出）：结果文案留在界面上，直到下一次点击。
+    val backupExporter: dev.praxis.data.backup.BackupExporter = org.koin.compose.koinInject()
+    var backupMessage by remember { mutableStateOf<String?>(null) }
+    var backupRequest by remember { mutableStateOf(0) }
+    LaunchedEffect(backupRequest) {
+        if (backupRequest > 0) {
+            backupMessage = when (val result = backupExporter.export()) {
+                is dev.praxis.data.backup.BackupResult.Done ->
+                    "已备份 " + result.manifest.fileName + "（" +
+                        (result.manifest.sizeBytes / 1024) + " KB）+ manifest.json"
+                is dev.praxis.data.backup.BackupResult.Failed -> "备份失败：" + result.detail
+            }
+        }
+    }
+
     // 请求记录的保留期（文档 §5.7）：**启动时清一次**。
     //
     // 为什么不在每次写入后清：那样每条请求都多一次 DELETE，而清理不是时效性的事 ——
@@ -1531,6 +1546,8 @@ fun PraxisApp(
                     }
                 },
                 gatewayEnabled = gatewayEnabled,
+                onBackupDatabase = { backupRequest += 1 },
+                backupMessage = backupMessage,
                 onGatewayEnabledChange = { enabled ->
                     coroutineScope.launch { settingsRepository.setGatewayEnabled(enabled) }
                 },
