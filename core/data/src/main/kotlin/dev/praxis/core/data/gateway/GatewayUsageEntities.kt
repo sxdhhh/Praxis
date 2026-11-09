@@ -102,4 +102,44 @@ interface GatewayUsageDao {
 
     @Query("DELETE FROM gateway_daily WHERE day < :beforeDay")
     suspend fun purgeDailyBefore(beforeDay: String): Int
+
+    // ── 报表聚合（文档 §9.6）──
+    //
+    // 直接查明细聚合，先不写日聚合表：手机上一周的量级（几千行）扫一遍是毫秒级，
+    // 而日聚合表要保证「写入与聚合同时更新」才算对 —— 那是等真有性能问题再上的复杂度。
+
+    /** 总请求数 / 失败数 / token 合计。[isTest] 一律排除（文档 §5.7 的测试请求不入报表）。 */
+    @Query(
+        "SELECT COUNT(*) AS requests, " +
+            "SUM(CASE WHEN status != 200 THEN 1 ELSE 0 END) AS failures, " +
+            "SUM(promptTokens + completionTokens) AS tokens " +
+            "FROM gateway_request WHERE ts >= :sinceMillis AND isTest = 0",
+    )
+    suspend fun summarySince(sinceMillis: Long): GatewayUsageSummaryRow?
+
+    /** 按模型分组（报表的「哪个模型用得最多」）。 */
+    @Query(
+        "SELECT model AS name, COUNT(*) AS requests, " +
+            "SUM(CASE WHEN status != 200 THEN 1 ELSE 0 END) AS failures, " +
+            "SUM(promptTokens + completionTokens) AS tokens " +
+            "FROM gateway_request WHERE ts >= :sinceMillis AND isTest = 0 " +
+            "GROUP BY model ORDER BY requests DESC",
+    )
+    suspend fun byModelSince(sinceMillis: Long): List<GatewayUsageGroupRow>
 }
+
+/** 汇总一行（SQL 别名对应字段）。 */
+data class GatewayUsageSummaryRow(
+    val requests: Int,
+    val failures: Int,
+    val tokens: Long,
+)
+
+/** 分组一行（按模型 / 按家）。 */
+data class GatewayUsageGroupRow(
+    val name: String,
+    val requests: Int,
+    val failures: Int,
+    val tokens: Long,
+)
+

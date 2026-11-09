@@ -43,6 +43,40 @@ class GatewayUsageStore(
     /** 近 [sinceMillis] 之后的 token 总数；没有记录时上游返回 null，这里给 0。 */
     suspend fun tokensSince(sinceMillis: Long): Long = dao.tokensSince(sinceMillis) ?: 0L
 
+    /**
+     * 最近 [days] 天的汇总（含今天）。
+     *
+     * ## 起点为什么这样算
+     *
+     * 「今日」= 今天 00:00（**本地时区**）；「近 7 天」= 6 天前的 00:00。
+     * 用 `minusDays(days - 1)` 而不是 `minusDays(days)`：后者会把 7 天算成 8 个自然日，
+     * 报表上表现为「近 7 天的数字比直觉大一点」，而没人会去数。
+     */
+    suspend fun summarySince(nowMillis: Long, days: Long, zone: java.time.ZoneId): dev.praxis.core.gateway.GatewayUsageSummary {
+        val since = java.time.Instant.ofEpochMilli(nowMillis)
+            .atZone(zone)
+            .toLocalDate()
+            .minusDays((days - 1).coerceAtLeast(0))
+            .atStartOfDay(zone)
+            .toInstant()
+            .toEpochMilli()
+        val totals = dao.summarySince(since)
+        val buckets = dao.byModelSince(since).map { row ->
+            dev.praxis.core.gateway.GatewayUsageBucket(
+                name = row.name,
+                requests = row.requests,
+                failures = row.failures,
+                tokens = row.tokens,
+            )
+        }
+        return dev.praxis.core.gateway.GatewayUsageSummary(
+            requests = totals?.requests ?: 0,
+            failures = totals?.failures ?: 0,
+            tokens = totals?.tokens ?: 0L,
+            byModel = buckets,
+        )
+    }
+
     /** 保留期清理（文档 §5.7 的数据保留）。 */
     suspend fun purgeBefore(beforeMillis: Long): Int = dao.purgeRequestsBefore(beforeMillis)
 }
