@@ -372,6 +372,16 @@ fun PraxisApp(
         gatewayRouteState.updateBreakerConfig(gatewayRoutingPolicy.toBreakerConfig())
     }
 
+    // 路由组（文档 §5.5）：对外名 → 跨家成员。
+    val gatewayRouteGroupsJson by settingsRepository.gatewayRouteGroupsJson
+        .collectAsState(initial = null)
+    val gatewayRouteGroups = remember(gatewayRouteGroupsJson) {
+        dev.praxis.core.gateway.GatewayRouteGroupCodec
+            .decode(gatewayRouteGroupsJson)
+            ?.getOrNull()
+            .orEmpty()
+    }
+
     // 候选队列：按当前模型算一遍选路结果（不发请求，纯计算）。
     var gatewayQueueEntries by remember {
         mutableStateOf<List<dev.praxis.core.gateway.GatewayQueueEntry>>(emptyList())
@@ -382,6 +392,8 @@ fun PraxisApp(
             nativeModels = gatewayAccountStore.nativeModels(),
             mappings = gatewayModelRules.toRoutingMappings(),
             defaultProvider = null,
+            // 路由组（文档 §5.5）：队列预测也要按组算，否则加了组这里看不到变化。
+            groups = gatewayRouteGroups,
         ).candidates
         val plan = dev.praxis.core.gateway.RoutePlanner.plan(
             candidates = candidates,
@@ -391,7 +403,6 @@ fun PraxisApp(
             stickyAccountId = null,
             // 队列是**预测**，用当前策略算 —— 否则用户切到轮询后看到的次序仍是顺序的。
             policy = gatewayRoutingPolicy,
-            groups = gatewayRouteGroups,
         )
         gatewayQueueEntries = dev.praxis.core.gateway.GatewayQueue.of(plan)
     }
@@ -655,15 +666,6 @@ fun PraxisApp(
         gatewayUsageStore.purgeBefore(cutoff)
     }
 
-    // 路由组（文档 §5.5）：对外名 → 跨家成员。
-    val gatewayRouteGroupsJson by settingsRepository.gatewayRouteGroupsJson
-        .collectAsState(initial = null)
-    val gatewayRouteGroups = remember(gatewayRouteGroupsJson) {
-        dev.praxis.core.gateway.GatewayRouteGroupCodec
-            .decode(gatewayRouteGroupsJson)
-            ?.getOrNull()
-            .orEmpty()
-    }
 
     // 路由回放（文档 §5.5）：进程内最近若干条决策。
     val routeReplayLog: dev.praxis.core.gateway.RouteReplayLog =
@@ -759,9 +761,9 @@ fun PraxisApp(
         org.koin.compose.koinInject()
     // 与工具共用同一条进度总线（工具写、聊天层读）。
     val imageGenProgressBus: dev.praxis.core.imagegen.ImageGenProgressBus =
+        org.koin.compose.koinInject()
     /** 存相册的端口实现（:app 提供，见 GalleryImagePort）。 */
     val imageGalleryPort: dev.praxis.feature.chat.ImageGalleryPort =
-        org.koin.compose.koinInject()
         org.koin.compose.koinInject()
 
     // 运行时权限申请。回调不逐条比对结果，统一 refresh() 回读系统真值 ——

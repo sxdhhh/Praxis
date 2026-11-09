@@ -270,7 +270,7 @@ class GatewayProvider(
                                     (outcome.lastKind?.name ?: "未知") + "）"
                             is dev.praxis.core.gateway.RouteOutcome.GaveUp ->
                                 "放弃换号：" + outcome.reason
-                            null -> "失败：" + e.error.message,
+                            null -> "失败：" + e.error.message
                         },
                         atMillis = System.currentTimeMillis(),
                     ),
