@@ -1,8 +1,10 @@
 package dev.praxis.data.imagegen
 
 import dev.praxis.core.imagegen.DownloadCleanup
+import dev.praxis.core.imagegen.DownloadTarget
 import dev.praxis.core.imagegen.DownloadProgress
 import dev.praxis.core.imagegen.ParallelProgress
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import dev.praxis.core.imagegen.ImageDownloadPlan
 import dev.praxis.core.imagegen.SpaceCheck
@@ -132,7 +134,7 @@ class ModelDownloader(
             val terminal = kotlinx.coroutines.runBlocking {
                 kotlinx.coroutines.coroutineScope {
                     plan.targets.map { target ->
-                        kotlinx.coroutines.async(kotlinx.coroutines.Dispatchers.IO) {
+                        async(kotlinx.coroutines.Dispatchers.IO) {
                             gate.acquire()
                             try {
                                 downloadOne(
