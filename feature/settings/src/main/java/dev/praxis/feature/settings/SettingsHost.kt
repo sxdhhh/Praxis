@@ -118,6 +118,9 @@ fun SettingsHost(
     gatewayRequestRecords: List<dev.praxis.core.gateway.GatewayRequestRecord> = emptyList(),
     onLoadGatewayRequestRecords: () -> Unit = {},
     onRefreshGatewayReport: () -> Unit = {},
+    /** 请求记录保留天数（文档 §5.7）。 */
+    gatewayRequestRetentionDays: Int = dev.praxis.core.gateway.GatewayRetention.DEFAULT_DAYS,
+    onGatewayRequestRetentionDaysChange: (Int) -> Unit = {},
     /** 选路策略（顺序/轮询 + 粘性）。 */
     gatewayRoutingPolicy: dev.praxis.core.gateway.GatewayRoutingPolicy =
         dev.praxis.core.gateway.GatewayRoutingPolicy(),
@@ -322,6 +325,8 @@ fun SettingsHost(
             gatewayRequestRecords = gatewayRequestRecords,
             onLoadGatewayRequestRecords = onLoadGatewayRequestRecords,
             onRefreshGatewayReport = onRefreshGatewayReport,
+            gatewayRequestRetentionDays = gatewayRequestRetentionDays,
+            onGatewayRequestRetentionDaysChange = onGatewayRequestRetentionDaysChange,
             gatewayRoutingPolicy = gatewayRoutingPolicy,
             gatewayRoutingPolicyBroken = gatewayRoutingPolicyBroken,
             onGatewayPolicyChange = onGatewayPolicyChange,
@@ -483,6 +488,9 @@ private fun SettingsPageBody(
     gatewayRequestRecords: List<dev.praxis.core.gateway.GatewayRequestRecord> = emptyList(),
     onLoadGatewayRequestRecords: () -> Unit = {},
     onRefreshGatewayReport: () -> Unit = {},
+    /** 请求记录保留天数（文档 §5.7）。 */
+    gatewayRequestRetentionDays: Int = dev.praxis.core.gateway.GatewayRetention.DEFAULT_DAYS,
+    onGatewayRequestRetentionDaysChange: (Int) -> Unit = {},
     /** 选路策略（顺序/轮询 + 粘性）。 */
     gatewayRoutingPolicy: dev.praxis.core.gateway.GatewayRoutingPolicy =
         dev.praxis.core.gateway.GatewayRoutingPolicy(),
@@ -762,6 +770,8 @@ private fun SettingsPageBody(
             windows = gatewayReportWindows,
             topModels = gatewayReportTopModels,
             onRefresh = onRefreshGatewayReport,
+            retentionDays = gatewayRequestRetentionDays,
+            onRetentionDaysChange = onGatewayRequestRetentionDaysChange,
             modifier = modifier,
         )
         PraxisRoute.SettingsGatewayModels -> dev.praxis.feature.gateway.GatewayModelsScreen(

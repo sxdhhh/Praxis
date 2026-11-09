@@ -707,6 +707,19 @@ class SettingsRepository(
     suspend fun setImageOutputSettingsJson(text: String) = put(KEY_IMAGEGEN_OUTPUT, text)
 
     /**
+     * 网关请求记录的保留天数（文档 §5.7）。
+     *
+     * 存成字符串而不是 Int 键：与别的设置一致，坏内容判「解析不出来」而不是崩，
+     * 再由 `GatewayRetention.parseDays` 夹到 1~365。
+     */
+    val gatewayRequestRetentionDays: Flow<Int?> = dataStore.data.map { prefs ->
+        prefs[KEY_GATEWAY_RETENTION_DAYS]?.toIntOrNull()
+    }
+
+    suspend fun setGatewayRequestRetentionDays(days: Int) =
+        put(KEY_GATEWAY_RETENTION_DAYS, days.toString())
+
+    /**
      * 用户改写过的**内置人格**（覆盖 Praxis 出厂那段）。空串 = 用出厂人格。
      *
      * ## 为什么要单独一个键，而不是并进 [setSystemPrompt]
@@ -1416,6 +1429,9 @@ private val KEY_IMAGEGEN_DEFAULTS = stringPreferencesKey("imagegen_defaults")
 
 /** 生图输出设置（自动存相册），见 [SettingsRepository.imageOutputSettingsJson]。 */
 private val KEY_IMAGEGEN_OUTPUT = stringPreferencesKey("imagegen_output")
+
+/** 网关请求记录保留天数，见 [SettingsRepository.gatewayRequestRetentionDays]。 */
+private val KEY_GATEWAY_RETENTION_DAYS = stringPreferencesKey("gateway_request_retention_days")
 
 /**
  * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。

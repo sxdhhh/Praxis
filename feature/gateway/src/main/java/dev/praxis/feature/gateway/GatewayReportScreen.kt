@@ -1,5 +1,13 @@
 package dev.praxis.feature.gateway
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import dev.praxis.ui.widgets.MiuixAnimatedDialog
+import top.yukonga.miuix.kmp.basic.TextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,11 +52,15 @@ fun GatewayReportScreen(
     /** 按模型排行（取最长那个窗口的分组）。 */
     topModels: List<GatewayUsageBucket> = emptyList(),
     onRefresh: () -> Unit = {},
+    /** 记录保留天数（文档 §5.7）。 */
+    retentionDays: Int = dev.praxis.core.gateway.GatewayRetention.DEFAULT_DAYS,
+    onRetentionDaysChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // 顶栏与底栏都是浮层：内容要能滚到它们下面，否则置顶/置底会被糊住或被压住。
     val topInset = dev.praxis.ui.design.component.LocalTopBarInset.current
     val scrollLimit = dev.praxis.ui.design.component.LocalScrollBottomLimit.current
+    var retentionDialogVisible by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -124,6 +136,17 @@ fun GatewayReportScreen(
             }
         }
 
+        // 保留期：记录会一直累积，这里给用户一个可调的出口。
+        item(key = "retention") {
+            GatewayCard {
+                MiuixNavigationItemWidget(
+                    title = "记录保留",
+                    description = retentionDays.toString() + " 天（更早的记录在下次启动时清掉）",
+                    onClick = { retentionDialogVisible = true },
+                )
+            }
+        }
+
         item(key = "refresh") {
             Card(
                 modifier = Modifier
@@ -135,6 +158,77 @@ fun GatewayReportScreen(
                     title = "刷新",
                     description = "重新统计（数据是本地库里的，不联网）",
                     onClick = onRefresh,
+                )
+            }
+        }
+    }
+
+    if (retentionDialogVisible) {
+        RetentionDialog(
+            current = retentionDays,
+            onDismiss = { retentionDialogVisible = false },
+            onConfirm = { days ->
+                onRetentionDaysChange(days)
+                retentionDialogVisible = false
+            },
+        )
+    }
+}
+
+/**
+ * 保留天数弹窗。校验与夹取都用 core 的 `GatewayRetention`（与清理侧同一套边界）。
+ *
+ * 为什么下限是 1 而不是 0：0 天等于「什么都不留」—— 那不是「少留一点」，
+ * 而且报表会立刻变空，用户会以为数据丢了。
+ */
+@Composable
+private fun RetentionDialog(
+    current: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit,
+) {
+    var days by remember { mutableStateOf(current.toString()) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+        Card {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(text = "记录保留", style = MiuixTheme.textStyles.body2)
+                Text(
+                    text = "早于这么多天的请求记录会在下次启动时清掉（1~365 天）。" +
+                        "报表统计的就是这些记录，清掉后对应时间段会变空。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(10.dp))
+                TextField(
+                    value = days,
+                    onValueChange = { days = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "天数（1~365）",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                error?.let { text ->
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = text,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.error,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                MiuixNavigationItemWidget(
+                    title = "保存",
+                    description = "下次启动生效",
+                    onClick = {
+                        val parsed = days.trim().toIntOrNull()
+                        if (parsed == null) {
+                            error = "要填数字"
+                        } else {
+                            onConfirm(dev.praxis.core.gateway.GatewayRetention.parseDays(parsed))
+                        }
+                    },
                 )
             }
         }

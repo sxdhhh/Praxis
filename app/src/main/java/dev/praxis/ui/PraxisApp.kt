@@ -603,9 +603,29 @@ fun PraxisApp(
             ?: dev.praxis.core.imagegen.ImageGenDefaults()
     }
 
+
     // 请求记录写入层：GatewayProvider 每轮结束（成功或失败）落一条。
     val gatewayUsageStore: dev.praxis.data.gateway.GatewayUsageStore =
         org.koin.compose.koinInject()
+
+    // 请求记录的保留期（文档 §5.7）：**启动时清一次**。
+    //
+    // 为什么不在每次写入后清：那样每条请求都多一次 DELETE，而清理不是时效性的事 ——
+    // 早几分钟晚几分钟删掉旧记录，没有区别。
+    //
+    // 为什么必须清：`gateway_request` 每请求一行，不清就是无限增长 ——
+    // 一个常用一年的人会有几十万行，报表聚合会变慢，而手机存储比服务器紧。
+    LaunchedEffect(Unit) {
+        val days = dev.praxis.core.gateway.GatewayRetention.parseDays(
+            settingsRepository.gatewayRequestRetentionDays.first(),
+        )
+        val cutoff = dev.praxis.core.gateway.GatewayRetention.cutoffMillis(
+            nowMillis = System.currentTimeMillis(),
+            days = days,
+            zone = java.time.ZoneId.systemDefault(),
+        )
+        gatewayUsageStore.purgeBefore(cutoff)
+    }
 
     // 日志页的「请求记录」视图（文档 §5.8）：按需加载，不跟着每轮刷新。
     //
@@ -632,6 +652,12 @@ fun PraxisApp(
         mutableStateOf<List<dev.praxis.core.gateway.GatewayUsageBucket>>(emptyList())
     }
     var gatewayReportRefresh by remember { mutableStateOf(0) }
+    // 请求记录保留天数（启动清理与报表页共用同一个值）。
+    val gatewayRetentionDaysRaw by settingsRepository.gatewayRequestRetentionDays
+        .collectAsState(initial = null)
+    val gatewayRetentionDays = remember(gatewayRetentionDaysRaw) {
+        dev.praxis.core.gateway.GatewayRetention.parseDays(gatewayRetentionDaysRaw)
+    }
     LaunchedEffect(gatewayReportRefresh, gatewayRowsRefresh) {
         val now = System.currentTimeMillis()
         val zone = java.time.ZoneId.systemDefault()
@@ -1384,6 +1410,12 @@ fun PraxisApp(
                 gatewayRequestRecords = gatewayRequestRecords,
                 onLoadGatewayRequestRecords = { gatewayRequestRecordsLoad += 1 },
                 onRefreshGatewayReport = { gatewayReportRefresh += 1 },
+                gatewayRequestRetentionDays = gatewayRetentionDays,
+                onGatewayRequestRetentionDaysChange = { days ->
+                    coroutineScope.launch {
+                        settingsRepository.setGatewayRequestRetentionDays(days)
+                    }
+                },
                 gatewayModelError = gatewayModelError,
                 gatewayRoutingPolicy = gatewayRoutingPolicy,
                 gatewayRoutingPolicyBroken = gatewayRoutingPolicyBroken,
