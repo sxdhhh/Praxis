@@ -56,6 +56,14 @@ enum class SkipReason {
     CoolingDown,
     ConcurrencyFull,
     RateLimited,
+
+    /**
+     * 自己设的 token 预算用完了（不是上游报的 429）。
+     *
+     * 与 [RateLimited] 分开：前者是「我们不让你用了」，后者是「上游说你超了」。
+     * 处置也不同 —— 预算用尽等窗口滚过去，上游限流要等它给的重置时刻。
+     */
+    BudgetExhausted,
 }
 
 /** 一个可尝试的组合：某账号 + 某上游模型。 */
@@ -128,6 +136,10 @@ object RoutePlanner {
         stickyAccountId: String?,
         /** 各家的运行期用量；空表示没有配置家级限流。 */
         providerUsages: List<ProviderUsage> = emptyList(),
+        /** token 预算（文档 §7.2 第 6 条）；默认不限。 */
+        budget: GatewayTokenBudget = GatewayTokenBudget(),
+        /** 各账号在窗口内的 token 用量（没有记录 = 0）。 */
+        accountSpend: Map<String, Long> = emptyMap(),
         /** 选路策略（文档 §9.4）：顺序/轮询 + 粘性开关。 */
         policy: GatewayRoutingPolicy = GatewayRoutingPolicy(),
         /**
@@ -154,6 +166,8 @@ object RoutePlanner {
                         state = state,
                         needsImages = needsImages,
                         providerExhausted = providerExhausted,
+                        budget = budget,
+                        accountSpend = accountSpend,
                     )
                     if (reason == null) {
                         usable += PlannedAttempt(
@@ -213,6 +227,8 @@ object RoutePlanner {
         state: RouteState,
         needsImages: Boolean,
         providerExhausted: Boolean,
+        budget: GatewayTokenBudget,
+        accountSpend: Map<String, Long>,
     ): SkipReason? {
         if (!account.enabled) return SkipReason.Disabled
         if (!account.hasCredentials) return SkipReason.NoCredentials
@@ -234,6 +250,11 @@ object RoutePlanner {
             account.requestsThisMinute >= account.requestLimitPerMinute
         ) {
             return SkipReason.RateLimited
+        }
+
+        // 自己设的 token 预算：用尽就跳过（比上游限流更早判定 —— 它是我们主动的刹车）。
+        if (budget.isExhausted(account.id, accountSpend)) {
+            return SkipReason.BudgetExhausted
         }
 
         // 家级配额用满时，这一家的所有账号都跳过：换号也躲不开共享配额。

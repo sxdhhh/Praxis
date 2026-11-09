@@ -63,5 +63,6 @@ object GatewayQueue {
         SkipReason.CoolingDown -> "冷却中（退避 / 熔断 / 额度受限）"
         SkipReason.ConcurrencyFull -> "并发已满"
         SkipReason.RateLimited -> "限流已满（每账号或每家的配额）"
+        SkipReason.BudgetExhausted -> "token 预算已在窗口内用完（设置里可改）"
     }
 }

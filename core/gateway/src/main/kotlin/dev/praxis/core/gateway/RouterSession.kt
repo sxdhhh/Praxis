@@ -62,6 +62,16 @@ class RouterSession(
 
     /** 轮询的单调计数：每个请求转一位（顺序策略下它不被读）。 */
     private var rotationSeed: Int = 0
+    /**
+     * token 预算（默认不限）。
+     *
+     * 名字上带 token 是为了与构造参数 `budget: FailoverBudget` 区分 ——
+     * 那个是「一次请求最多试几个组合」，这个是「一个账号能花多少」
+     * （两者都叫 budget 会读错，编译器也不允许）。
+     */
+    private var tokenBudget: GatewayTokenBudget = GatewayTokenBudget()
+    /** 各账号在窗口内的用量；空 = 都没有记录。 */
+    private var accountSpend: Map<String, Long> = emptyMap()
 
     private var stickyAccountId: String? = null
     private var failover = FailoverState()
@@ -97,6 +107,17 @@ class RouterSession(
     }
 
     /**
+     * token 预算与各账号的使用量（文档 §7.2 第 6 条）。
+     *
+     * 由调用方**每次请求前**推入：`next()` 是同步的，不能在里面查库；
+     * 而用量会随每次请求变化，缓存一份在会话里比每轮 plan 都带参数更简单。
+     */
+    fun setBudget(budget: GatewayTokenBudget, accountSpend: Map<String, Long>) {
+        this.tokenBudget = budget
+        this.accountSpend = accountSpend
+    }
+
+    /**
      * 下一个要尝试的组合；null 表示没有可试的了（看 [outcome]）。
      */
     fun next(): PlannedAttempt? {
@@ -111,6 +132,8 @@ class RouterSession(
             providerUsages = providerUsages,
             policy = policy,
             rotationSeed = rotationSeed,
+            budget = tokenBudget,
+            accountSpend = accountSpend,
         )
         // 每取一次就推进轮询计数：这是「摊开请求」的定义，不是每轮会话一次。
         rotationSeed += 1

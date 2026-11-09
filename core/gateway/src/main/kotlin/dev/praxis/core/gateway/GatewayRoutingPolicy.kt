@@ -44,7 +44,19 @@ data class GatewayRoutingPolicy(
     val breakerOpenMillis: Long = 60_000L,
     /** 打开期间成功多少次后恢复（当前实现只记录，不据此自动恢复）。 */
     val breakerSuccessThreshold: Int = 1,
+
+    // ── token 预算（§7.2 第 6 条）──
+
+    /** 每账号在窗口内的 token 上限；0 = 不限（默认）。 */
+    val tokenBudgetPerAccount: Long = 0L,
+    /** 预算窗口（小时）。用滚动窗口而不是自然日：见 [GatewayTokenBudget] 的说明。 */
+    val budgetWindowHours: Int = 24,
 ) {
+    /** 交给 planner / RouteSession 的预算视图。 */
+    fun toTokenBudget(): GatewayTokenBudget = GatewayTokenBudget(
+        perAccountTokens = tokenBudgetPerAccount,
+        windowHours = budgetWindowHours,
+    )
     /** 交给 RouteState 的四参视图。 */
     fun toBreakerConfig(): BreakerConfig = BreakerConfig(
         enabled = breakerEnabled,
@@ -69,6 +81,8 @@ object GatewayRoutingPolicyCodec {
         put("breakerFailureThreshold", policy.breakerFailureThreshold)
         put("breakerOpenMillis", policy.breakerOpenMillis)
         put("breakerSuccessThreshold", policy.breakerSuccessThreshold)
+        put("tokenBudgetPerAccount", policy.tokenBudgetPerAccount)
+        put("budgetWindowHours", policy.budgetWindowHours)
     }.toString()
 
     /** @param text null/空白 = 没配过（返回默认策略）；坏内容 = failure。 */
@@ -98,6 +112,14 @@ object GatewayRoutingPolicyCodec {
                 breakerSuccessThreshold = root.intOr(
                     "breakerSuccessThreshold",
                     defaults.breakerSuccessThreshold,
+                ),
+                tokenBudgetPerAccount = root.longOr(
+                    "tokenBudgetPerAccount",
+                    defaults.tokenBudgetPerAccount,
+                ),
+                budgetWindowHours = root.intOr(
+                    "budgetWindowHours",
+                    defaults.budgetWindowHours,
                 ),
             )
         }
