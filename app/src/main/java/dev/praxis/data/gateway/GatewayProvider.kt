@@ -176,6 +176,13 @@ class GatewayProvider(
                         customHeaders = customHeaders,
                         client = client,
                     )
+                dev.praxis.core.gateway.ProviderProtocol.Responses ->
+                    dev.praxis.data.ai.ResponsesProvider(
+                        baseUrl = baseUrl,
+                        apiKey = apiKey,
+                        customHeaders = customHeaders,
+                        client = client,
+                    )
                 dev.praxis.core.gateway.ProviderProtocol.OpenAiChat ->
                     OpenAiCompatProvider(
                         baseUrl = baseUrl,

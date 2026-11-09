@@ -12,6 +12,15 @@ enum class ProviderProtocol(
 
     /** Anthropic Messages（`/v1/messages`）。 */
     AnthropicMessages("anthropic"),
+
+    /**
+     * OpenAI Responses（`/v1/responses`）。
+     *
+     * 与 Chat Completions 是**同一家的两个协议**，不是两家 —— 所以内置表里没有
+     * 任何一家默认走它（官方 OpenAI 走 Chat 更通用）。目前只有用户把自定义家
+     * 的 id 写成 `responses` / `openai-responses` 才会走到这里。
+     */
+    Responses("responses"),
 }
 
 /**
@@ -35,12 +44,15 @@ object ProviderProtocols {
         "claude",
     )
 
+    /** 明确说 Responses 协议的家（自定义家里的 id）。 */
+    private val RESPONSES_HOSTS = setOf("responses", "openai-responses")
+
     fun of(providerId: String): ProviderProtocol {
         val normalized = providerId.trim().lowercase()
-        return if (normalized in ANTHROPIC_HOSTS) {
-            ProviderProtocol.AnthropicMessages
-        } else {
-            ProviderProtocol.OpenAiChat
+        return when {
+            normalized in ANTHROPIC_HOSTS -> ProviderProtocol.AnthropicMessages
+            normalized in RESPONSES_HOSTS -> ProviderProtocol.Responses
+            else -> ProviderProtocol.OpenAiChat
         }
     }
 
@@ -56,11 +68,14 @@ object ProviderProtocols {
             "x-api-key" to apiKey,
             "anthropic-version" to AnthropicRequestBuilder.API_VERSION,
         )
+        // Responses 与 Chat 是同一家的两个协议，鉴权头一致。
+        ProviderProtocol.Responses -> mapOf("Authorization" to "Bearer " + apiKey)
     }
 
     /** 请求路径。 */
     fun path(protocol: ProviderProtocol): String = when (protocol) {
         ProviderProtocol.OpenAiChat -> "/v1/chat/completions"
         ProviderProtocol.AnthropicMessages -> "/v1/messages"
+        ProviderProtocol.Responses -> "/v1/responses"
     }
 }

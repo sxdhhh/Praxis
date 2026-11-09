@@ -26,6 +26,22 @@ class ProviderProtocolsTest {
     }
 
     @Test
+    fun `responses 这个 id 走 Responses 协议`() {
+        // 内置表里没有哪家默认走它（官方 OpenAI 走 Chat 更通用）；
+        // 只有自定义家的 id 写成这两个之一才会走到。
+        assertEquals(ProviderProtocol.Responses, ProviderProtocols.of("responses"))
+        assertEquals(ProviderProtocol.Responses, ProviderProtocols.of("openai-responses"))
+    }
+
+    @Test
+    fun `Responses 的鉴权头与 Chat 一致`() {
+        // 同一家的两个协议，别写成 Anthropic 那种 x-api-key。
+        val headers = ProviderProtocols.authHeaders(ProviderProtocol.Responses, "sk-3")
+        assertEquals("Bearer sk-3", headers["Authorization"])
+        assertEquals("/v1/responses", ProviderProtocols.path(ProviderProtocol.Responses))
+    }
+
+    @Test
     fun `两家的鉴权头不同`() {
         val openai = ProviderProtocols.authHeaders(ProviderProtocol.OpenAiChat, "sk-1")
         assertEquals("Bearer sk-1", openai["Authorization"])
