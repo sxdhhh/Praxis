@@ -111,6 +111,10 @@ fun SettingsHost(
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
+    /** 报表：三段窗口 + 按模型排行。 */
+    gatewayReportWindows: List<dev.praxis.feature.gateway.GatewayReportWindowUi> = emptyList(),
+    gatewayReportTopModels: List<dev.praxis.core.gateway.GatewayUsageBucket> = emptyList(),
+    onRefreshGatewayReport: () -> Unit = {},
     /** 选路策略（顺序/轮询 + 粘性）。 */
     gatewayRoutingPolicy: dev.praxis.core.gateway.GatewayRoutingPolicy =
         dev.praxis.core.gateway.GatewayRoutingPolicy(),
@@ -306,6 +310,9 @@ fun SettingsHost(
             gatewayEnabled = gatewayEnabled,
             onGatewayEnabledChange = onGatewayEnabledChange,
             gatewayModelRows = gatewayModelRows,
+            gatewayReportWindows = gatewayReportWindows,
+            gatewayReportTopModels = gatewayReportTopModels,
+            onRefreshGatewayReport = onRefreshGatewayReport,
             gatewayRoutingPolicy = gatewayRoutingPolicy,
             gatewayRoutingPolicyBroken = gatewayRoutingPolicyBroken,
             onGatewayPolicyChange = onGatewayPolicyChange,
@@ -458,6 +465,10 @@ private fun SettingsPageBody(
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
+    /** 报表：三段窗口 + 按模型排行。 */
+    gatewayReportWindows: List<dev.praxis.feature.gateway.GatewayReportWindowUi> = emptyList(),
+    gatewayReportTopModels: List<dev.praxis.core.gateway.GatewayUsageBucket> = emptyList(),
+    onRefreshGatewayReport: () -> Unit = {},
     /** 选路策略（顺序/轮询 + 粘性）。 */
     gatewayRoutingPolicy: dev.praxis.core.gateway.GatewayRoutingPolicy =
         dev.praxis.core.gateway.GatewayRoutingPolicy(),
@@ -727,6 +738,12 @@ private fun SettingsPageBody(
         )
         // 账号页：账号池的存储层已经就绪，但还没有「添加账号」的界面（P1 剩余部分），
         // 所以这里传的是真实状态（空列表），不是占位数据。
+        PraxisRoute.SettingsGatewayReport -> dev.praxis.feature.gateway.GatewayReportScreen(
+            windows = gatewayReportWindows,
+            topModels = gatewayReportTopModels,
+            onRefresh = onRefreshGatewayReport,
+            modifier = modifier,
+        )
         PraxisRoute.SettingsGatewayModels -> dev.praxis.feature.gateway.GatewayModelsScreen(
             rows = gatewayModelRows,
             error = gatewayModelError,

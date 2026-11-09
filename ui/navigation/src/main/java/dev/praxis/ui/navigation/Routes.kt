@@ -182,6 +182,13 @@ data object SettingsGatewayImport : PraxisRoute
 data object SettingsGatewayRouting : PraxisRoute
 
 /**
+ * 网关的报表页（设置 -> 网关 -> 报表）。
+ *
+ * 文档 §9.6：复用现有列表与控件，**不新写图表**。数据来自 `gateway_request` 的聚合。
+ */
+data object SettingsGatewayReport : PraxisRoute
+
+/**
  * 网关的模型管理页（设置 -> 网关 -> 模型管理）。
  *
  * `gateway_model` 表在 P2 建好却一直没有写入路径（等于一张死表）；

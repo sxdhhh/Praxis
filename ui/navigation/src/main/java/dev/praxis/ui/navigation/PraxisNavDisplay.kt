@@ -144,6 +144,7 @@ fun PraxisNavDisplay(
             entry<PraxisRoute.SettingsGatewayImport>(swipeDismiss = swipe) { route -> content(route) }
             entry<PraxisRoute.SettingsGatewayRouting>(swipeDismiss = swipe) { route -> content(route) }
     entry<PraxisRoute.SettingsGatewayModels>(swipeDismiss = swipe) { route -> content(route) }
+    entry<PraxisRoute.SettingsGatewayReport>(swipeDismiss = swipe) { route -> content(route) }
     // 与 SettingsModel 一致：主设置页不允许侧滑返回，避免误退（文档 §7.1 的表）。
     entry<PraxisRoute.SettingsImageGen>(swipeDismiss = NavSwipeDirection.None) { route ->
         content(route)
@@ -194,6 +195,7 @@ fun PraxisRoute.title(): String = when (this) {
     PraxisRoute.SettingsGatewayImport -> "导入导出"
     PraxisRoute.SettingsGatewayRouting -> "路由"
     PraxisRoute.SettingsGatewayModels -> "模型管理"
+    PraxisRoute.SettingsGatewayReport -> "报表"
     PraxisRoute.SettingsImageGen -> "本地生图"
     PraxisRoute.SettingsImageGenModels -> "模型库"
     PraxisRoute.SettingsCompatPluginEntries -> "兼容插件入口"

@@ -602,6 +602,35 @@ fun PraxisApp(
             ?: dev.praxis.core.imagegen.ImageGenDefaults()
     }
 
+    // ── 报表（文档 §9.6）──
+    //
+    // 三段窗口各自查一次库。天数与「起点怎么算」都在 core 的 GatewayReport 里定死
+    // （近 7 天 = 6 天前的 00:00，本地时区）。
+    var gatewayReportWindows by remember {
+        mutableStateOf<List<dev.praxis.feature.gateway.GatewayReportWindowUi>>(emptyList())
+    }
+    var gatewayReportTopModels by remember {
+        mutableStateOf<List<dev.praxis.core.gateway.GatewayUsageBucket>>(emptyList())
+    }
+    var gatewayReportRefresh by remember { mutableStateOf(0) }
+    LaunchedEffect(gatewayReportRefresh, gatewayRowsRefresh) {
+        val now = System.currentTimeMillis()
+        val zone = java.time.ZoneId.systemDefault()
+        val windows = listOf(
+            "今日" to 1L,
+            "近 7 天" to 7L,
+            "近 30 天" to 30L,
+        ).map { (label, days) ->
+            dev.praxis.feature.gateway.GatewayReportWindowUi(
+                label = label,
+                summary = gatewayUsageStore.summarySince(now, days, zone),
+            )
+        }
+        gatewayReportWindows = windows
+        // 排行取最长窗口：单看今天太容易被一次调试带偏。
+        gatewayReportTopModels = windows.lastOrNull()?.summary?.byModel.orEmpty()
+    }
+
     // 请求记录写入层：GatewayProvider 每轮结束（成功或失败）落一条。
     val gatewayUsageStore: dev.praxis.data.gateway.GatewayUsageStore =
         org.koin.compose.koinInject()
@@ -1316,6 +1345,9 @@ fun PraxisApp(
                 gatewayAccountRows = gatewayAccountRows,
                 // ── 模型管理页（gateway_model 的写入口）──
                 gatewayModelRows = gatewayModelRows,
+                gatewayReportWindows = gatewayReportWindows,
+                gatewayReportTopModels = gatewayReportTopModels,
+                onRefreshGatewayReport = { gatewayReportRefresh += 1 },
                 gatewayModelError = gatewayModelError,
                 gatewayRoutingPolicy = gatewayRoutingPolicy,
                 gatewayRoutingPolicyBroken = gatewayRoutingPolicyBroken,
