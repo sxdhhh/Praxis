@@ -182,6 +182,13 @@ data object SettingsGatewayImport : PraxisRoute
 data object SettingsGatewayRouting : PraxisRoute
 
 /**
+ * 自定义提供商页（设置 -> 网关 -> 自定义提供商）。
+ *
+ * 文档 §5.3：提供商是「地址 + 模型清单」，凭证在账号池里填。
+ */
+data object SettingsGatewayProviders : PraxisRoute
+
+/**
  * 网关的报表页（设置 -> 网关 -> 报表）。
  *
  * 文档 §9.6：复用现有列表与控件，**不新写图表**。数据来自 `gateway_request` 的聚合。

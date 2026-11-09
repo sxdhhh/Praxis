@@ -167,6 +167,21 @@ fun GatewayRoute(
                 subtitle = "这次会先用谁、谁被跳过",
             )
         }
+        item(key = "__providers_card__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "自定义提供商",
+                    description = "填地址与模型清单；标识决定走哪种协议",
+                    onClick = { navigator.push(PraxisRoute.SettingsGatewayProviders) },
+                )
+            }
+        }
+
         item(key = "__backup_card__") {
             Card(
                 modifier = Modifier

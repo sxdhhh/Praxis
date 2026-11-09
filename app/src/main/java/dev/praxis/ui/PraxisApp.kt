@@ -654,6 +654,27 @@ fun PraxisApp(
         gatewayUsageStore.purgeBefore(cutoff)
     }
 
+    // ── 自定义提供商（文档 §5.3）──
+    //
+    // 三件事共用一份状态：页面列表、地址解析（providerBaseUrl）、以及添加/删除后的刷新。
+    var gatewayProviderRows by remember {
+        mutableStateOf<List<dev.praxis.feature.gateway.GatewayProviderRowUi>>(emptyList())
+    }
+    var gatewayProviderAddError by remember { mutableStateOf<String?>(null) }
+    var gatewayProviderTick by remember { mutableStateOf(0) }
+    LaunchedEffect(gatewayRowsRefresh, gatewayProviderTick) {
+        gatewayProviderRows = gatewayAccountStore.providers().map { entity ->
+            dev.praxis.feature.gateway.GatewayProviderRowUi(
+                id = entity.id,
+                name = entity.name,
+                baseUrl = entity.baseUrl,
+                modelCount = entity.modelsJson
+                    .split("\n")
+                    .count { line -> line.trim().isNotEmpty() },
+            )
+        }
+    }
+
     // 日志页的「请求记录」视图（文档 §5.8）：按需加载，不跟着每轮刷新。
     //
     // 放在 gatewayUsageStore 声明**之后** —— 这个文件里已经栽过两次
@@ -834,7 +855,11 @@ fun PraxisApp(
                             // 请求记录：报表与 token 预算的数据源（文档 6.1）。
                             recordUsage = { draft -> gatewayUsageStore.record(draft) },
                             // 内置家地址表（只有 anthropic 与 openai 两家，见 BuiltinProviders 的说明）。
-                            providerBaseUrl = { id -> dev.praxis.data.gateway.BuiltinProviders.baseUrl(id) },
+                            // 地址解析：内置家优先（它们有确定的官方地址），其次用户建的自定义家。
+                            providerBaseUrl = { id ->
+                                dev.praxis.data.gateway.BuiltinProviders.baseUrl(id)
+                                    ?: gatewayProviderRows.firstOrNull { it.id == id }?.baseUrl
+                            },
                             // 预算判定要的「窗口内各账号用量」：每次请求前查一次。
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                             state = gatewayRouteState,
@@ -1043,7 +1068,11 @@ fun PraxisApp(
                             // 两处都要接，否则只有一半请求进报表。
                             recordUsage = { draft -> gatewayUsageStore.record(draft) },
                             // 内置家地址表（只有 anthropic 与 openai 两家，见 BuiltinProviders 的说明）。
-                            providerBaseUrl = { id -> dev.praxis.data.gateway.BuiltinProviders.baseUrl(id) },
+                            // 地址解析：内置家优先（它们有确定的官方地址），其次用户建的自定义家。
+                            providerBaseUrl = { id ->
+                                dev.praxis.data.gateway.BuiltinProviders.baseUrl(id)
+                                    ?: gatewayProviderRows.firstOrNull { it.id == id }?.baseUrl
+                            },
                             // 预算判定要的「窗口内各账号用量」：每次请求前查一次。
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                         ),
@@ -1440,6 +1469,28 @@ fun PraxisApp(
                 gatewayReportWindows = gatewayReportWindows,
                 gatewayReportTopModels = gatewayReportTopModels,
                 gatewayRequestRecords = gatewayRequestRecords,
+                gatewayProviderRows = gatewayProviderRows,
+                gatewayProviderAddError = gatewayProviderAddError,
+                onAddGatewayProvider = { draft ->
+                    coroutineScope.launch {
+                        gatewayAccountStore.addProvider(draft)
+                            .onSuccess {
+                                gatewayProviderAddError = null
+                                gatewayProviderTick += 1
+                            }
+                            .onFailure { error ->
+                                // 校验在 core 里已经做过一遍，这里是**第二道**：
+                                // 存储层可能返回它自己的拒绝理由（比如重名）。
+                                gatewayProviderAddError = error.message ?: "添加失败"
+                            }
+                    }
+                },
+                onRemoveGatewayProvider = { id ->
+                    coroutineScope.launch {
+                        gatewayAccountStore.removeProvider(id)
+                        gatewayProviderTick += 1
+                    }
+                },
                 onLoadGatewayRequestRecords = { gatewayRequestRecordsLoad += 1 },
                 onRefreshGatewayReport = { gatewayReportRefresh += 1 },
                 gatewayRequestRetentionDays = gatewayRetentionDays,

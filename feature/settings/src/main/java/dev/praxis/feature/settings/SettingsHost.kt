@@ -120,6 +120,11 @@ fun SettingsHost(
     gatewayReportTopModels: List<dev.praxis.core.gateway.GatewayUsageBucket> = emptyList(),
     /** 日志页「请求记录」视图的数据（文档 §5.8）。 */
     gatewayRequestRecords: List<dev.praxis.core.gateway.GatewayRequestRecord> = emptyList(),
+    /** 自定义提供商（文档 §5.3）。 */
+    gatewayProviderRows: List<dev.praxis.feature.gateway.GatewayProviderRowUi> = emptyList(),
+    onAddGatewayProvider: (dev.praxis.core.gateway.GatewayProviderDraft) -> Unit = {},
+    onRemoveGatewayProvider: (String) -> Unit = {},
+    gatewayProviderAddError: String? = null,
     onLoadGatewayRequestRecords: () -> Unit = {},
     onRefreshGatewayReport: () -> Unit = {},
     /** 请求记录保留天数（文档 §5.7）。 */
@@ -332,6 +337,10 @@ fun SettingsHost(
             gatewayReportWindows = gatewayReportWindows,
             gatewayReportTopModels = gatewayReportTopModels,
             gatewayRequestRecords = gatewayRequestRecords,
+            gatewayProviderRows = gatewayProviderRows,
+            onAddGatewayProvider = onAddGatewayProvider,
+            onRemoveGatewayProvider = onRemoveGatewayProvider,
+            gatewayProviderAddError = gatewayProviderAddError,
             onLoadGatewayRequestRecords = onLoadGatewayRequestRecords,
             onRefreshGatewayReport = onRefreshGatewayReport,
             gatewayRequestRetentionDays = gatewayRequestRetentionDays,
@@ -500,6 +509,11 @@ private fun SettingsPageBody(
     gatewayReportTopModels: List<dev.praxis.core.gateway.GatewayUsageBucket> = emptyList(),
     /** 日志页「请求记录」视图的数据（文档 §5.8）。 */
     gatewayRequestRecords: List<dev.praxis.core.gateway.GatewayRequestRecord> = emptyList(),
+    /** 自定义提供商（文档 §5.3）。 */
+    gatewayProviderRows: List<dev.praxis.feature.gateway.GatewayProviderRowUi> = emptyList(),
+    onAddGatewayProvider: (dev.praxis.core.gateway.GatewayProviderDraft) -> Unit = {},
+    onRemoveGatewayProvider: (String) -> Unit = {},
+    gatewayProviderAddError: String? = null,
     onLoadGatewayRequestRecords: () -> Unit = {},
     onRefreshGatewayReport: () -> Unit = {},
     /** 请求记录保留天数（文档 §5.7）。 */
@@ -791,6 +805,13 @@ private fun SettingsPageBody(
         )
         // 账号页：账号池的存储层已经就绪，但还没有「添加账号」的界面（P1 剩余部分），
         // 所以这里传的是真实状态（空列表），不是占位数据。
+        PraxisRoute.SettingsGatewayProviders -> dev.praxis.feature.gateway.GatewayProvidersScreen(
+            providers = gatewayProviderRows,
+            onAdd = onAddGatewayProvider,
+            onRemove = onRemoveGatewayProvider,
+            addError = gatewayProviderAddError,
+            modifier = modifier,
+        )
         PraxisRoute.SettingsGatewayReport -> dev.praxis.feature.gateway.GatewayReportScreen(
             windows = gatewayReportWindows,
             topModels = gatewayReportTopModels,

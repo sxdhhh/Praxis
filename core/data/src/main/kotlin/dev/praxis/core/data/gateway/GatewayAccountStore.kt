@@ -3,6 +3,8 @@ package dev.praxis.core.data.gateway
 import dev.praxis.core.gateway.AccountView
 import dev.praxis.core.gateway.NativeModel
 import dev.praxis.core.gateway.GatewayAccountRow
+import dev.praxis.core.gateway.GatewayProviderDraft
+import dev.praxis.core.gateway.GatewayProviderDraftRules
 import dev.praxis.core.gateway.GatewayAccountDraft
 import dev.praxis.core.gateway.GatewayAccountDraftRules
 import dev.praxis.core.gateway.GatewayCredential
@@ -191,6 +193,46 @@ class GatewayAccountStore(
      */
     /** 自定义提供商（含各家声明的模型清单）。 */
     suspend fun providers(): List<GatewayProviderEntity> = providerDao.all()
+
+    /**
+     * 新建或覆盖一家自定义提供商（文档 §5.3）。
+     *
+     * ## 为什么是 upsert 而不是 insert
+     *
+     * 同一个 id 再填一次就是「改地址 / 改模型清单」—— 那是常见操作。
+     * 报「已存在」再让用户先删一次，没有任何好处。
+     *
+     * ## 但 mappingsJson 沿用旧值
+     *
+     * 映射是**导入**带进来的（`GatewayCustomProvider.toEntity` 不伪造它），
+     * 这个页面没有编辑映射的入口 —— 覆盖成空等于把导入的信息悄悄删了。
+     */
+    suspend fun addProvider(draft: GatewayProviderDraft): Result<GatewayProviderEntity> {
+        val error = GatewayProviderDraftRules.validate(draft)
+        if (error != null) {
+            return Result.failure(IllegalArgumentException(error.userMessage()))
+        }
+        val normalized = GatewayProviderDraftRules.normalize(draft)
+        val previous = providerDao.byId(normalized.id)
+        val entity = GatewayProviderEntity(
+            id = normalized.id,
+            name = normalized.name,
+            baseUrl = normalized.baseUrl,
+            modelsJson = normalized.models.joinToString("\n"),
+            mappingsJson = previous?.mappingsJson.orEmpty(),
+            // createdAt 是「什么时候加的」，改地址不该把它刷新。
+            createdAt = previous?.createdAt ?: clock(),
+        )
+        providerDao.upsert(entity)
+        return Result.success(entity)
+    }
+
+    /** 删掉一家自定义提供商；返回是否真的删了（不存在时 false）。 */
+    suspend fun removeProvider(id: String): Boolean {
+        if (providerDao.byId(id) == null) return false
+        providerDao.delete(id)
+        return true
+    }
 
     /**
      * 各家声明的模型清单 -> 候选链的「原生承载」（文档 7.1）。
