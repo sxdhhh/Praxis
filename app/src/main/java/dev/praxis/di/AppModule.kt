@@ -435,6 +435,10 @@ val appModule = module {
                 readDownloadSettings()?.getOrNull()?.baseUrl
                     ?: dev.praxis.core.imagegen.ImageDownloadSettings.DEFAULT_BASE_URL
             },
+            concurrency = {
+                readDownloadSettings()?.getOrNull()?.concurrency
+                    ?: dev.praxis.core.imagegen.ImageDownloadSettings.DEFAULT_CONCURRENCY
+            },
         )
     }
 

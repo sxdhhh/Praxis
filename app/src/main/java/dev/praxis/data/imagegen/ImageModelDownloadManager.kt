@@ -48,6 +48,10 @@ class ImageModelDownloadManager(
     private val baseUrl: suspend () -> String = {
         dev.praxis.core.imagegen.ImageDownloadSettings.DEFAULT_BASE_URL
     },
+    /** 同时下几个文件（设置里的「并发下载数」）。 */
+    private val concurrency: suspend () -> Int = {
+        dev.praxis.core.imagegen.ImageDownloadSettings.DEFAULT_CONCURRENCY
+    },
 ) {
 
     private val _state = MutableStateFlow<ImageDownloadState>(ImageDownloadState.Idle)
@@ -82,10 +86,12 @@ class ImageModelDownloadManager(
             }
             val plan = ImageDownloadPlanner.plan(modelsRoot, model)
             val source = baseUrl()
+            val parallel = concurrency()
             val result = withContext(io) {
                 downloader.download(
                     plan = plan,
                     baseUrl = source,
+                    concurrency = parallel,
                     onProgress = { progress ->
                         _state.value = ImageDownloadState.Running(model.id, progress)
                     },

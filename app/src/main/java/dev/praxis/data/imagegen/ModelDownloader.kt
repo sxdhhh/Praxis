@@ -2,6 +2,7 @@ package dev.praxis.data.imagegen
 
 import dev.praxis.core.imagegen.DownloadCleanup
 import dev.praxis.core.imagegen.DownloadProgress
+import dev.praxis.core.imagegen.ParallelProgress
 import dev.praxis.core.imagegen.ImageDownloadPlan
 import dev.praxis.core.imagegen.SpaceCheck
 import dev.praxis.core.imagegen.SpaceDecision
@@ -95,6 +96,13 @@ class ModelDownloader(
          * 绑的是最后一个参数，所以进度回调必须留在末尾。
          */
         shouldStop: () -> Boolean = { false },
+        /**
+         * 同时下几个文件（文档 §7.2 的「并发下载数」）。默认 1 = 逐个下。
+         *
+         * 排在 [shouldStop] 之后、[onProgress] 之前：尾随 lambda 绑最后一个参数，
+         * 进度回调必须留在末尾。
+         */
+        concurrency: Int = 1,
         onProgress: (DownloadProgress) -> Unit,
     ): DownloadResult {
         // ① 目录 + 预检。先清残留再判空间：否则上次失败的 .part 会让预检自相矛盾地报「不够」。
@@ -110,43 +118,42 @@ class ModelDownloader(
         }
         val spaceWasUnknown = plan.requiredBytes == null
 
-        // ② 逐个文件下载。
+        // ② 下载文件（并发度由调用方给，默认 1 = 逐个下）。
+        //
+        // 为什么用 runBlocking + 信号量，而不是把 download 改成 suspend：
+        // 这里的读是**阻塞 IO**（见 shouldStop 的说明），调用方本来就在 Dispatchers.IO 上，
+        // 改成 suspend 只会让「阻塞」这件事换个地方发生，却要动所有调用点与单测。
         val total = plan.requiredBytes
-        var written = 0L
+        val done = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        val abort = java.util.concurrent.atomic.AtomicBoolean(false)
+        val gate = kotlinx.coroutines.sync.Semaphore(concurrency.coerceAtLeast(1))
         try {
-            for (target in plan.targets) {
-                val part = File(plan.targetDir, target.localName + ImageDownloadPlan.PART_SUFFIX)
-                if (part.exists() && !part.delete()) {
-                    return DownloadResult.Failed("无法删除残留文件：" + part.name)
-                }
-                openStream(baseUrl + target.remotePath).use { input ->
-                    part.outputStream().use { output ->
-                        val buffer = ByteArray(BUFFER_SIZE)
-                        while (true) {
-                            if (shouldStop()) {
-                                cleanStale(plan)
-                                return DownloadResult.Cancelled
-                            }
-                            val read = input.read(buffer)
-                            if (read <= 0) break
-                            output.write(buffer, 0, read)
-                            written += read
-                            onProgress(
-                                DownloadProgress(
-                                    bytesDownloaded = written,
+            val terminal = kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.coroutineScope {
+                    plan.targets.map { target ->
+                        kotlinx.coroutines.async(kotlinx.coroutines.Dispatchers.IO) {
+                            gate.acquire()
+                            try {
+                                downloadOne(
+                                    target = target,
+                                    plan = plan,
+                                    baseUrl = baseUrl,
+                                    shouldStop = shouldStop,
+                                    abort = abort,
+                                    done = done,
                                     totalBytes = total,
-                                    fraction = total?.takeIf { it > 0L }?.let { (written.toDouble() / it).toFloat().coerceIn(0f, 1f) },
-                                    fileName = target.localName,
-                                ),
-                            )
+                                    onProgress = onProgress,
+                                )
+                            } finally {
+                                gate.release()
+                            }
                         }
-                    }
+                    }.awaitAll().firstOrNull { it != null }
                 }
-                // 去掉 .part 才算这个文件下好了（多文件包缺一个都不算装完）。
-                val finalFile = File(plan.targetDir, target.localName)
-                if (!part.renameTo(finalFile)) {
-                    return DownloadResult.Failed("无法重命名：" + part.name)
-                }
+            }
+            if (terminal != null) {
+                cleanStale(plan)
+                return terminal
             }
 
             // ③ 单 zip：解压 + 搬家。
@@ -168,6 +175,60 @@ class ModelDownloader(
             cleanStale(plan)
             return DownloadResult.Failed(error.message ?: "解压被拒绝（zip 内含越界路径）")
         }
+    }
+
+    /**
+     * 下载单个文件到 `.part`，成功后改名（去掉 `.part` 才算这个文件下好了）。
+     *
+     * @return null = 这个文件成功；非 null = 终止结果（失败或取消）。
+     */
+    private fun downloadOne(
+        target: DownloadTarget,
+        plan: ImageDownloadPlan,
+        baseUrl: String,
+        shouldStop: () -> Boolean,
+        abort: java.util.concurrent.atomic.AtomicBoolean,
+        done: java.util.concurrent.ConcurrentHashMap<String, Long>,
+        totalBytes: Long?,
+        onProgress: (DownloadProgress) -> Unit,
+    ): DownloadResult? {
+        val part = File(plan.targetDir, target.localName + ImageDownloadPlan.PART_SUFFIX)
+        if (part.exists() && !part.delete()) {
+            abort.set(true)
+            return DownloadResult.Failed("无法删除残留文件：" + part.name)
+        }
+        try {
+            openStream(baseUrl + target.remotePath).use { input ->
+                part.outputStream().use { output ->
+                    val buffer = ByteArray(BUFFER_SIZE)
+                    var fileWritten = 0L
+                    while (true) {
+                        // 两个都要看：用户取消（shouldStop）与别的文件已经失败（abort）。
+                        if (shouldStop() || abort.get()) return DownloadResult.Cancelled
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                        fileWritten += read
+                        done[target.localName] = fileWritten
+                        // 进度是**所有文件的和**：各报各的会让界面来回跳。
+                        onProgress(ParallelProgress.aggregate(done, totalBytes))
+                    }
+                }
+            }
+        } catch (error: IOException) {
+            // 一个文件失败就中止其余：半装好的模型对用户没用，
+            // 让其他连接继续跑只是白耗流量。
+            abort.set(true)
+            return DownloadResult.Failed(
+                error.message ?: ("下载失败：" + target.localName),
+            )
+        }
+        val finalFile = File(plan.targetDir, target.localName)
+        if (!part.renameTo(finalFile)) {
+            abort.set(true)
+            return DownloadResult.Failed("无法重命名：" + part.name)
+        }
+        return null
     }
 
     /**

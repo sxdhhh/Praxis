@@ -463,7 +463,7 @@ private fun reasonLine(result: EngineAvailability.Unavailable): String {
 /** 还没实现的分区。和 `GatewayRoute` 同一个做法：写在页面上。 */
 private val PLAN_LINES = listOf(
     "模型库：内置清单 + 下载（单 zip / 多文件）+ 导入",
-    "模型提供方 · 并发数：下载器现在是逐文件顺序下的，改并发要先解决多 .part 同时写与进度合并",
+    "模型提供方 · 并发数：**已可用**（1~4，默认 2；进度按所有文件求和，不会来回跳）",
     "模型提供方 · 代理：要等 Praxis 先有全局代理设置",
     "性能（预热 / 后端选择）：形态 A 下不适用 —— Praxis 不启动引擎，只是连一个已经在跑的引擎，" +
         "启动参数由那个外部 App 决定；等形态 B/C 落地才有东西可调",
@@ -486,6 +486,7 @@ private fun DownloadSourceDialog(
     onConfirm: (dev.praxis.core.imagegen.ImageDownloadSettings) -> Unit,
 ) {
     var baseUrl by remember { mutableStateOf(settings.baseUrl) }
+    var concurrency by remember { mutableStateOf(settings.concurrency.toString()) }
     var error by remember { mutableStateOf<String?>(null) }
 
     MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
@@ -506,6 +507,15 @@ private fun DownloadSourceDialog(
                     useLabelAsPlaceholder = true,
                     singleLine = true,
                 )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = concurrency,
+                    onValueChange = { concurrency = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "同时下载几个文件（1~4）",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
                 error?.let { text ->
                     Spacer(Modifier.height(8.dp))
                     Text(
@@ -517,19 +527,28 @@ private fun DownloadSourceDialog(
                 Spacer(Modifier.height(12.dp))
                 MiuixNavigationItemWidget(
                     title = "保存",
-                    description = "地址要以 http:// 或 https:// 开头",
+                    description = "地址要以 http:// 或 https:// 开头；并发数超出 1~4 会夹到边界",
                     onClick = {
                         if (!dev.praxis.core.imagegen.ImageDownloadSettingsRules
                                 .isValidBaseUrl(baseUrl)
                         ) {
                             error = "地址要以 http:// 或 https:// 开头"
                         } else {
-                            onConfirm(
-                                settings.copy(
-                                    baseUrl = dev.praxis.core.imagegen.ImageDownloadSettingsRules
-                                        .normalizeBaseUrl(baseUrl),
-                                ),
-                            )
+                            val parsed = concurrency.trim().toIntOrNull()
+                            if (parsed == null) {
+                                // 并发数不是用户精确输入（是 1~4 的选择），但「填了字」要如实拦下。
+                                error = "并发数要填数字（1~4）"
+                            } else {
+                                onConfirm(
+                                    settings.copy(
+                                        baseUrl = dev.praxis.core.imagegen.ImageDownloadSettingsRules
+                                            .normalizeBaseUrl(baseUrl),
+                                        concurrency = dev.praxis.core.imagegen
+                                            .ImageDownloadSettingsRules
+                                            .normalizeConcurrency(parsed),
+                                    ),
+                                )
+                            }
                         }
                     },
                 )
