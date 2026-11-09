@@ -20,6 +20,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.praxis.ui.widgets.MiuixNavigationItemWidget
+import dev.praxis.feature.settings.ImageGenTargetDialog
 import dev.praxis.core.data.settings.SettingsRepository
 import dev.praxis.core.model.settings.ApiProvider
 import dev.praxis.core.model.settings.FunctionModelOverride
@@ -77,6 +79,18 @@ fun FunctionModelRoute(
      * 与 `ModelRoute` 同一个口径（能力没装配就不画点了没反应的按钮）。
      */
     modelCatalogFetcher: dev.praxis.core.ai.ModelCatalogFetcher? = null,
+    /**
+     * 「生图」那一行要用的三样（文档 §7.1）。
+     *
+     * ## 为什么生图不走 [modelCatalogFetcher]
+     *
+     * 生图的目标是**独立的 `imagegen_target`**：本地模型用「模型 id」表达，
+     * 而 [FunctionModelOverride] 是「模型 + 服务商」的远端语义，塞不进本地 id。
+     * 所以这一行只是入口，点进去用专用选择器，选完写回 `imagegen_target`。
+     */
+    imageGenTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
+    imageModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
+    onImageGenTargetChange: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val global by repository.modelSettings.collectAsState(initial = ModelSettings())
@@ -85,6 +99,8 @@ fun FunctionModelRoute(
 
     // 同时只展开一个：一次只改一处，避免多个输入框同时可编辑造成「改了哪个」的困惑。
     var expanded by remember { mutableStateOf<FunctionSlot?>(null) }
+    // 生图目标选择器（文档 §7.1）。
+    var imageTargetDialogVisible by remember { mutableStateOf(false) }
 
     // ── 模型选择器（功能位用）──────────────────────────────────────
     //
@@ -166,12 +182,10 @@ fun FunctionModelRoute(
         item {
             SmallTitle("功能模型")
             Card(modifier = Modifier.padding(horizontal = 12.dp)) {
-                // 生图（IMAGE）这一行**暂时不在这里渲染**：
-                //
+                // 生图（IMAGE）不在下面这批里渲染，它有自己的行（见本卡片末尾）：
                 // 它的目标是独立的 `imagegen_target`（本地模型 id 塞不进
-                // FunctionModelOverride 的「模型 + 服务商」语义），而专用选择器还没做。
-                // 现在若照常列出，用户点进去会把模型写到一个没人读的地方 ——
-                // 那正是 FunctionSlot 注释里说的「假入口」。等选择器做完再一起放出来。
+                // FunctionModelOverride 的「模型 + 服务商」语义），
+                // 所以走专用选择器而不是 FunctionSlotRow 的那套输入框。
                 val visibleSlots = FunctionSlot.entries.filter { it != FunctionSlot.IMAGE }
                 visibleSlots.forEachIndexed { index, slot ->
                     FunctionSlotRow(
@@ -217,13 +231,22 @@ fun FunctionModelRoute(
                             }
                         },
                     )
-                    if (index != visibleSlots.lastIndex) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            color = MiuixTheme.colorScheme.dividerLine,
-                        )
-                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MiuixTheme.colorScheme.dividerLine,
+                    )
                 }
+
+                // ── 生图（IMAGE）──
+                //
+                // 文档 §7.1：这一行只是**入口**，点进去选完写回独立的
+                // `imagegen_target`，**不写** FunctionModelOverride ——
+                // 免得给「模型 → 服务商」的结构硬塞第三种语义。
+                MiuixNavigationItemWidget(
+                    title = FunctionSlot.IMAGE.title,
+                    description = imageGenTargetText(imageGenTarget),
+                    onClick = { imageTargetDialogVisible = true },
+                )
             }
         }
 
@@ -280,7 +303,32 @@ fun FunctionModelRoute(
         visible = pickerSlot != null,
     )
 
+    // 生图目标选择器：本地模型 ∪ 自定义远端（复用生图设置页同一个选择器）。
+    ImageGenTargetDialog(
+        visible = imageTargetDialogVisible,
+        onDismiss = { imageTargetDialogVisible = false },
+        localModels = imageModels,
+        current = imageGenTarget,
+        onSelect = { target ->
+            onImageGenTargetChange(target)
+            imageTargetDialogVisible = false
+        },
+    )
 }
+
+/**
+ * 「生图」那一行的副标题：当前走的是哪条路。
+ *
+ * 三种状态都要说清（未选 / 本地 / 远端）：这一行是入口，副标题是唯一能让用户
+ * 知道自己现在用的是什么的地方 —— 写「已配置」而不写具体哪个模型，等于什么都没说。
+ */
+private fun imageGenTargetText(target: dev.praxis.core.imagegen.ImageGenTarget?): String =
+    when (target) {
+        null -> "未选择 —— 点这里选本地模型或自定义远端"
+        is dev.praxis.core.imagegen.ImageGenTarget.Local -> "本地模型 · " + target.modelId
+        is dev.praxis.core.imagegen.ImageGenTarget.Remote ->
+            "服务商 · " + target.provider + " / " + target.model
+    }
 
 /** 一个功能位：折叠头一行，展开后是编辑区。 */
 @Composable

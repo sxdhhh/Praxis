@@ -562,6 +562,11 @@ private fun SettingsPageBody(
             repository = repository,
             modifier = modifier,
             modelCatalogFetcher = modelCatalogFetcher,
+            // 「生图」那一行（文档 §7.1）：目标与本地候选都走独立的 imagegen 存储，
+            // 与上面那些功能位的 FunctionModelOverride 不是一套。
+            imageGenTarget = imageGenCurrentTarget,
+            imageModels = imageGenInstalledModels,
+            onImageGenTargetChange = onSelectImageGenTarget,
         )
         PraxisRoute.SettingsSystemPrompt -> SystemPromptRoute(repository, modifier)
 
