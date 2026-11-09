@@ -1,10 +1,12 @@
 package dev.praxis.tool
 
+import dev.praxis.core.imagegen.ImageGenConfigChange
 import dev.praxis.core.imagegen.ImageGenConfigDiff
 import dev.praxis.core.imagegen.ImageGenConfigRules
 import dev.praxis.core.imagegen.ImageGenDefaults
 import dev.praxis.core.imagegen.ImageGenDefaultsRules
 import dev.praxis.core.imagegen.ImageGenTarget
+import dev.praxis.core.imagegen.ImageOutputSettings
 import dev.praxis.core.tool.PermissionTier
 import dev.praxis.core.tool.Tool
 import dev.praxis.core.tool.ToolContext
@@ -44,6 +46,9 @@ class SetImageGenConfigTool(
     private val writeTarget: suspend (ImageGenTarget) -> Unit,
     /** 已安装模型的 id：切到本机没有的模型要明确拒绝。 */
     private val installedModelIds: suspend () -> Set<String>,
+    /** 输出设置（自动存相册）。文档 §7.1 的输出分区。 */
+    private val readOutput: suspend () -> ImageOutputSettings = { ImageOutputSettings() },
+    private val writeOutput: suspend (ImageOutputSettings) -> Unit = {},
 ) : Tool {
 
     override val spec: ToolSpec = ToolSpec(
@@ -119,11 +124,37 @@ class SetImageGenConfigTool(
             targetAfter = ImageGenTarget.Local(modelId)
         }
 
-        // ④ 写。顺序：先默认参数，再目标 —— 中途失败时不会出现「目标换了但参数没换」。
+        // ④ 输出开关：autoSave 已实现，直接写。
+        val outputBefore = readOutput()
+        var outputAfter = outputBefore
+        val outputKeys = keys.filter { ImageGenConfigRules.isSupportedOutputKey(it) }
+        if (outputKeys.isNotEmpty()) {
+            val raw = args[outputKeys.first()]?.jsonPrimitive?.contentOrNull
+            val enabled = raw?.toBooleanStrictOrNull()
+                ?: return failure(
+                code = "invalid_config",
+                message = outputKeys.first() + " 要是 true 或 false",
+            )
+            outputAfter = outputAfter.copy(autoSave = enabled)
+        }
+
+        // ⑤ 写。顺序：先默认参数，再目标，最后输出开关 —— 中途失败时不会出现半套配置。
         if (after != before) writeDefaults(after)
+        if (outputAfter != outputBefore) writeOutput(outputAfter)
         if (targetAfter != targetBefore && targetAfter != null) writeTarget(targetAfter)
 
-        return ToolResult(content = changedJson(before, after, targetBefore, targetAfter, notImplemented, unknown))
+        return ToolResult(
+            content = changedJson(
+                before = before,
+                after = after,
+                targetBefore = targetBefore,
+                targetAfter = targetAfter,
+                outputBefore = outputBefore,
+                outputAfter = outputAfter,
+                notImplemented = notImplemented,
+                unknown = unknown,
+            ),
+        )
     }
 
     private fun changedJson(
@@ -131,11 +162,20 @@ class SetImageGenConfigTool(
         after: ImageGenDefaults,
         targetBefore: ImageGenTarget?,
         targetAfter: ImageGenTarget?,
+        outputBefore: ImageOutputSettings,
+        outputAfter: ImageOutputSettings,
         notImplemented: List<String>,
         unknown: List<String>,
     ): String {
         val changes = ImageGenConfigDiff.defaults(before, after).toMutableList()
         ImageGenConfigDiff.target(targetBefore, targetAfter)?.let { changes += it }
+        if (outputBefore.autoSave != outputAfter.autoSave) {
+            changes += ImageGenConfigChange(
+                field = "autoSave",
+                from = outputBefore.autoSave.toString(),
+                to = outputAfter.autoSave.toString(),
+            )
+        }
         return buildJsonObject {
             put("ok", true)
             put("changed", buildJsonArray {

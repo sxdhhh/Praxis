@@ -651,6 +651,16 @@ fun PraxisApp(
     }
 
 
+    // 生图输出设置（自动存相册）。工具落盘后会读它决定要不要写相册。
+    val imageOutputSettingsJson by settingsRepository.imageOutputSettingsJson
+        .collectAsState(initial = null)
+    val imageGenOutput = remember(imageOutputSettingsJson) {
+        dev.praxis.core.imagegen.ImageOutputSettingsCodec
+            .decode(imageOutputSettingsJson)
+            ?.getOrNull()
+            ?: dev.praxis.core.imagegen.ImageOutputSettings()
+    }
+
     val imageGenEngineLocator: dev.praxis.data.imagegen.EngineLocator =
         org.koin.compose.koinInject()
     // 与工具共用同一条进度总线（工具写、聊天层读）。
@@ -1502,6 +1512,14 @@ fun PraxisApp(
                 imageGenModelsRootPath = imageGenModelsRoot.absolutePath,
                 imageDownloadSettings = imageDownloadSettings,
                 imageGenDefaults = imageGenDefaults,
+                imageGenOutput = imageGenOutput,
+                onImageGenOutputChange = { updated ->
+                    coroutineScope.launch {
+                        settingsRepository.setImageOutputSettingsJson(
+                            dev.praxis.core.imagegen.ImageOutputSettingsCodec.encode(updated),
+                        )
+                    }
+                },
                 onImageGenDefaultsChange = { updated ->
                     coroutineScope.launch {
                         settingsRepository.setImageGenDefaultsJson(

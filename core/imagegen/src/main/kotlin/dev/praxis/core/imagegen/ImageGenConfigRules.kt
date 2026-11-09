@@ -31,7 +31,15 @@ object ImageGenConfigRules {
      * 收到这些键时**不报错、也不假装改了** —— 如实回一句「这项还没做」，
      * 让模型能对用户说清楚，而不是含糊地说「都改好了」。
      */
-    private val NOT_IMPLEMENTED = setOf("autosave", "auto_save", "showpreview", "show_preview")
+    private val NOT_IMPLEMENTED = setOf("showpreview", "show_preview")
+
+    /**
+     * 本工具能改的输出开关（文档 §7.1 的输出分区）。
+     *
+     * `autoSave` 已实现（写 MediaStore）；`showPreview` 还没有 ——
+     * 两者的区别对用户是有意义的：一个能用，一个不能。
+     */
+    private val SUPPORTED_OUTPUT = setOf("autosave", "auto_save")
 
     /** 归一化键名以便比对（大小写不敏感）。 */
     private fun normalize(key: String): String = key.trim().lowercase()
@@ -47,7 +55,10 @@ object ImageGenConfigRules {
     /** 这个键是不是本工具认识的字段（不认识就忽略并说出来）。 */
     fun isKnownKey(key: String): Boolean = normalize(key) in setOf(
         "target", "width", "height", "steps", "cfg", "scheduler", "negative",
-    ) + NOT_IMPLEMENTED + NOT_ALLOWED
+    ) + SUPPORTED_OUTPUT + NOT_IMPLEMENTED + NOT_ALLOWED
+
+    /** 这个键是不是「能改的输出开关」（autoSave）。 */
+    fun isSupportedOutputKey(key: String): Boolean = normalize(key) in SUPPORTED_OUTPUT
 }
 
 /**

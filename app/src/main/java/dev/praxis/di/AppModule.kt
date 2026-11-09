@@ -514,6 +514,37 @@ val appModule = module {
                                     "gen_" + System.currentTimeMillis() + ".jpg",
                                 )
                                 file.writeBytes(bytes)
+                                // 自动存相册（文档 §7.1 的输出分区）。
+                                //
+                                // 失败**不影响出图**：图已经落盘、也已经进了对话，只是相册里没有。
+                                // 这条路径没有回调可用（进度总线只有 phase/fraction，没有自由文本），
+                                // 所以结果写进 App 日志 —— 设置页那一栏的说明里写明了这一点。
+                                val outputSettings =
+                                    dev.praxis.core.imagegen.ImageOutputSettingsCodec
+                                        .decode(settings.imageOutputSettingsJson.first())
+                                        ?.getOrNull()
+                                        ?: dev.praxis.core.imagegen.ImageOutputSettings()
+                                if (outputSettings.autoSave) {
+                                    when (
+                                        val saved = dev.praxis.data.imagegen.GalleryWriter.save(
+                                            context = androidContext(),
+                                            bytes = bytes,
+                                            displayName = file.name,
+                                        )
+                                    ) {
+                                        is dev.praxis.core.imagegen.GallerySaveResult.Saved -> Unit
+                                        is dev.praxis.core.imagegen.GallerySaveResult.Unsupported ->
+                                            dev.praxis.core.data.log.PraxisLogger.i(
+                                                "imagegen",
+                                                "自动存相册在 Android 9 及以下不支持（没有接存储权限流程）",
+                                            )
+                                        is dev.praxis.core.imagegen.GallerySaveResult.Failed ->
+                                            dev.praxis.core.data.log.PraxisLogger.i(
+                                                "imagegen",
+                                                "自动存相册失败：" + saved.detail,
+                                            )
+                                    }
+                                }
                                 file.absolutePath
                             }
                         },
@@ -563,6 +594,17 @@ val appModule = module {
                             )
                         },
                         installedModelIds = installedModelIds,
+                        readOutput = {
+                            dev.praxis.core.imagegen.ImageOutputSettingsCodec
+                                .decode(settings.imageOutputSettingsJson.first())
+                                ?.getOrNull()
+                                ?: dev.praxis.core.imagegen.ImageOutputSettings()
+                        },
+                        writeOutput = { updated ->
+                            settings.setImageOutputSettingsJson(
+                                dev.praxis.core.imagegen.ImageOutputSettingsCodec.encode(updated),
+                            )
+                        },
                     ),
                 )
                 register(

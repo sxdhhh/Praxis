@@ -695,6 +695,18 @@ class SettingsRepository(
     suspend fun setImageGenDefaultsJson(text: String) = put(KEY_IMAGEGEN_DEFAULTS, text)
 
     /**
+     * 生图输出设置（文档 §7.1 的「输出」）：自动存相册。
+     *
+     * `showPreview`（每步预览）也在同一个对象里，但它**尚未实现** ——
+     * 存着是为了让 `set_image_gen_config` 能如实回一句「这项还没做」，
+     * 而不是假装改好了。
+     */
+    val imageOutputSettingsJson: Flow<String?> =
+        dataStore.data.map { it[KEY_IMAGEGEN_OUTPUT] }
+
+    suspend fun setImageOutputSettingsJson(text: String) = put(KEY_IMAGEGEN_OUTPUT, text)
+
+    /**
      * 用户改写过的**内置人格**（覆盖 Praxis 出厂那段）。空串 = 用出厂人格。
      *
      * ## 为什么要单独一个键，而不是并进 [setSystemPrompt]
@@ -1401,6 +1413,9 @@ private val KEY_IMAGEGEN_DOWNLOAD = stringPreferencesKey("imagegen_download")
 
 /** 生图默认参数（画布/采样），见 [SettingsRepository.imageGenDefaultsJson]。 */
 private val KEY_IMAGEGEN_DEFAULTS = stringPreferencesKey("imagegen_defaults")
+
+/** 生图输出设置（自动存相册），见 [SettingsRepository.imageOutputSettingsJson]。 */
+private val KEY_IMAGEGEN_OUTPUT = stringPreferencesKey("imagegen_output")
 
 /**
  * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。

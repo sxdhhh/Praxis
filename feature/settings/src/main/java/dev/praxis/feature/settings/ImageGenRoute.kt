@@ -1,5 +1,6 @@
 package dev.praxis.feature.settings
 
+import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.CloudDownload
 import dev.praxis.ui.widgets.MiuixSwitchWidget
 import dev.praxis.ui.widgets.MiuixAnimatedDialog
@@ -82,6 +83,10 @@ fun ImageGenRoute(
     imageDefaults: dev.praxis.core.imagegen.ImageGenDefaults =
         dev.praxis.core.imagegen.ImageGenDefaults(),
     onImageDefaultsChange: (dev.praxis.core.imagegen.ImageGenDefaults) -> Unit = {},
+    /** 输出设置（文档 §7.1）：自动存相册。 */
+    imageOutput: dev.praxis.core.imagegen.ImageOutputSettings =
+        dev.praxis.core.imagegen.ImageOutputSettings(),
+    onImageOutputChange: (dev.praxis.core.imagegen.ImageOutputSettings) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // 组合局部变量只能在组合期读一次、闭包捕获；写进 onClick 的 lambda 里会在点击时越界
@@ -309,6 +314,44 @@ fun ImageGenRoute(
             }
         }
 
+        // ── 输出（§7.1）──
+        item(key = "__output_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Save,
+                title = "输出",
+                subtitle = "生成完之后要不要额外做点什么",
+            )
+        }
+        item(key = "__output_autosave__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixSwitchWidget(
+                    title = "生成后自动存相册",
+                    description = "存到相册的 Pictures/Praxis；Android 9 及以下不支持" +
+                        "（那需要存储权限，Praxis 还没接那套流程）",
+                    checked = imageOutput.autoSave,
+                    onCheckedChange = { enabled ->
+                        onImageOutputChange(imageOutput.copy(autoSave = enabled))
+                    },
+                )
+            }
+        }
+        item(key = "__output_note__") {
+            BareCard {
+                Text(
+                    text = "存相册失败不会影响出图：图已经落盘、也已经进了对话，只是相册里没有。" +
+                        "这类结果只会写进 App 日志（设置 → 日志）。「显示每步预览」还没做 ——" +
+                        "要引擎推中间帧，不是加个开关的事。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+
         // ── 下载源（§7.2）──
         item(key = "__download_title__") {
             SettingsSectionHeader(
@@ -467,7 +510,7 @@ private val PLAN_LINES = listOf(
     "模型提供方 · 代理：要等 Praxis 先有全局代理设置",
     "性能（预热 / 后端选择）：形态 A 下不适用 —— Praxis 不启动引擎，只是连一个已经在跑的引擎，" +
         "启动参数由那个外部 App 决定；等形态 B/C 落地才有东西可调",
-    "输出（自动存相册 / 每步预览）：相册写入要接 MediaStore；每步预览要引擎推帧 + 缩略图管线",
+    "输出 · 每步预览：要引擎在采样过程中推中间帧 + 一条缩略图管线（自动存相册已可用）",
     "诊断（启动耗时 / 日志尾巴）：引擎日志在引擎那边，Praxis 这边拿不到",
 )
 

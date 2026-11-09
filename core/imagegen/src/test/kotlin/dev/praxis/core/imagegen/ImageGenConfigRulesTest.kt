@@ -47,11 +47,21 @@ class ImageGenConfigRulesTest {
     // ── 还没实现的字段 ──
 
     @Test
-    fun `输出分区的两个字段被识别为未实现`() {
+    fun `只有 showPreview 还算未实现`() {
+        // autoSave 已经实现了（写 MediaStore），showPreview 还没有 ——
+        // 这两者的区别对用户是有意义的：一个能用，一个不能。
         assertEquals(
-            listOf("autoSave", "showPreview"),
+            listOf("showPreview"),
             ImageGenConfigRules.notImplementedKeys(listOf("autoSave", "steps", "showPreview")),
         )
+    }
+
+    @Test
+    fun `autoSave 是可改的输出开关`() {
+        assertTrue(ImageGenConfigRules.isSupportedOutputKey("autoSave"))
+        assertTrue(ImageGenConfigRules.isSupportedOutputKey("auto_save"))
+        assertTrue(!ImageGenConfigRules.isSupportedOutputKey("showPreview"))
+        assertTrue(!ImageGenConfigRules.isSupportedOutputKey("steps"))
     }
 
     @Test

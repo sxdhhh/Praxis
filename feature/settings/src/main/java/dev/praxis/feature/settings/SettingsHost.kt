@@ -158,6 +158,10 @@ fun SettingsHost(
     imageGenDefaults: dev.praxis.core.imagegen.ImageGenDefaults =
         dev.praxis.core.imagegen.ImageGenDefaults(),
     onImageGenDefaultsChange: (dev.praxis.core.imagegen.ImageGenDefaults) -> Unit = {},
+    /** 生图输出设置（自动存相册）。 */
+    imageGenOutput: dev.praxis.core.imagegen.ImageOutputSettings =
+        dev.praxis.core.imagegen.ImageOutputSettings(),
+    onImageGenOutputChange: (dev.praxis.core.imagegen.ImageOutputSettings) -> Unit = {},
     imageGenModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
     imageGenInstalledIds: Set<String> = emptySet(),
     imageGenDownloadState: dev.praxis.core.imagegen.ImageDownloadState =
@@ -337,6 +341,8 @@ fun SettingsHost(
             onImageDownloadSettingsChange = onImageDownloadSettingsChange,
             imageGenDefaults = imageGenDefaults,
             onImageGenDefaultsChange = onImageGenDefaultsChange,
+            imageGenOutput = imageGenOutput,
+            onImageGenOutputChange = onImageGenOutputChange,
             imageGenModels = imageGenModels,
             imageGenInstalledIds = imageGenInstalledIds,
             imageGenDownloadState = imageGenDownloadState,
@@ -511,6 +517,10 @@ private fun SettingsPageBody(
     imageGenDefaults: dev.praxis.core.imagegen.ImageGenDefaults =
         dev.praxis.core.imagegen.ImageGenDefaults(),
     onImageGenDefaultsChange: (dev.praxis.core.imagegen.ImageGenDefaults) -> Unit = {},
+    /** 生图输出设置（自动存相册）。 */
+    imageGenOutput: dev.praxis.core.imagegen.ImageOutputSettings =
+        dev.praxis.core.imagegen.ImageOutputSettings(),
+    onImageGenOutputChange: (dev.praxis.core.imagegen.ImageOutputSettings) -> Unit = {},
     imageGenModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
     imageGenInstalledIds: Set<String> = emptySet(),
     imageGenDownloadState: dev.praxis.core.imagegen.ImageDownloadState =
@@ -736,6 +746,8 @@ private fun SettingsPageBody(
             onDownloadSettingsChange = onImageDownloadSettingsChange,
             imageDefaults = imageGenDefaults,
             onImageDefaultsChange = onImageGenDefaultsChange,
+            imageOutput = imageGenOutput,
+            onImageOutputChange = onImageGenOutputChange,
             modifier = modifier,
         )
         PraxisRoute.SettingsGateway -> dev.praxis.feature.gateway.GatewayRoute(
