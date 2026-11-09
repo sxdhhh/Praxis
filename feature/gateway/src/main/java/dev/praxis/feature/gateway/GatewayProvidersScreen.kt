@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.praxis.ui.widgets.MiuixAnimatedDialog
+import dev.praxis.core.gateway.userMessage
 import dev.praxis.ui.widgets.MiuixNavigationItemWidget
 import dev.praxis.ui.widgets.SettingsSectionHeader
 import top.yukonga.miuix.kmp.basic.Card
@@ -103,7 +104,7 @@ fun GatewayProvidersScreen(
                         MiuixNavigationItemWidget(
                             title = provider.name + "（" + provider.id + "）",
                             description = provider.baseUrl + " · " +
-                                if (provider.modelCount == 0L) {
+                                if (provider.modelCount == 0) {
                                     "没声明模型（请求只能靠映射）"
                                 } else {
                                     "声明 " + provider.modelCount + " 个模型"
