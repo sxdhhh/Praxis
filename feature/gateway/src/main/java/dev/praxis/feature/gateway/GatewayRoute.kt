@@ -167,6 +167,21 @@ fun GatewayRoute(
                 subtitle = "这次会先用谁、谁被跳过",
             )
         }
+        item(key = "__models_card__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "模型管理",
+                    description = "逐条启停、看能力位；候选清单按这里的开关过滤",
+                    onClick = { navigator.push(PraxisRoute.SettingsGatewayModels) },
+                )
+            }
+        }
+
         item(key = "__providers_card__") {
             Card(
                 modifier = Modifier

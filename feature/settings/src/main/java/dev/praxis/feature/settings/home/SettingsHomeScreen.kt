@@ -73,6 +73,13 @@ fun SettingsHomeScreen(modifier: Modifier = Modifier) {
             SettingsCard(
                 SettingsEntry.Model,
                 SettingsEntry.Gateway,
+                // 本地生图紧跟网关：两者都是「这次请求去哪出图」的一条路
+                // （本机引擎 / 远端服务商），排在一起才读得顺。
+                //
+                // ⚠️ 这个列表是**显式列举**的：枚举里加了条目而忘了加到这里，
+                // 结果就是「页面、路由、导航登记都齐了，但首页看不到入口」。
+                // 这一条曾经真的漏掉过（用户报「设置页没看到生图入口」）。
+                SettingsEntry.ImageGen,
                 SettingsEntry.FunctionModel,
                 SettingsEntry.SystemPrompt,
             ) { navigator.push(it.route) }
