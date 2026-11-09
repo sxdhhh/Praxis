@@ -71,6 +71,7 @@ fun GatewayRoutingScreen(
     // 底栏同理：滚动终点必须抬高，否则最后一项被压住看不见。
     val scrollLimit = dev.praxis.ui.design.component.LocalScrollBottomLimit.current
     var faultDialogVisible by remember { mutableStateOf(false) }
+    var budgetDialogVisible by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -175,6 +176,29 @@ fun GatewayRoutingScreen(
             }
         }
 
+        // ── 预算（§7.2 第 6 条）──
+        item(key = "__routing_budget_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Rule,
+                title = "token 预算",
+                subtitle = "一个账号在窗口内用满就不再选它",
+            )
+        }
+        item(key = "__routing_budget_row__") {
+            GatewayCard {
+                MiuixNavigationItemWidget(
+                    title = "每账号预算",
+                    description = if (policy.tokenBudgetPerAccount <= 0L) {
+                        "不限（点这里设置）"
+                    } else {
+                        budgetText(policy.tokenBudgetPerAccount) + " / " +
+                            policy.budgetWindowHours + " 小时"
+                    },
+                    onClick = { budgetDialogVisible = true },
+                )
+            }
+        }
+
         item(key = "__routing_queue_title__") {
             SettingsSectionHeader(
                 icon = Icons.Outlined.Rule,
@@ -231,6 +255,17 @@ fun GatewayRoutingScreen(
                 }
             }
         }
+    }
+
+    if (budgetDialogVisible) {
+        BudgetDialog(
+            policy = policy,
+            onDismiss = { budgetDialogVisible = false },
+            onConfirm = { updated ->
+                onPolicyChange(updated)
+                budgetDialogVisible = false
+            },
+        )
     }
 
     if (faultDialogVisible) {
@@ -332,6 +367,91 @@ private fun FaultParamsDialog(
                                     breakerSuccessThreshold = s,
                                 ),
                             )
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** 预算数字的显示：带千分位，读得快。 */
+private fun budgetText(tokens: Long): String {
+    if (tokens <= 0L) return "不限"
+    return if (tokens >= 1000L) (tokens / 1000).toString() + "k tokens" else tokens.toString() + " tokens"
+}
+
+/**
+ * token 预算弹窗（文档 §7.2 第 6 条）。
+ *
+ * ## 0 是「不限」，不是一个特殊的错误值
+ *
+ * 默认就是不限：给个默认额度会让用户在完全不知情的情况下撞上「额度用完了」。
+ * 校验用 core 的 `GatewayTokenBudgetRules`（与判定侧同一套边界）。
+ */
+@Composable
+private fun BudgetDialog(
+    policy: dev.praxis.core.gateway.GatewayRoutingPolicy,
+    onDismiss: () -> Unit,
+    onConfirm: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit,
+) {
+    var tokens by remember { mutableStateOf(policy.tokenBudgetPerAccount.toString()) }
+    var hours by remember { mutableStateOf(policy.budgetWindowHours.toString()) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+        Card {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(text = "token 预算", style = MiuixTheme.textStyles.body1)
+                Text(
+                    text = "每个账号在窗口内用满这个数，就不再选它（填 0 表示不限）。" +
+                        "窗口是滚动的：从此刻往回数这么多小时。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(12.dp))
+                TextField(
+                    value = tokens,
+                    onValueChange = { tokens = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "每账号上限（token，0 = 不限）",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = hours,
+                    onValueChange = { hours = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "窗口（小时，1~720）",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                )
+                error?.let { text ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = text,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.error,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                MiuixNavigationItemWidget(
+                    title = "保存",
+                    description = "统计只含真实请求（连通性测试不计入）",
+                    onClick = {
+                        val parsedTokens = tokens.trim().toLongOrNull() ?: -1L
+                        val parsedHours = hours.trim().toIntOrNull() ?: -1
+                        val candidate = policy.copy(
+                            tokenBudgetPerAccount = parsedTokens,
+                            budgetWindowHours = parsedHours,
+                        )
+                        val invalid = dev.praxis.core.gateway.GatewayTokenBudgetRules
+                            .validate(candidate.toTokenBudget())
+                        if (invalid != null) {
+                            error = invalid
+                        } else {
+                            onConfirm(candidate)
                         }
                     },
                 )

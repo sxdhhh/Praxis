@@ -126,12 +126,31 @@ interface GatewayUsageDao {
             "GROUP BY model ORDER BY requests DESC",
     )
     suspend fun byModelSince(sinceMillis: Long): List<GatewayUsageGroupRow>
+
+    /**
+     * 按账号聚合窗口内的 token（token 预算用）。
+     *
+     * 排除 accountId 为空的记录：那是「没能定到账号」的失败，算到谁头上都不对，
+     * 而算错了会**静默地**让某个账号提前被限流。
+     */
+    @Query(
+        "SELECT accountId AS accountId, SUM(promptTokens + completionTokens) AS tokens " +
+            "FROM gateway_request WHERE ts >= :sinceMillis AND isTest = 0 " +
+            "AND accountId IS NOT NULL GROUP BY accountId",
+    )
+    suspend fun tokensByAccountSince(sinceMillis: Long): List<GatewayAccountTokensRow>
 }
 
 /** 汇总一行（SQL 别名对应字段）。 */
 data class GatewayUsageSummaryRow(
     val requests: Int,
     val failures: Int,
+    val tokens: Long,
+)
+
+/** 按账号的 token 合计（预算判定用）。 */
+data class GatewayAccountTokensRow(
+    val accountId: String,
     val tokens: Long,
 )
 

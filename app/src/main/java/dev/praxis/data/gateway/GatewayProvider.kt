@@ -68,6 +68,13 @@ class GatewayProvider(
      * 不是「悄悄丢记录」（装配点见 AppModule/PraxisApp）。
      */
     private val recordUsage: suspend (dev.praxis.core.gateway.GatewayUsageDraft) -> Unit = {},
+    /**
+     * 窗口内各账号的 token 用量（token 预算判定，文档 §7.2 第 6 条）。
+     *
+     * 默认空 map：没装配报表时预算恒为「不限」—— 但那是**显式**的空，
+     * 装配点在 AppModule / PraxisApp。
+     */
+    private val accountSpend: suspend (sinceMillis: Long) -> Map<String, Long> = { emptyMap() },
     private val customHeaders: List<CustomHeader> = emptyList(),
     private val client: OkHttpClient = OkHttpClient(),
 ) : AiProvider {
@@ -108,6 +115,15 @@ class GatewayProvider(
             budget = budget,
             policy = policy(),
         )
+
+        // token 预算：每次请求前取一次窗口内的用量推给会话。
+        //
+        // 放在这里而不是构造时：用量每轮都在变，缓存的数字会让预算「晚一步」生效。
+        val tokenBudget = policy().toTokenBudget()
+        if (tokenBudget.enabled) {
+            val windowStart = tokenBudget.windowStartMillis(System.currentTimeMillis())
+            session.setBudget(tokenBudget, accountSpend(windowStart))
+        }
 
         val startedAt = System.currentTimeMillis()
         var attempts = 0

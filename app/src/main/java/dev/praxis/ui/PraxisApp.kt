@@ -752,6 +752,8 @@ fun PraxisApp(
                             policy = { gatewayRoutingPolicy },
                             // 请求记录：报表与 token 预算的数据源（文档 6.1）。
                             recordUsage = { draft -> gatewayUsageStore.record(draft) },
+                            // 预算判定要的「窗口内各账号用量」：每次请求前查一次。
+                            accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                             state = gatewayRouteState,
                         ),
                     ),
@@ -955,6 +957,8 @@ fun PraxisApp(
                             // 请求记录：这是**第二处**构造点（另一个 ViewModel），
                             // 两处都要接，否则只有一半请求进报表。
                             recordUsage = { draft -> gatewayUsageStore.record(draft) },
+                            // 预算判定要的「窗口内各账号用量」：每次请求前查一次。
+                            accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                         ),
                     ),
                 ),

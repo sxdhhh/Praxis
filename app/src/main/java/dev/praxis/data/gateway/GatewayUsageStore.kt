@@ -77,6 +77,14 @@ class GatewayUsageStore(
         )
     }
 
+    /**
+     * 窗口内各账号的 token 用量（token 预算判定用）。
+     *
+     * 没有记录的账号不会出现在 map 里 —— 判定侧按「没有 = 0」处理（有单测钉这条）。
+     */
+    suspend fun tokensByAccountSince(sinceMillis: Long): Map<String, Long> =
+        dao.tokensByAccountSince(sinceMillis).associate { row -> row.accountId to row.tokens }
+
     /** 保留期清理（文档 §5.7 的数据保留）。 */
     suspend fun purgeBefore(beforeMillis: Long): Int = dao.purgeRequestsBefore(beforeMillis)
 }
