@@ -97,6 +97,21 @@ val appModule = module {
             .build()
     }
     single { get<PraxisDatabase>().gatewayUsageDao() }
+
+    // 整库备份导出（文档 组十六）。恢复**故意不做**，原因见 BackupExporter 的 KDoc。
+    single {
+        val database = get<PraxisDatabase>()
+        dev.praxis.data.backup.BackupExporter(
+            databaseFile = androidContext().getDatabasePath("praxis.db"),
+            outputDir = java.io.File(androidContext().filesDir, "exports/backups"),
+            checkpoint = {
+                database.openHelper.writableDatabase
+                    .query("PRAGMA wal_checkpoint(TRUNCATE)")
+                    .use { cursor -> cursor.moveToFirst() }
+            },
+            databaseVersion = { database.openHelper.readableDatabase.version },
+        )
+    }
     // 请求记录写入层（报表 / token 预算的数据源）。
     single {
         dev.praxis.data.gateway.GatewayUsageStore(

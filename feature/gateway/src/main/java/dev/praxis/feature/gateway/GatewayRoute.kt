@@ -48,6 +48,15 @@ fun GatewayRoute(
     /** 网关总开关（文档 §11 末尾的回滚闸）。 */
     gatewayEnabled: Boolean = true,
     onGatewayEnabledChange: (Boolean) -> Unit = {},
+    /**
+     * 整库备份（文档 组十六）：**只导出**。
+     *
+     * 恢复没做 —— 覆盖当前库需要先处理 WAL、Room 关闭时机与断电中断，
+     * 而那三样只能真机验证。见 BackupExporter 的 KDoc。
+     */
+    onBackupDatabase: () -> Unit = {},
+    /** 上次备份的结果文案（null = 还没点过）。 */
+    backupMessage: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val navigator = LocalNavigator.current
@@ -158,6 +167,22 @@ fun GatewayRoute(
                 subtitle = "这次会先用谁、谁被跳过",
             )
         }
+        item(key = "__backup_card__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "备份整库",
+                    description = backupMessage
+                        ?: "把数据库复制到 exports/backups（恢复未实现，见下方说明）",
+                    onClick = onBackupDatabase,
+                )
+            }
+        }
+
         item(key = "__routing_card__") {
             Card(
                 modifier = Modifier
