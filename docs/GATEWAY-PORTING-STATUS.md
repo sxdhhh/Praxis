@@ -229,8 +229,32 @@ test suites: 118   tests: 1252   failed: 9
 
 ## 九、下一步建议
 
-1. 模型页自动填网关模型清单（数据已齐：gateway_model + provider 的 modelsJson + mappings 的 alias）
-2. 路由页：候选队列可视化，把 RoutePlan.skipped 的原因展示出来
-3. ~~core:ai 补三类错误~~（已完成，见 §五-7；流式 content_filter 仍待接线）
-4. ~~gateway_enabled 总开关~~（已完成，见 §五-6）
-5. ~~导出~~（已完成，见 §五-2）
+1. **Responses 编码器**（四类入口里的第三个，P3 剩余）
+2. 代理池 / 云同步 / 备份（P4）—— 前两者各有一处前置依赖，见 §五-11
+3. Rust 内核 + 剩下 19 家（P5）
+4. 生图侧剩余：每步预览（要引擎推帧）、代理（要全局代理设置）、形态 B/C 识别
+
+## 十、尚未在真机上验证的部分（**这一节最重要**）
+
+CI 只证明「编译通过 + 单测通过」。下面这些**一次都没在真实设备上跑过**，按「出问题的概率」排序：
+
+| 项 | 为什么只有真机能验 |
+|---|---|
+| **数据库迁移 v13 → v14** | Room 打开库时按 identity hash 校验。上次 `12 → 13` 的手写迁移漏配，就是真机启动 3 秒后崩溃才发现的 |
+| Anthropic 全链路 | 编码器/组装器/provider/分派都有单测，但**从未对真实上游发过请求**。最可能的偏差是真实响应里 `content_block_start` 的 `tool_use.input` 初值形态 |
+| 生图自动存相册 | MediaStore 的 `IS_PENDING` 收尾与 `RELATIVE_PATH` 只在真机生效 |
+| 生图并发下载 | 信号量 + 多 `.part` 同时写 + 失败 abort，全是 IO 行为 |
+| 请求记录 → 报表页 | 从未在真机上写入过一条记录，也没看过报表渲染 |
+| 日志页「请求记录」视图 | 新加的分支，从未渲染过 |
+| 所有新设置页 | 策略 / 容错 / 预算 / 下载源 / 画布采样 / 输出 / 诊断 —— 都只过了编译 |
+
+**怎么验**（保留数据升级，不要卸载）：
+
+```bash
+adb install -r app-debug.apk
+adb shell run-as dev.praxis.debug sqlite3 databases/praxis.db "PRAGMA user_version;"
+```
+
+期望：`user_version` 从 13 变 14、进程存活、无 `A migration from 13 to 14 was required`。
+
+> 2026-11 期间每轮汇报里都提过这条；它至今**没有被验证过**，因为验证它需要用户的设备许可。
