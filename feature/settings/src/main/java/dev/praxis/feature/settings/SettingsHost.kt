@@ -140,6 +140,11 @@ fun SettingsHost(
     gatewayRouteGroups: List<dev.praxis.core.gateway.GatewayRouteGroup> = emptyList(),
     onAddGatewayRouteGroup: (dev.praxis.core.gateway.GatewayRouteGroup) -> Unit = {},
     onRemoveGatewayRouteGroup: (String) -> Unit = {},
+    /** 网关系统设置（文档 §5.18 的可用子集）。 */
+    gatewaySystemSettings: dev.praxis.core.gateway.GatewaySystemSettings =
+        dev.praxis.core.gateway.GatewaySystemSettings(),
+    onGatewaySystemSettingsChange:
+        (dev.praxis.core.gateway.GatewaySystemSettings) -> Unit = {},
     gatewayReplayEntries: () -> List<dev.praxis.core.gateway.RouteReplayEntry> = {
         emptyList()
     },
@@ -360,6 +365,8 @@ fun SettingsHost(
             gatewayRouteGroups = gatewayRouteGroups,
             onAddGatewayRouteGroup = onAddGatewayRouteGroup,
             onRemoveGatewayRouteGroup = onRemoveGatewayRouteGroup,
+            gatewaySystemSettings = gatewaySystemSettings,
+            onGatewaySystemSettingsChange = onGatewaySystemSettingsChange,
             gatewayModelError = gatewayModelError,
             onAddGatewayAccount = onAddGatewayAccount,
             onTestGatewayAccount = onTestGatewayAccount,
@@ -541,6 +548,11 @@ private fun SettingsPageBody(
     gatewayRouteGroups: List<dev.praxis.core.gateway.GatewayRouteGroup> = emptyList(),
     onAddGatewayRouteGroup: (dev.praxis.core.gateway.GatewayRouteGroup) -> Unit = {},
     onRemoveGatewayRouteGroup: (String) -> Unit = {},
+    /** 网关系统设置（文档 §5.18 的可用子集）。 */
+    gatewaySystemSettings: dev.praxis.core.gateway.GatewaySystemSettings =
+        dev.praxis.core.gateway.GatewaySystemSettings(),
+    onGatewaySystemSettingsChange:
+        (dev.praxis.core.gateway.GatewaySystemSettings) -> Unit = {},
     gatewayReplayEntries: () -> List<dev.praxis.core.gateway.RouteReplayEntry> = {
         emptyList()
     },
@@ -825,6 +837,11 @@ private fun SettingsPageBody(
         )
         // 账号页：账号池的存储层已经就绪，但还没有「添加账号」的界面（P1 剩余部分），
         // 所以这里传的是真实状态（空列表），不是占位数据。
+        PraxisRoute.SettingsGatewaySystem -> dev.praxis.feature.gateway.GatewaySystemScreen(
+            settings = gatewaySystemSettings,
+            onChange = onGatewaySystemSettingsChange,
+            modifier = modifier,
+        )
         PraxisRoute.SettingsGatewayProviders -> dev.praxis.feature.gateway.GatewayProvidersScreen(
             providers = gatewayProviderRows,
             onAdd = onAddGatewayProvider,

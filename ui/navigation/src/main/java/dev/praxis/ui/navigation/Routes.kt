@@ -182,6 +182,13 @@ data object SettingsGatewayImport : PraxisRoute
 data object SettingsGatewayRouting : PraxisRoute
 
 /**
+ * 网关系统设置页（设置 -> 网关 -> 系统设置）。
+ *
+ * 文档 §5.18：只包含真的接上了消费者的项（超时/换号上限/debug 摘要）。
+ */
+data object SettingsGatewaySystem : PraxisRoute
+
+/**
  * 自定义提供商页（设置 -> 网关 -> 自定义提供商）。
  *
  * 文档 §5.3：提供商是「地址 + 模型清单」，凭证在账号池里填。

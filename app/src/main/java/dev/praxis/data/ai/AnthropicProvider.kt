@@ -38,6 +38,8 @@ import okhttp3.Response
 class AnthropicProvider(
     private val baseUrl: String,
     private val apiKey: String,
+    /** 调试：记请求/响应摘要（不含对话内容）。见 GatewayProvider 的说明。 */
+    private val debug: Boolean = false,
     private val customHeaders: List<CustomHeader> = emptyList(),
     private val client: OkHttpClient = defaultClient(),
 ) : AiProvider {
@@ -46,6 +48,13 @@ class AnthropicProvider(
 
     override fun stream(request: ChatRequest): Flow<AiStreamEvent> = flow {
         val body = AnthropicRequestBuilder.build(request)
+        if (debug) {
+            dev.praxis.core.data.log.PraxisLogger.i(
+                "gateway",
+                "请求(Messages) → 模型=" + request.model + " 消息=" + request.messages.size +
+                    " 工具=" + request.tools.size + " 正文=" + body.length + " 字节",
+            )
+        }
 
         val httpRequest = Request.Builder()
             .url(endpoint())
@@ -79,6 +88,12 @@ class AnthropicProvider(
         }
 
         response.use { resp ->
+            if (debug) {
+                dev.praxis.core.data.log.PraxisLogger.i(
+                    "gateway",
+                    "响应(Messages) ← HTTP=" + resp.code,
+                )
+            }
             if (!resp.isSuccessful) {
                 val errText = runCatching { resp.body?.string() }.getOrNull().orEmpty()
                 throw AiException(

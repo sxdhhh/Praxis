@@ -71,6 +71,8 @@ class OpenAiCompatProvider(
      * 同时又要求一个自定义标识头。若用户想**替换**内置 Authorization，
      * 他应当把 apiKey 留空（见 `stream()` 里的 `isNotBlank` 判断）。
      */
+    /** 调试：记请求/响应摘要（不含对话内容）。见 GatewayProvider 的说明。 */
+    private val debug: Boolean = false,
     private val customHeaders: List<dev.praxis.core.model.settings.CustomHeader> =
         emptyList(),
     private val client: OkHttpClient = defaultClient(),
@@ -83,6 +85,14 @@ class OpenAiCompatProvider(
         // buildRequestBody 返回 JsonObject；toRequestBody 只接受 String/ByteArray，
         // 这里显式 toString() 一次，避免依赖隐式转换。
         val body = buildRequestBody(request).toString()
+        if (debug) {
+            // 只记元数据：日志页对用户承诺过「不含对话内容与密钥」。
+            dev.praxis.core.data.log.PraxisLogger.i(
+                "gateway",
+                "请求 → 模型=" + request.model + " 消息=" + request.messages.size +
+                    " 工具=" + request.tools.size + " 正文=" + body.length + " 字节",
+            )
+        }
 
         val httpRequest = Request.Builder()
             .url(endpoint())
@@ -123,6 +133,13 @@ class OpenAiCompatProvider(
         }
 
         response.use { resp ->
+            if (debug) {
+                dev.praxis.core.data.log.PraxisLogger.i(
+                    "gateway",
+                    "响应 ← HTTP=" + resp.code +
+                        (resp.header("Retry-After")?.let { " Retry-After=" + it }.orEmpty()),
+                )
+            }
             if (!resp.isSuccessful) {
                 val errText = runCatching { resp.body?.string() }.getOrNull().orEmpty()
                 // 用分类器读正文，而不是只看状态码（文档 §7.4 的产出点）：

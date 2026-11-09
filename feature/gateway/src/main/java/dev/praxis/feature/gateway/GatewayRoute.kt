@@ -167,6 +167,21 @@ fun GatewayRoute(
                 subtitle = "这次会先用谁、谁被跳过",
             )
         }
+        item(key = "__system_card__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "系统设置",
+                    description = "超时、换号上限、排障摘要",
+                    onClick = { navigator.push(PraxisRoute.SettingsGatewaySystem) },
+                )
+            }
+        }
+
         item(key = "__models_card__") {
             Card(
                 modifier = Modifier

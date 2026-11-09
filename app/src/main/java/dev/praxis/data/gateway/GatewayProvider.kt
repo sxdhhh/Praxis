@@ -87,6 +87,14 @@ class GatewayProvider(
     private val groups: () -> List<dev.praxis.core.gateway.GatewayRouteGroup> = {
         emptyList()
     },
+    /**
+     * 调试：把请求/响应**摘要**写进 App 日志（文档 §5.18 的 debug 项）。
+     *
+     * ⚠️ 只记元数据（模型、消息条数、正文字节数、HTTP 状态），
+     * **不记对话内容** —— 日志页对用户承诺过「不含对话内容与密钥」，
+     * 那条承诺不能被一个调试开关破坏。
+     */
+    private val debugRawTraffic: Boolean = false,
     private val customHeaders: List<CustomHeader> = emptyList(),
     private val client: OkHttpClient = OkHttpClient(),
 ) : AiProvider {
@@ -184,6 +192,7 @@ class GatewayProvider(
             val provider: dev.praxis.core.ai.AiProvider = when (protocol) {
                 dev.praxis.core.gateway.ProviderProtocol.AnthropicMessages ->
                     dev.praxis.data.ai.AnthropicProvider(
+                        debug = debugRawTraffic,
                         baseUrl = baseUrl,
                         apiKey = apiKey,
                         customHeaders = customHeaders,
@@ -198,6 +207,7 @@ class GatewayProvider(
                     )
                 dev.praxis.core.gateway.ProviderProtocol.OpenAiChat ->
                     OpenAiCompatProvider(
+                        debug = debugRawTraffic,
                         baseUrl = baseUrl,
                         apiKey = apiKey,
                         customHeaders = customHeaders,

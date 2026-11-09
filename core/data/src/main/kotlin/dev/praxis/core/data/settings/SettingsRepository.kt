@@ -724,6 +724,12 @@ class SettingsRepository(
     val gatewayRouteGroupsJson: Flow<String?> =
         dataStore.data.map { it[KEY_GATEWAY_ROUTE_GROUPS] }
 
+    /** 网关系统设置（文档 §5.18 的可用子集）：超时 / 换号上限 / debug 原文。 */
+    val gatewaySystemSettingsJson: Flow<String?> =
+        dataStore.data.map { it[KEY_GATEWAY_SYSTEM] }
+
+    suspend fun setGatewaySystemSettingsJson(text: String) = put(KEY_GATEWAY_SYSTEM, text)
+
     suspend fun setGatewayRouteGroupsJson(text: String) =
         put(KEY_GATEWAY_ROUTE_GROUPS, text)
 
@@ -1446,6 +1452,9 @@ private val KEY_GATEWAY_RETENTION_DAYS = stringPreferencesKey("gateway_request_r
 
 /** 路由组，见 [SettingsRepository.gatewayRouteGroupsJson]。 */
 private val KEY_GATEWAY_ROUTE_GROUPS = stringPreferencesKey("gateway_route_groups")
+
+/** 网关系统设置，见 [SettingsRepository.gatewaySystemSettingsJson]。 */
+private val KEY_GATEWAY_SYSTEM = stringPreferencesKey("gateway_system")
 
 /**
  * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。

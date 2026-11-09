@@ -372,6 +372,35 @@ fun PraxisApp(
         gatewayRouteState.updateBreakerConfig(gatewayRoutingPolicy.toBreakerConfig())
     }
 
+    // 网关系统设置（文档 §5.18）：超时 / 换号上限 / debug 原文。
+    //
+    // 三项都**真的接上了消费者**：超时→OkHttp、换号上限→FailoverBudget、
+    // debug→provider 的日志。没接上的项不放进页面（假开关比没有更糟）。
+    val gatewaySystemJson by settingsRepository.gatewaySystemSettingsJson
+        .collectAsState(initial = null)
+    val gatewaySystem = remember(gatewaySystemJson) {
+        dev.praxis.core.gateway.GatewaySystemSettingsCodec
+            .decode(gatewaySystemJson)
+            ?.getOrNull()
+            ?: dev.praxis.core.gateway.GatewaySystemSettings()
+    }
+    // 超时改了要重建客户端（OkHttp 的超时是客户端属性，不能逐请求改）。
+    val gatewayHttpClient = remember(
+        gatewaySystem.connectTimeoutSeconds,
+        gatewaySystem.readTimeoutSeconds,
+    ) {
+        okhttp3.OkHttpClient.Builder()
+            .connectTimeout(
+                gatewaySystem.connectTimeoutSeconds.toLong(),
+                java.util.concurrent.TimeUnit.SECONDS,
+            )
+            .readTimeout(
+                gatewaySystem.readTimeoutSeconds.toLong(),
+                java.util.concurrent.TimeUnit.SECONDS,
+            )
+            .build()
+    }
+
     // 路由组（文档 §5.5）：对外名 → 跨家成员。
     val gatewayRouteGroupsJson by settingsRepository.gatewayRouteGroupsJson
         .collectAsState(initial = null)
@@ -886,6 +915,11 @@ fun PraxisApp(
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                             replayLog = routeReplayLog,
                             groups = { gatewayRouteGroups },
+                            budget = dev.praxis.core.gateway.FailoverBudget(
+                                maxSwitches = gatewaySystem.maxSwitches,
+                            ),
+                            debugRawTraffic = gatewaySystem.debugRawTraffic,
+                            client = gatewayHttpClient,
                             state = gatewayRouteState,
                         ),
                     ),
@@ -1101,6 +1135,11 @@ fun PraxisApp(
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                             replayLog = routeReplayLog,
                             groups = { gatewayRouteGroups },
+                            budget = dev.praxis.core.gateway.FailoverBudget(
+                                maxSwitches = gatewaySystem.maxSwitches,
+                            ),
+                            debugRawTraffic = gatewaySystem.debugRawTraffic,
+                            client = gatewayHttpClient,
                         ),
                     ),
                 ),
@@ -1702,6 +1741,16 @@ fun PraxisApp(
                 // 现取：回放是内存列表，进页面时读到的就是最新的（含刚失败那次）。
                 gatewayReplayEntries = { routeReplayLog.recent() },
                 gatewayRouteGroups = gatewayRouteGroups,
+                gatewaySystemSettings = gatewaySystem,
+                onGatewaySystemSettingsChange = { updated ->
+                    coroutineScope.launch {
+                        settingsRepository.setGatewaySystemSettingsJson(
+                            dev.praxis.core.gateway.GatewaySystemSettingsCodec.encode(
+                                dev.praxis.core.gateway.GatewaySystemSettingsRules.normalize(updated),
+                            ),
+                        )
+                    }
+                },
                 onAddGatewayRouteGroup = { group ->
                     coroutineScope.launch {
                         val updated = gatewayRouteGroups + group
