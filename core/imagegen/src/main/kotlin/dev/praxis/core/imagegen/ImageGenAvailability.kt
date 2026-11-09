@@ -98,7 +98,6 @@ object ImageGenErrorClassifier {
     private val OOM_MARKERS = listOf(
         "out of memory",
         "outofmemory",
-        "oom",
         "failed to allocate",
         "allocation failed",
         "insufficient memory",
@@ -107,8 +106,19 @@ object ImageGenErrorClassifier {
         "内存不足",
     )
 
+    /**
+     * 单独的 `oom` 才认，**必须带词边界**。
+     *
+     * 这条是 CI 抓出来的：`ImageGenToolTest` 里假引擎抛的是 `IOException("boom")`，
+     * 而裸的 `"oom"` 子串会命中 `boom` —— 于是「引擎炸了」被当成「显存不足」，
+     * 工具去降档重试，第二次居然成功了，最终**报成了成功**。
+     * 误判的代价在这里非常具体：把一次真实失败变成一次虚假成功。
+     */
+    private val OOM_WORD = Regex("\\boom\\b")
+
     fun isOutOfMemory(text: String?): Boolean {
         val lower = text?.lowercase() ?: return false
+        if (OOM_WORD.containsMatchIn(lower)) return true
         return OOM_MARKERS.any { marker -> lower.contains(marker) }
     }
 }

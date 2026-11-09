@@ -96,6 +96,18 @@ class ImageGenAvailabilityTest {
     }
 
     @Test
+    fun `boom 这类词不会被当成 OOM`() {
+        // CI 抓出来的真问题：裸子串 "oom" 会命中 "boom"，
+        // 于是「引擎炸了」被当成「显存不足」→ 降档重试 → 报成成功。
+        assertFalse(ImageGenErrorClassifier.isOutOfMemory("boom"))
+        assertFalse(ImageGenErrorClassifier.isOutOfMemory("room not found"))
+        assertFalse(ImageGenErrorClassifier.isOutOfMemory("zoom failed"))
+        // 但真正单独的 oom 仍要认出来。
+        assertTrue(ImageGenErrorClassifier.isOutOfMemory("CUDA OOM"))
+        assertTrue(ImageGenErrorClassifier.isOutOfMemory("oom"))
+    }
+
+    @Test
     fun `普通错误不会被误判成 OOM`() {
         // 误判的代价是「该报错的被当成可重试」，比漏判更糟。
         assertFalse(ImageGenErrorClassifier.isOutOfMemory("HTTP 500"))
