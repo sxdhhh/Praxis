@@ -706,6 +706,9 @@ fun PraxisApp(
         org.koin.compose.koinInject()
     // 与工具共用同一条进度总线（工具写、聊天层读）。
     val imageGenProgressBus: dev.praxis.core.imagegen.ImageGenProgressBus =
+    /** 存相册的端口实现（:app 提供，见 GalleryImagePort）。 */
+    val imageGalleryPort: dev.praxis.feature.chat.ImageGalleryPort =
+        org.koin.compose.koinInject()
         org.koin.compose.koinInject()
 
     // 运行时权限申请。回调不逐条比对结果，统一 refresh() 回读系统真值 ——
@@ -832,6 +835,8 @@ fun PraxisApp(
                 permissionSnapshotProvider = { permissionState.snapshot() },
                 // 生图进度：工具写、ViewModel 读（文档 §6.1）。
                 imageGenProgress = imageGenProgressBus,
+                // 长按保存到相册（生图文档 P2）：feature 声明端口，:app 给实现。
+                imageGallery = imageGalleryPort,
                 chatRepository = chatPersistence,
                 sessionId = sessionId,
                 memoryPort = memoryPort,

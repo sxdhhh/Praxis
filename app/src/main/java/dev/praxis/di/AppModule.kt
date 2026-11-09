@@ -98,6 +98,11 @@ val appModule = module {
     }
     single { get<PraxisDatabase>().gatewayUsageDao() }
 
+    // 长按保存到相册（生图文档 P2）：:feature:chat 声明端口，这里给实现。
+    single<dev.praxis.feature.chat.ImageGalleryPort> {
+        dev.praxis.data.imagegen.GalleryImagePort(androidContext())
+    }
+
     // 整库备份导出（文档 组十六）。恢复**故意不做**，原因见 BackupExporter 的 KDoc。
     single {
         val database = get<PraxisDatabase>()

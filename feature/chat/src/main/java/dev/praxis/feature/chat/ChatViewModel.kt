@@ -83,6 +83,12 @@ class ChatViewModel(
      */
     private val imageGenProgress: dev.praxis.core.imagegen.ImageGenProgressBus? = null,
     /**
+     * 存相册的端口（生图文档 P2 的「长按保存到相册」）。null = 不接线。
+     *
+     * 与 [imageGenProgress] 同理用可空：单测不该被迫起一个 MediaStore 环境。
+     */
+    private val imageGallery: ImageGalleryPort? = null,
+    /**
      * 已启用技能拼成的提示词片段（可为空）。
      *
      * 用 `suspend () -> String` 而不是 String：技能列表可能在设置页被改，
@@ -3456,10 +3462,60 @@ class ChatViewModel(
 
     // ── 消息菜单动作（长按） ─────────────────────────────────
 
+
     /**
-     * 执行一条消息动作。
+     * 把某条消息里的图片逐张存进相册，并用 notice 回报结果。
      *
-     * 复制需要平台剪贴板，不在 ViewModel 里做：
+     * ## 为什么逐张而不是批量
+     *
+     * MediaStore 的插入本来就是一条一条的；逐张还能给出「3 张存了 2 张」这种
+     * 精确结果，而不是「全有或全无」。
+     *
+     * ## 为什么用 notice（输入栏那 4 秒提示）而不是弹窗
+     *
+     * 存图是个轻动作，弹窗会打断阅读；而 notice 已经是这一页既有的反馈通道
+     * （「最多附 4 张图片」走的就是它）。
+     */
+    private fun saveMessageImages(bubble: ChatBubble) {
+        val images = bubble.images
+        if (images.isEmpty()) return
+        val port = imageGallery
+        if (port == null) {
+            _state.update { it.copy(notice = "保存到相册不可用（这条路径没有接线）") }
+            return
+        }
+        _state.update { it.copy(notice = "正在保存 " + images.size + " 张…") }
+        viewModelScope.launch {
+            var saved = 0
+            var unsupported = 0
+            var firstFailure: String? = null
+            images.forEach { image ->
+                when (val result = port.saveImage(image.base64, image.mimeType)) {
+                    is dev.praxis.core.imagegen.GallerySaveResult.Saved -> saved += 1
+                    is dev.praxis.core.imagegen.GallerySaveResult.Unsupported -> unsupported += 1
+                    is dev.praxis.core.imagegen.GallerySaveResult.Failed ->
+                        if (firstFailure == null) firstFailure = result.detail
+                }
+            }
+            val text = buildString {
+                if (saved > 0) append("已保存 ").append(saved).append(" 张到相册")
+                if (unsupported > 0) {
+                    if (isNotEmpty()) append("；")
+                    append("这台设备不支持（Android 9 及以下要存储权限，Praxis 还没接）")
+                }
+                firstFailure?.let { detail ->
+                    if (isNotEmpty()) append("；")
+                    append("保存失败：").append(detail)
+                }
+                if (isEmpty()) append("没有可保存的图片")
+            }
+            _state.update { it.copy(notice = text) }
+        }
+    }
+
+    /**
+     * 处理消息菜单的动作。
+     *
      * 这里只处理「会改状态」的动作，复制由 UI 层拿到文本后自己写剪贴板。
      * 这样 ViewModel 保持纯 JVM，单测不需要 Android 环境。
      *
@@ -3584,6 +3640,17 @@ class ChatViewModel(
             // 把要展示的字段先算成文本，由 UI 弹窗展示 —— ViewModel 不碰 UI。
             // 用 infoText 字段而不是在 UI 里重新推导：UI 拿不到 `assistantRowIds`
             // 这类内部映射，字段必须在 ViewModel 里就算好。
+            /**
+             * 保存到相册：异步 + 用输入栏的 notice 回报结果。
+             *
+             * 为什么不是同步返回字符串（像 Copy 那样）：写 MediaStore 是 IO，
+             * 而 `onMessageAction` 是 UI 直接调的同步函数 —— 在这里阻塞会卡住主线程。
+             */
+            MessageAction.SaveImages -> {
+                saveMessageImages(bubble)
+                null
+            }
+
             MessageAction.ShowInfo -> {
                 _state.update { it.copy(infoBubbleId = bubbleId) }
                 null

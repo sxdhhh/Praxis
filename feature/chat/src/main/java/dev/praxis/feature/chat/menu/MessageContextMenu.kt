@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Reply
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Summarize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -199,6 +200,9 @@ private val MessageAction.icon: ImageVector
         MessageAction.EditAssistant -> Icons.Default.AutoFixHigh
         MessageAction.InsertSummary -> Icons.Default.Summarize
         MessageAction.ShowInfo -> Icons.Default.Info
+        // 「保存到相册」用 Save（软盘意象）而不是 Download：
+        // Download 在这一页会与「回滚/继续」的箭头类图标混起来。
+        MessageAction.SaveImages -> Icons.Default.Save
         MessageAction.Delete -> Icons.Default.Delete
     }
 
@@ -227,7 +231,18 @@ private val MessageAction.icon: ImageVector
  * 上游没有这一项。放在复制旁边是因为两者都是「把这条内容带走」，
  * 紧邻符合直觉；放到末尾会让用户在「删除」附近找它。
  */
-fun actionsForBubble(bubble: ChatBubble): List<MessageAction> = when (bubble.role) {
+/**
+ * 哪些角色能用哪些动作（1:1 对齐 Operit 的 sender 分支顺序），
+ * 外加一条**按内容**决定的项：带图的消息才给「保存到相册」。
+ */
+fun actionsForBubble(bubble: ChatBubble): List<MessageAction> {
+    val base = roleActions(bubble)
+    // 图片是「这条消息的内容」，不是「角色的能力」—— 所以判定放在外面：
+    // 用户消息与助手消息都可能带图（生图结果落在助手气泡里）。
+    return if (bubble.images.isEmpty()) base else listOf(MessageAction.SaveImages) + base
+}
+
+private fun roleActions(bubble: ChatBubble): List<MessageAction> = when (bubble.role) {
     BubbleRole.User -> listOf(
         MessageAction.Copy,
         MessageAction.Edit,
