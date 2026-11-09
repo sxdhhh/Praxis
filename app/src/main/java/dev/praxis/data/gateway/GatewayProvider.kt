@@ -60,6 +60,13 @@ class GatewayProvider(
     private val policy: () -> dev.praxis.core.gateway.GatewayRoutingPolicy =
         { dev.praxis.core.gateway.GatewayRoutingPolicy() },
     private val budget: FailoverBudget = FailoverBudget(),
+    /**
+     * 请求记录落地（报表与 token 预算的数据源）。
+     *
+     * 默认空实现：没有装配报表时不影响请求本身 —— 但那是**显式**的空，
+     * 不是「悄悄丢记录」（装配点见 AppModule/PraxisApp）。
+     */
+    private val recordUsage: suspend (dev.praxis.core.gateway.GatewayUsageDraft) -> Unit = {},
     private val customHeaders: List<CustomHeader> = emptyList(),
     private val client: OkHttpClient = OkHttpClient(),
 ) : AiProvider {
@@ -101,9 +108,35 @@ class GatewayProvider(
             policy = policy(),
         )
 
+        val startedAt = System.currentTimeMillis()
+        var attempts = 0
+        var lastUsage: AiStreamEvent.Usage? = null
+        var lastAttempt: PlannedAttempt? = null
+
+        // 成功/失败都记一条；失败按文档 §5.7 清零 token（规则在 core 的 GatewayUsageRules）。
+        suspend fun record(success: Boolean, status: Int, error: String?) {
+            val draft = dev.praxis.core.gateway.GatewayUsageDraft(
+                model = request.model,
+                upstreamModel = lastAttempt?.wireModel,
+                providerId = lastAttempt?.provider,
+                accountId = lastAttempt?.accountId,
+                status = status,
+                error = error,
+                attempts = attempts,
+                promptTokens = lastUsage?.promptTokens ?: 0,
+                completionTokens = lastUsage?.completionTokens ?: 0,
+                cacheReadTokens = lastUsage?.cacheReadTokens ?: 0,
+                durationMs = System.currentTimeMillis() - startedAt,
+            )
+            recordUsage(dev.praxis.core.gateway.GatewayUsageRules.build(draft, success))
+        }
+
         var emitted = false
+        try {
         while (true) {
             val attempt = session.next() ?: break
+            lastAttempt = attempt
+            attempts += 1
             val view = views.firstOrNull { it.id == attempt.accountId } ?: continue
             val credential = store.credentialOf(attempt.accountId).getOrNull() ?: continue
             val apiKey = (credential as? GatewayCredential.ApiKey)?.apiKey ?: continue
@@ -123,9 +156,12 @@ class GatewayProvider(
             try {
                 provider.stream(request.copy(model = attempt.wireModel)).collect { event ->
                     emitted = true
+                    // 用量事件记下来（结尾一起落库），同时照常下发给上层。
+                    if (event is AiStreamEvent.Usage) lastUsage = event
                     emit(event)
                 }
                 session.onSuccess(attempt)
+                record(success = true, status = dev.praxis.core.gateway.GatewayUsageRules.STATUS_OK, error = null)
                 return@flow
             } catch (e: AiException) {
                 if (e.error.kind == AiErrorKind.CANCELLED) throw e
@@ -147,5 +183,17 @@ class GatewayProvider(
                 message = "网关没有可用的账号（这次请求已经试过所有候选）",
             ),
         )
+        } catch (e: AiException) {
+            // 用户主动取消不算失败，不入记录（否则报表里会出现一堆「失败」，
+            // 而用户只是换了句话）。其余的失败都记一条，token 由规则清零。
+            if (e.error.kind != AiErrorKind.CANCELLED) {
+                record(
+                    success = false,
+                    status = dev.praxis.core.gateway.GatewayUsageRules.STATUS_NO_RESPONSE,
+                    error = e.error.message,
+                )
+            }
+            throw e
+        }
     }
 }

@@ -602,6 +602,10 @@ fun PraxisApp(
             ?: dev.praxis.core.imagegen.ImageGenDefaults()
     }
 
+    // 请求记录写入层：GatewayProvider 每轮结束（成功或失败）落一条。
+    val gatewayUsageStore: dev.praxis.data.gateway.GatewayUsageStore =
+        org.koin.compose.koinInject()
+
     val imageGenEngineLocator: dev.praxis.data.imagegen.EngineLocator =
         org.koin.compose.koinInject()
     // 与工具共用同一条进度总线（工具写、聊天层读）。
@@ -716,6 +720,8 @@ fun PraxisApp(
                             modelRules = { gatewayModelRules },
                             // 每次现取：改了策略下一句就生效（见 GatewayProvider 的参数说明）。
                             policy = { gatewayRoutingPolicy },
+                            // 请求记录：报表与 token 预算的数据源（文档 6.1）。
+                            recordUsage = { draft -> gatewayUsageStore.record(draft) },
                             state = gatewayRouteState,
                         ),
                     ),

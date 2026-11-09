@@ -97,6 +97,13 @@ val appModule = module {
             .build()
     }
     single { get<PraxisDatabase>().gatewayUsageDao() }
+    // 请求记录写入层（报表 / token 预算的数据源）。
+    single {
+        dev.praxis.data.gateway.GatewayUsageStore(
+            dao = get(),
+            clock = { System.currentTimeMillis() },
+        )
+    }
     single<SessionDao> { get<PraxisDatabase>().sessionDao() }
     single<dev.praxis.data.db.MessageDao> { get<PraxisDatabase>().messageDao() }
     single<dev.praxis.data.db.MemoryDao> { get<PraxisDatabase>().memoryDao() }
