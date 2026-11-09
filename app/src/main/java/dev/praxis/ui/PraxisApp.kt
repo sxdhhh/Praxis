@@ -602,6 +602,10 @@ fun PraxisApp(
             ?: dev.praxis.core.imagegen.ImageGenDefaults()
     }
 
+    // 请求记录写入层：GatewayProvider 每轮结束（成功或失败）落一条。
+    val gatewayUsageStore: dev.praxis.data.gateway.GatewayUsageStore =
+        org.koin.compose.koinInject()
+
     // ── 报表（文档 §9.6）──
     //
     // 三段窗口各自查一次库。天数与「起点怎么算」都在 core 的 GatewayReport 里定死
@@ -631,9 +635,6 @@ fun PraxisApp(
         gatewayReportTopModels = windows.lastOrNull()?.summary?.byModel.orEmpty()
     }
 
-    // 请求记录写入层：GatewayProvider 每轮结束（成功或失败）落一条。
-    val gatewayUsageStore: dev.praxis.data.gateway.GatewayUsageStore =
-        org.koin.compose.koinInject()
 
     val imageGenEngineLocator: dev.praxis.data.imagegen.EngineLocator =
         org.koin.compose.koinInject()
