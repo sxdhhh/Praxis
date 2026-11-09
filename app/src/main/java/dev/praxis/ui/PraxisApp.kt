@@ -120,7 +120,6 @@ fun PraxisApp(
 
     // ── 依赖 ─────────────────────────────────────────────────
     val toolRegistry: dev.praxis.core.tool.ToolRegistry = org.koin.compose.koinInject()
-    }
 
     val toolExecutor: dev.praxis.core.tool.ToolExecutor = org.koin.compose.koinInject()
     val toolContext: dev.praxis.core.tool.ToolContext = org.koin.compose.koinInject()
@@ -620,6 +619,7 @@ fun PraxisApp(
         if (gatewayRequestRecordsLoad > 0) {
             gatewayRequestRecords = gatewayUsageStore.recentRequests()
         }
+    }
 
     // ── 报表（文档 §9.6）──
     //
