@@ -13,6 +13,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +57,9 @@ fun ImageGenTargetDialog(
     current: ImageGenTarget?,
     onSelect: (ImageGenTarget) -> Unit,
 ) {
+    // 自定义远端表单的开关。放在这里而不是外面：它是这个对话框的子流程。
+    var remoteDialogVisible by remember { mutableStateOf(false) }
+
     MiuixAnimatedDialog(visible = visible, onDismissRequest = onDismiss) {
         Card {
             Column(
@@ -127,12 +134,128 @@ fun ImageGenTargetDialog(
                 Spacer(Modifier.height(8.dp))
                 Text(text = "服务商生图模型", style = MiuixTheme.textStyles.body2)
                 Text(
-                    text = "还没接：远端 /v1/images/generations 的客户端未写，现在只有本地引擎这条路",
+                    // 这句话此前写的是「客户端未写」—— 那是**旧信息**：
+                    // /v1/images/generations 的客户端（RemoteImageProtocol +
+                    // OkHttpRemoteImageGenerator）早已实现并有单测，缺的是「界面能选到」。
+                    text = "远端客户端已实现，但还没有内置清单 —— 点下面自己填一个。" +
+                        "注意：远端走的是「Praxis 全局 API Key」，不是网关的账号池。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 6.dp),
                 )
+                Text(
+                    text = "自定义远端…",
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { remoteDialogVisible = true }
+                        .padding(vertical = 10.dp),
+                )
+                (current as? ImageGenTarget.Remote)?.let { remote ->
+                    Text(
+                        text = "当前：remote:" + remote.provider + "/" + remote.model,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.primary,
+                    )
+                }
             }
         }
     }
+
+    // 自定义远端表单：与主对话框并列（主对话框在它后面不消失）。
+    if (remoteDialogVisible) {
+        RemoteTargetDialog(
+            onDismiss = { remoteDialogVisible = false },
+            onConfirm = { target ->
+                onSelect(target)
+                remoteDialogVisible = false
+                onDismiss()
+            },
+        )
+    }
+}
+/**
+ * 自定义远端生图目标（`/v1/images/generations`）。
+ *
+ * ## 为什么让用户自己填，而不是给一份内置清单
+ *
+ * 各家的生图模型名与地址一直在变，写一份内置清单很快就会过期 ——
+ * 而过期的默认值比没有更糟（用户选了它，得到 404，却以为是自己配置错了）。
+ * 三个字段都让用户填，界面只负责校验「不为空」。
+ *
+ * ## 用的是哪个 key
+ *
+ * `Praxis 全局 API Key`（设置页那一个），**不是**网关的账号池。
+ * 走账号池要先把「生图请求」接进 RouteSession —— 那是另一件事。
+ */
+@Composable
+private fun RemoteTargetDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (ImageGenTarget) -> Unit,
+) {
+    var provider by remember { mutableStateOf("") }
+    var baseUrl by remember { mutableStateOf("") }
+    var model by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+        Card {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(text = "自定义远端", style = MiuixTheme.textStyles.body2)
+                Text(
+                    text = "填上游的地址与模型名；地址带不带 /v1 都可以（会自动补 /v1/images/generations）。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(10.dp))
+                RemoteField("服务商标识（随意起名）", provider) { provider = it }
+                RemoteField("地址（如 https://api.openai.com）", baseUrl) { baseUrl = it }
+                RemoteField("模型名（如 gpt-image-1）", model) { model = it }
+                error?.let { text ->
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = text,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.error,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "确定",
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (provider.isBlank() || baseUrl.isBlank() || model.isBlank()) {
+                                error = "三个字段都要填"
+                            } else {
+                                onConfirm(
+                                    ImageGenTarget.Remote(
+                                        provider = provider.trim(),
+                                        baseUrl = baseUrl.trim(),
+                                        model = model.trim(),
+                                    ),
+                                )
+                            }
+                        }
+                        .padding(vertical = 10.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RemoteField(label: String, value: String, onChange: (String) -> Unit) {
+    top.yukonga.miuix.kmp.basic.TextField(
+        value = value,
+        onValueChange = onChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = label,
+        useLabelAsPlaceholder = true,
+        singleLine = true,
+    )
+    Spacer(Modifier.height(8.dp))
 }
