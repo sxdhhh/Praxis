@@ -164,10 +164,11 @@ fun GatewayModelsScreen(
                             val report = testReport?.takeIf { it.first == key }?.second
                             MiuixNavigationItemWidget(
                                 title = if (testing == key) "测试中…" else "测试",
+                                // when 作为**表达式**用时分支末尾不能带逗号（同一个坑第三次）。
                                 description = when {
-                                    testing == key -> "正在发一个只要 1 个 token 的真实请求",
-                                    report != null -> report.detail,
-                                    else -> "会真打上游、烧一点点额度；测试请求不计入报表",
+                                    testing == key -> "正在发一个只要 1 个 token 的真实请求"
+                                    report != null -> report.detail
+                                    else -> "会真打上游、烧一点点额度；测试请求不计入报表"
                                 },
                                 onClick = {
                                     if (testing != null) return@MiuixNavigationItemWidget
