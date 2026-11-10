@@ -539,9 +539,13 @@ class WiringGuardTest {
             "必须从 modelAdvancedSettings 读取限流配置",
             settings.contains("repository.modelAdvancedSettings.first()"),
         )
+        // 两种形式都算（2026-11-11）：`acquire()` 是无限等，
+        // `tryAcquire()` 是带排队上限的版本（文档 §5.18 的「请求队列」）。
+        // 关键是**发请求前必须拿名额** —— 两者取其一即可，两条都没有才算漏接线。
         assertTrue(
-            "必须在发请求前 acquire 名额",
-            settings.contains("throttle.acquire()"),
+            "必须在发请求前拿名额（acquire 或 tryAcquire）",
+            settings.contains("throttle.acquire()") ||
+                settings.contains("throttle.tryAcquire()"),
         )
         assertTrue(
             "必须在 finally 里归还名额（否则异常路径会泄漏并发位）",
