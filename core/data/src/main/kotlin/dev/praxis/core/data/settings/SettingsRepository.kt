@@ -741,6 +741,17 @@ class SettingsRepository(
 
     suspend fun setGatewayProxyJson(text: String) = put(KEY_GATEWAY_PROXY, text)
 
+    /**
+     * 出站脱敏的开关与规则（文档 §5.18）。
+     *
+     * 文档 §6.4 给的是两个键（`gateway_sanitize_enabled` + 规则 JSON），
+     * 这里合并成一个 JSON —— **与 §6.4 的偏离已在代码里记明**：
+     * 规则是可变长列表，逐键命名要拼前缀，而导入导出侧本来就要写映射。
+     */
+    val gatewaySanitizeJson: Flow<String?> = dataStore.data.map { it[KEY_GATEWAY_SANITIZE] }
+
+    suspend fun setGatewaySanitizeJson(text: String) = put(KEY_GATEWAY_SANITIZE, text)
+
     suspend fun setGatewayRouteGroupsJson(text: String) =
         put(KEY_GATEWAY_ROUTE_GROUPS, text)
 
@@ -1469,6 +1480,9 @@ private val KEY_GATEWAY_SYSTEM = stringPreferencesKey("gateway_system")
 
 /** 代理池，见 [SettingsRepository.gatewayProxyJson]。 */
 private val KEY_GATEWAY_PROXY = stringPreferencesKey("gateway_proxy")
+
+/** 脱敏规则，见 [SettingsRepository.gatewaySanitizeJson]。 */
+private val KEY_GATEWAY_SANITIZE = stringPreferencesKey("gateway_sanitize")
 
 /**
  * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。

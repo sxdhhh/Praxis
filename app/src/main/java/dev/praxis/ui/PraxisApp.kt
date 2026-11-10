@@ -765,6 +765,48 @@ fun PraxisApp(
             client = gatewayHttpClient,
         )
     }
+    // 文件导入：SAF 多选 → 逐个读出文本 → 走与剪贴板**同一条**预检路径。
+    //
+    // 读文件放 IO 线程：下载目录里的文件可能不小，而这是主线程组合期。
+    val fileImportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts
+            .OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        gatewayImportError = null
+        gatewayImportResult = null
+        gatewayImportBusy = true
+        coroutineScope.launch {
+            val files = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                uris.mapNotNull { uri ->
+                    runCatching {
+                        val name = uri.lastPathSegment
+                            ?.substringAfterLast('/')
+                            ?: "account.json"
+                        val raw = appContext.contentResolver.openInputStream(uri)
+                            ?.bufferedReader()
+                            ?.use { reader -> reader.readText() }
+                        if (raw.isNullOrBlank()) null else name to raw
+                    }.getOrNull()
+                }.toMap()
+            }
+            if (files.isEmpty()) {
+                gatewayImportError = "选中的文件读不出内容（可能不是文本文件，或已被移动）"
+            } else {
+                val existing = gatewayAccountStore.all().map { it.id }.toSet()
+                val known = gatewayAccountStore.providers().map { it.id }.toSet()
+                val plan = dev.praxis.core.gateway.GatewayImporter.prepare(
+                    files = files,
+                    existingIds = existing,
+                    knownProviders = known,
+                )
+                gatewayImportPlan = plan
+                gatewayImportReport = plan.report
+            }
+            gatewayImportBusy = false
+        }
+    }
+
     var gatewayProviderAddError by remember { mutableStateOf<String?>(null) }
     var gatewayProviderTick by remember { mutableStateOf(0) }
     LaunchedEffect(gatewayRowsRefresh, gatewayProviderTick) {
@@ -1991,6 +2033,20 @@ fun PraxisApp(
                 gatewayExportBusy = gatewayExportBusy,
                 gatewayExportText = gatewayExportText,
                 gatewayExportError = gatewayExportError,
+                // 选择文件导入（文档 §9.7 的「选择文件」入口）：
+                // 用户在网关面板导出的账号文件常常落在「下载」里，所以这条路必须存在
+                // ——只支持剪贴板的话，他得先自己打开文件、全选、复制。
+                //
+                // 用 **OpenMultipleDocuments**：下载文件夹里通常不止一个账号文件，
+                // 一个一个点太折磨人。GatewayImporter.prepare 本来就收「文件名 -> 内容」的 map，
+                // 多文件是它天然支持的形状。
+                onImportFromFiles = {
+                    gatewayImportError = null
+                    gatewayImportResult = null
+                    fileImportLauncher.launch(
+                        arrayOf("application/json", "text/plain", "*/*"),
+                    )
+                },
                 onImportFromClipboard = {
                     gatewayImportError = null
                     gatewayImportResult = null

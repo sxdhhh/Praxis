@@ -45,11 +45,34 @@ class SettingsBackedProvider(
      * 默认 0 保持旧行为（无限等），与 `GatewaySystemSettings` 的默认一致。
      */
     private val queueWaitSeconds: () -> Int = { 0 },
+    /**
+     * 出站脱敏规则（文档 §5.18）。空 = 不改写（默认）。
+     *
+     * **每次现取**：用户在设置页改了规则，下一句就该按新规则发。
+     */
+    private val sanitizeRules: () -> List<dev.praxis.core.ai.SanitizeRule> = { emptyList() },
 ) : AiProvider {
 
     override val displayName: String = "设置配置的 OpenAI 兼容服务"
 
     override fun stream(request: ChatRequest): Flow<AiStreamEvent> = flow {
+        // ── 出站脱敏（文档 §5.18）──
+        //
+        // 放在**最开头**：两条路（网关与直连）共用这一处改写，
+        // 否则迟早出现「走网关时脱了、直连时没脱」这种一半生效的状态。
+        // 规则为空时**原样返回**（不改写），默认就是这条路。
+        val rules = sanitizeRules()
+        val outbound = if (rules.isEmpty()) {
+            request
+        } else {
+            request.copy(
+                messages = request.messages.map { message ->
+                    val cleaned = dev.praxis.core.ai.OutboundSanitizer.apply(message.text, rules)
+                    if (cleaned == message.text) message else message.copy(text = cleaned)
+                },
+            )
+        }
+
         // ── 网关档案：交给路由层 ──
         //
         // 判定用**当前档案**的 kind，而不是别的开关：用户把模型档案切到「网关」
@@ -85,7 +108,7 @@ class SettingsBackedProvider(
                         message = "模型档案是「网关」，但网关没有装配（构建配置问题）",
                     ),
                 )
-            gateway.stream(request).collect { emit(it) }
+            gateway.stream(outbound).collect { emit(it) }
             return@flow
         }
 
@@ -180,7 +203,8 @@ class SettingsBackedProvider(
         // 表现为「改了温度没任何变化」。model 与 temperature 都取设置里的值。
             emitAll(
                 delegate.stream(
-                    request.copy(
+                    // 用**脱敏后**的请求：直连这条路同样要覆盖（见 stream 开头的说明）。
+                    outbound.copy(
                         // ## 必须用 `activeModel` 而不是 `settings.model`（2026-10-24 修）
                         //
                         // `settings.model` 现在是**模型池**（逗号分隔多个），
