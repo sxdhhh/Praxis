@@ -38,6 +38,13 @@ class SettingsBackedProvider(
      * 那种「悄悄用别的账号发出去」的行为比直接报错危险得多。
      */
     private val gatewayProvider: AiProvider? = null,
+    /**
+     * 请求队列的等待上限（秒），0 = 不限。
+     *
+     * **每次现取**：用户在设置页改完，下一次请求就该按新的走。
+     * 默认 0 保持旧行为（无限等），与 `GatewaySystemSettings` 的默认一致。
+     */
+    private val queueWaitSeconds: () -> Int = { 0 },
 ) : AiProvider {
 
     override val displayName: String = "设置配置的 OpenAI 兼容服务"
@@ -136,8 +143,23 @@ class SettingsBackedProvider(
         //
         // 折中：按 `(rpm, concurrency)` 缓存（见 [throttleFor]）——
         // 值不变就复用同一实例（窗口连续），值一变就换新实例（立即生效）。
-        val throttle = throttleFor(advanced.requestLimitPerMinute, advanced.maxConcurrentRequests)
-        val permit = if (throttle.isNoOp) null else throttle.acquire()
+        val throttle = throttleFor(
+            advanced.requestLimitPerMinute,
+            advanced.maxConcurrentRequests,
+            queueWaitSeconds(),
+        )
+        // 有上限地拿许可证：等不到就报「排队超时」，而不是无限挂着 ——
+        // 文档 §5.18 的「请求队列」要的就是这个语义。
+        val permit = if (throttle.isNoOp) {
+            null
+        } else {
+            throttle.tryAcquire() ?: throw AiException(
+                AiError(
+                    kind = AiErrorKind.RATE_LIMIT,
+                    message = "排队超时：并发名额一直没空出来（可在「网关 → 系统设置」里调大等待上限）",
+                ),
+            )
+        }
         try {
             val delegate = OpenAiCompatProvider(
             // ## 必须用 resolve 后的 baseUrl（2026-10-29）
@@ -216,14 +238,15 @@ class SettingsBackedProvider(
          * 正确语义是「配置一变就重新开始计」，所以这里同时候只留一份：
          * 新配置进来时把其它配置的实例全部丢掉。
          */
-        internal fun throttleFor(rpm: Int, concurrency: Int): RequestThrottle {
+        internal fun throttleFor(rpm: Int, concurrency: Int, waitSeconds: Int): RequestThrottle {
             if (rpm <= 0 && concurrency <= 0) return NO_OP_THROTTLE
-            val key = "$rpm|$concurrency"
+            // 等待上限进 key：它是构造参数，改了必须换实例（否则沿用旧上限）。
+            val key = "$rpm|$concurrency|$waitSeconds"
             // 已经只缓存这一份时直接复用（窗口连续）。
             val existing = throttles[key]
             if (existing != null && throttles.size == 1) return existing
             // 配置变了：清掉所有旧实例，只留新的 —— 等价于「重新开始计」。
-            val fresh = RequestThrottle(rpm, concurrency)
+            val fresh = RequestThrottle(rpm, concurrency, maxWaitMs = waitSeconds.toLong() * 1000L)
             throttles.clear()
             throttles[key] = fresh
             return fresh

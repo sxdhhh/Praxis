@@ -26,11 +26,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * 文档 §5.18 列了 18 条端点，其中大部分是服务端专属（CORS / captcha / sidebar-layout /
  * storage / system-info / health —— 文档自己也标了不移植）。
- * 这里只放三项超时/换号/debug，因为她们各自有一个明确的读取点，改了立刻有效果：
+ * 这里只放「各自有一个明确读取点」的项，改了立刻有效果：
  *
  * - 超时 → OkHttp 客户端（改了要重建客户端，见 PraxisApp）
  * - 换号上限 → `FailoverBudget.maxSwitches`
  * - debug → provider 记请求/响应**摘要**（不含对话内容）
+ * - 排队等待上限 → `RequestThrottle.tryAcquire`（等不到就报「排队超时」，
+ *   而不是无限挂着）
  *
  * 其余（图片压缩阈值、脱敏规则、提示词模式、自动续写、客户端识别）**不放进来**：
  * 摆一个没人读的开关，比没有更糟 —— 用户调了没反应，会以为整个设置页坏了。
@@ -119,6 +121,21 @@ fun GatewaySystemScreen(
                     endInt = dev.praxis.core.gateway.GatewaySystemSettings.MAX_SWITCHES,
                     valueSuffix = " 次",
                     onValueChange = { count -> onChange(settings.copy(maxSwitches = count)) },
+                )
+            }
+        }
+        item(key = "__system_queue__") {
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+                MiuixIntNumberPickerWidget(
+                    title = "排队等待上限",
+                    description = "并发名额一直被占时最多等多久；**0 = 不限**（会一直等）",
+                    value = settings.queueWaitSeconds,
+                    startInt = dev.praxis.core.gateway.GatewaySystemSettings.MIN_QUEUE_WAIT_SECONDS,
+                    endInt = dev.praxis.core.gateway.GatewaySystemSettings.MAX_QUEUE_WAIT_SECONDS,
+                    valueSuffix = " 秒",
+                    onValueChange = { seconds ->
+                        onChange(settings.copy(queueWaitSeconds = seconds))
+                    },
                 )
             }
         }

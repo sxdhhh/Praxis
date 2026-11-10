@@ -996,6 +996,8 @@ fun PraxisApp(
             dev.praxis.feature.chat.ChatViewModel(
                 provider = dev.praxis.data.ai.SettingsBackedProvider(
                         repository = settingsRepository,
+                        // 请求队列等待上限（文档 §5.18）：0 = 不限（旧行为）。
+                        queueWaitSeconds = { gatewaySystem.queueWaitSeconds },
                         // 网关出站：与账号页共用同一个 RouteState，
                         // 这样「清空运行状态」与真实请求看到的是同一份状态。
                         gatewayProvider = dev.praxis.data.gateway.GatewayProvider(
@@ -1221,6 +1223,8 @@ fun PraxisApp(
                     repository = settingsRepository,
                     provider = dev.praxis.data.ai.SettingsBackedProvider(
                         repository = settingsRepository,
+                        // 请求队列等待上限（文档 §5.18）：0 = 不限（旧行为）。
+                        queueWaitSeconds = { gatewaySystem.queueWaitSeconds },
                         // 网关出站：与账号页共用同一个 RouteState，
                         // 这样「清空运行状态」与真实请求看到的是同一份状态。
                         gatewayProvider = dev.praxis.data.gateway.GatewayProvider(

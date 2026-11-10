@@ -19,6 +19,43 @@ class GatewaySystemSettingsTest {
     }
 
     @Test
+    fun `排队等待默认不限（不改用户既有行为）`() {
+        assertEquals(0, GatewaySystemSettings().queueWaitSeconds)
+    }
+
+    @Test
+    fun `排队等待越界被夹到 0 到 300`() {
+        assertEquals(
+            GatewaySystemSettings.MIN_QUEUE_WAIT_SECONDS,
+            GatewaySystemSettingsRules.normalize(
+                GatewaySystemSettings(queueWaitSeconds = -5),
+            ).queueWaitSeconds,
+        )
+        assertEquals(
+            GatewaySystemSettings.MAX_QUEUE_WAIT_SECONDS,
+            GatewaySystemSettingsRules.normalize(
+                GatewaySystemSettings(queueWaitSeconds = 9999),
+            ).queueWaitSeconds,
+        )
+    }
+
+    @Test
+    fun `排队等待能往返`() {
+        val settings = GatewaySystemSettings(queueWaitSeconds = 45)
+        assertEquals(
+            settings,
+            GatewaySystemSettingsCodec.decode(GatewaySystemSettingsCodec.encode(settings))?.getOrNull(),
+        )
+    }
+
+    @Test
+    fun `旧 JSON 缺排队字段时用默认值`() {
+        // schema 演进：老设置文件没有这个键，读出来应当是「不限」。
+        val decoded = GatewaySystemSettingsCodec.decode("""{"maxSwitches":5}""")?.getOrNull()
+        assertEquals(0, decoded?.queueWaitSeconds)
+    }
+
+    @Test
     fun `越界被夹到边界`() {
         val normalized = GatewaySystemSettingsRules.normalize(
             GatewaySystemSettings(connectTimeoutSeconds = 0, readTimeoutSeconds = 99999, maxSwitches = 0),

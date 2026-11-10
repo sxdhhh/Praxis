@@ -37,6 +37,17 @@ data class GatewaySystemSettings(
     val maxSwitches: Int = DEFAULT_MAX_SWITCHES,
     /** 调试：把脱敏后的请求体与响应摘要写进 App 日志。默认关。 */
     val debugRawTraffic: Boolean = false,
+    /**
+     * 请求队列：等一个并发位最多等多少秒。0 = 不限（旧行为）。
+     *
+     * 文档 §5.18 的「请求队列（最多等待 / 等待秒数）」。此前 `acquire()` 是
+     * **无限等** —— 上游全忙时请求一直挂着，用户看到的是「转了十分钟才报错」，
+     * 中间没有任何可操作提示。给了上限之后超时能变成一句明确的话。
+     *
+     * 默认 0（不限）而不是给个数字：改了默认值就等于改了所有用户的行为，
+     * 那不是「加个设置」该有的副作用。
+     */
+    val queueWaitSeconds: Int = 0,
 ) {
     companion object {
         const val DEFAULT_CONNECT_SECONDS: Int = 15
@@ -49,6 +60,10 @@ data class GatewaySystemSettings(
         const val MAX_READ_SECONDS: Int = 600
         const val MIN_SWITCHES: Int = 1
         const val MAX_SWITCHES: Int = 10
+
+        /** 0 = 不限；上限给 300 秒（再长不如让用户直接取消）。 */
+        const val MIN_QUEUE_WAIT_SECONDS: Int = 0
+        const val MAX_QUEUE_WAIT_SECONDS: Int = 300
     }
 }
 
@@ -70,6 +85,10 @@ object GatewaySystemSettingsRules {
                 GatewaySystemSettings.MAX_SWITCHES,
             ),
             debugRawTraffic = settings.debugRawTraffic,
+            queueWaitSeconds = settings.queueWaitSeconds.coerceIn(
+                GatewaySystemSettings.MIN_QUEUE_WAIT_SECONDS,
+                GatewaySystemSettings.MAX_QUEUE_WAIT_SECONDS,
+            ),
         )
 }
 
@@ -81,6 +100,7 @@ object GatewaySystemSettingsCodec {
         put("readTimeoutSeconds", settings.readTimeoutSeconds)
         put("maxSwitches", settings.maxSwitches)
         put("debugRawTraffic", settings.debugRawTraffic)
+        put("queueWaitSeconds", settings.queueWaitSeconds)
     }.toString()
 
     /** @param text null/空白 = 没配过（返回 null）；缺字段用默认值（schema 演进）。 */
@@ -96,6 +116,7 @@ object GatewaySystemSettingsCodec {
                     maxSwitches = root.intOr("maxSwitches", defaults.maxSwitches),
                     debugRawTraffic = root["debugRawTraffic"]?.jsonPrimitive?.contentOrNull
                         ?.toBooleanStrictOrNull() ?: defaults.debugRawTraffic,
+                    queueWaitSeconds = root.intOr("queueWaitSeconds", defaults.queueWaitSeconds),
                 ),
             )
         }
