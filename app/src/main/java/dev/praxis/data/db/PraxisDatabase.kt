@@ -46,7 +46,7 @@ import dev.praxis.core.data.gateway.GatewayProviderEntity
         GatewayRequestEntity::class,
         GatewayDailyEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = true,
 )
 abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.CharacterDatabase {
@@ -462,6 +462,20 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
          * 那些家：Cline 的 `X-CLIENT-TYPE` 缺了一律 403，GLM / MiniMax 的
          * Claude 兼容端点要求 `?beta=true`。默认空串 = 与旧行为一致。
          */
+        /**
+         * 15 -> 16：自定义提供商加「上次成功拉清单的时间」。
+         *
+         * 文档 §5.4.1 第 17 条要的「快照 + 缓存」：modelsJson 是快照，
+         * 这一列是它的时间戳。默认 0 = 从没成功过（一律算不新鲜）。
+         */
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `gateway_provider` ADD COLUMN `modelsFetchedAt` INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
         val MIGRATION_14_15 = object : Migration(14, 15) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(

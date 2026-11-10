@@ -33,6 +33,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 用扁平字符串而不是 Room 实体：`:feature:gateway` 不该为了画一行去依赖 Room。
  */
 data class GatewayProviderRowUi(
+    /** 上次**成功**拉到模型清单的时间；0 = 从没成功过（文档 §5.4.1 第 17 条的快照时间）。 */
+    val modelsFetchedAt: Long = 0L,
     val id: String,
     val name: String,
     val baseUrl: String,

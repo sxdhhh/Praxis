@@ -33,4 +33,12 @@ data class GatewayProviderEntity(
      * 空串 = 不加。
      */
     val urlSuffix: String = "",
+    /**
+     * 上次**成功**拉到模型清单的时间；0 = 从没成功过。
+     *
+     * 文档 §5.4.1 第 17 条的「快照 + 缓存」：`modelsJson` 是快照本身，
+     * 这一列让它带上了「什么时候的快照」—— 缓存新鲜度与界面上的
+     * 「上次刷新：3 小时前」都靠它。
+     */
+    val modelsFetchedAt: Long = 0L,
 )

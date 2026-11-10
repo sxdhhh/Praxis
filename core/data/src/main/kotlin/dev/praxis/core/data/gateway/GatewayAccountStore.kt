@@ -233,12 +233,19 @@ class GatewayAccountStore(
      *
      * 只动 modelsJson：地址、映射与创建时间都不碰 —— 拉清单不该有副作用。
      */
-    suspend fun updateProviderModels(id: String, models: List<String>): Boolean {
+    suspend fun updateProviderModels(
+        id: String,
+        models: List<String>,
+        /** 这次成功拉到的时间；默认现在。测试可注入。 */
+        fetchedAt: Long = System.currentTimeMillis(),
+    ): Boolean {
         val existing = providers().firstOrNull { it.id == id } ?: return false
         val json = models.distinct().sorted().joinToString(separator = ",", prefix = "[", postfix = "]") {
             model -> "\"" + model.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
         }
-        providerDao.upsert(existing.copy(modelsJson = json))
+        providerDao.upsert(
+            existing.copy(modelsJson = json, modelsFetchedAt = fetchedAt),
+        )
         return true
     }
 

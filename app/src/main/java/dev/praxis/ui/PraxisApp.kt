@@ -776,6 +776,8 @@ fun PraxisApp(
                 modelCount = entity.modelsJson
                     .split("\n")
                     .count { line -> line.trim().isNotEmpty() },
+                // 快照时间：界面显示「上次刷新：3 小时前」（文档 §5.4.1 第 17 条）。
+                modelsFetchedAt = entity.modelsFetchedAt,
             )
         }
     }

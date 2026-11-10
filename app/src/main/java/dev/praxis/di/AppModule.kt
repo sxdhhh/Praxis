@@ -94,6 +94,7 @@ val appModule = module {
                 // 同样是手写 DDL（11->13 的自动迁移不覆盖 13->14），见迁移的 KDoc。
                 PraxisDatabase.MIGRATION_13_14,
             PraxisDatabase.MIGRATION_14_15,
+            PraxisDatabase.MIGRATION_15_16,
             )
             .build()
     }
