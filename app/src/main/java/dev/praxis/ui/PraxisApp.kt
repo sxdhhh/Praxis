@@ -753,7 +753,9 @@ fun PraxisApp(
         dev.praxis.data.gateway.BuiltinProviders.ids().map { id ->
             dev.praxis.feature.gateway.GatewayProviderChoice(
                 id = id,
-                name = id,
+                // 显示名与 id 分开：列表里要能一眼认出是哪家，
+                // 而 id 是写进账号、参与选路的那个标识。
+                name = dev.praxis.data.gateway.BuiltinProviders.label(id),
                 baseUrl = dev.praxis.data.gateway.BuiltinProviders.baseUrl(id),
             )
         } + gatewayProviderRows.map { row ->
