@@ -51,6 +51,13 @@ fun GatewayImportScreen(
     resultText: String?,
     /** 出错时的文案（读剪贴板为空、JSON 坏了等）。 */
     errorMessage: String?,
+    /**
+     * 选择文件导入（文档 §9.7 的「选择文件」入口）。
+     *
+     * 网关面板导出的账号文件通常落在「下载」里 —— 只有剪贴板的话，
+     * 用户得先自己打开文件、全选、复制。**可多选**：下载里往往不只一个账号文件。
+     */
+    onImportFromFiles: () -> Unit = {},
     onImportFromClipboard: () -> Unit,
     onConfirmImport: () -> Unit,
     onDismissDialog: () -> Unit,
@@ -89,6 +96,16 @@ fun GatewayImportScreen(
                 title = "导入",
                 subtitle = "把网关那边配好的账号搬过来",
             )
+        }
+
+        item(key = "__import_files__") {
+            GatewayCard {
+                MiuixNavigationItemWidget(
+                    title = "选择文件导入",
+                    description = "从「下载」等目录选账号文件（可多选）",
+                    onClick = onImportFromFiles,
+                )
+            }
         }
 
         item(key = "__import_clipboard__") {

@@ -93,6 +93,8 @@ fun SettingsHost(
     /** 解析中（阻塞对话框）。 */
     gatewayImportBusy: Boolean = false,
     /** 从剪贴板读并预检。 */
+    /** 选择文件导入（文档 §9.7）；null 语义由调用方决定（这里默认空实现）。 */
+    onImportFromFiles: () -> Unit = {},
     onImportFromClipboard: () -> Unit = {},
     /** 预检通过后写入。 */
     onConfirmGatewayImport: () -> Unit = {},
@@ -360,6 +362,7 @@ fun SettingsHost(
             gatewayAccountNames = gatewayAccountNames,
             gatewayImportBusy = gatewayImportBusy,
             onImportFromClipboard = onImportFromClipboard,
+            onImportFromFiles = onImportFromFiles,
             onConfirmGatewayImport = onConfirmGatewayImport,
             onDismissGatewayImport = onDismissGatewayImport,
             gatewayExportBusy = gatewayExportBusy,
@@ -545,6 +548,8 @@ private fun SettingsPageBody(
     gatewayImportResult: String? = null,
     gatewayImportError: String? = null,
     gatewayImportBusy: Boolean = false,
+    /** 选择文件导入（文档 §9.7）；null 语义由调用方决定（这里默认空实现）。 */
+    onImportFromFiles: () -> Unit = {},
     onImportFromClipboard: () -> Unit = {},
     onConfirmGatewayImport: () -> Unit = {},
     onDismissGatewayImport: () -> Unit = {},
@@ -974,6 +979,7 @@ private fun SettingsPageBody(
             resultText = gatewayImportResult,
             errorMessage = gatewayImportError,
             onImportFromClipboard = onImportFromClipboard,
+            onImportFromFiles = onImportFromFiles,
             onConfirmImport = onConfirmGatewayImport,
             onDismissDialog = onDismissGatewayImport,
             exportBusy = gatewayExportBusy,
