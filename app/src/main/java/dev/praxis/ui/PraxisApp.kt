@@ -1553,6 +1553,8 @@ fun PraxisApp(
                                 }
                             },
                             modelSettings = modelSettings,
+                            // 图片压缩（文档 §5.18）：默认开，值来自设置；关掉时原图原样发出。
+                            imageCompression = gatewaySystem.imageCompress,
                             // 会话身份：滚动状态 / item key / 密钥掩码都按它区分。
                             // 旧实现没传，于是三个东西共用上一会话的值（见该参数 KDoc）。
                             sessionId = targetSessionId,

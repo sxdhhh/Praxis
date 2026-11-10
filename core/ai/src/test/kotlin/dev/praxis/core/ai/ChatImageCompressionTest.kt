@@ -62,11 +62,11 @@ class ChatImageCompressionTest {
     }
 
     @Test
-    fun `默认值等于既有硬编码（512 与 80）`() {
+    fun `默认值等于既有的硬编码行为（1024 与 85，且默认开）`() {
         val d = ChatImageCompression()
-        assertEquals(512, d.maxEdge)
-        assertEquals(80, d.quality)
-        // 默认关：改写用户的图是有副作用的操作，不该默认发生。
-        assertEquals(false, d.enabled)
+        assertEquals(1024, d.maxEdge)
+        assertEquals(85, d.quality)
+        // 压缩是既有行为：默认关会静默改变所有用户的行为，还会把 413 的风险放回去。
+        assertEquals(true, d.enabled)
     }
 }

@@ -42,7 +42,7 @@ import kotlin.math.max
 object ChatImagePreparer {
 
     /** 目标长边像素。1024 是「视觉模型不浪费、肉眼仍清晰」的折中点。 */
-    private const val TARGET_LONG_EDGE = 1024
+    private const val TARGET_LONG_EDGE = 1024 // 仅作常量文档；实际值走策略（默认同为 1024）
 
     /** JPEG 质量。85 在照片上肉眼接近无损，体积约为 95 的 60%。 */
     private const val JPEG_QUALITY = 85
@@ -56,12 +56,34 @@ object ChatImagePreparer {
      * @return null 表示读不到 / 不是图片。调用方应给用户提示，而不是静默丢弃 ——
      *   「点了选图什么都没发生」是最难排查的用户反馈。
      */
-    fun prepare(context: Context, uri: Uri): ChatImage? {
+    fun prepare(
+        context: Context,
+        uri: Uri,
+        /**
+         * 压缩策略（文档 §5.18）。默认值 = 既有的硬编码行为（1024 / 85），
+         * 所以「不传」与「改动前」完全一致。
+         */
+        policy: dev.praxis.core.ai.ChatImageCompression =
+            dev.praxis.core.ai.ChatImageCompression(),
+    ): ChatImage? {
         // 用一层显式 try 而不是 `runCatching { ... return null }`：
         // 后者在 lambda 里的 `return` 是非局部返回，读起来像是「提前退出
         // runCatching」而实际退出的是 `prepare`，极易误读。
         return try {
             val resolver = context.contentResolver
+
+            // 关掉压缩 = 真原图：**不做任何重编码**，直接把原字节 base64。
+            // 这不是「用 100 质量重压一遍」（那仍有损），而是真正的原样发出。
+            // 代价写在界面上：base64 会膨胀 33%，上游 10~20MB 会 413。
+            if (!policy.enabled) {
+                val raw = resolver.openInputStream(uri)?.use { stream ->
+                    stream.readBytes()
+                } ?: return null
+                return ChatImage(
+                    mimeType = resolver.getType(uri) ?: "image/jpeg",
+                    base64 = Base64.encodeToString(raw, Base64.NO_WRAP),
+                )
+            }
 
             // ① 第一趟：只读边界。
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -70,7 +92,7 @@ object ChatImagePreparer {
 
             // ② 算采样率：除以 2 后仍不小于目标长边就继续翻倍。
             var sample = 1
-            while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= TARGET_LONG_EDGE) {
+            while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= policy.maxEdge) {
                 sample *= 2
             }
 
@@ -81,11 +103,11 @@ object ChatImagePreparer {
             } ?: return null
 
             // ④ 精修到目标长边。
-            val scaled = scaleDown(decoded)
+            val scaled = scaleDown(decoded, policy.maxEdge)
             if (scaled !== decoded) decoded.recycle()
 
             // ⑤ 编码。明显超标时降质量重编一次（最多两档，不递归）。
-            var bytes = compress(scaled, JPEG_QUALITY)
+            var bytes = compress(scaled, policy.quality)
             if (bytes.size > MAX_BYTES) {
                 bytes = compress(scaled, 60)
             }
@@ -103,10 +125,10 @@ object ChatImagePreparer {
     }
 
     /** 长边超过目标就等比缩小；否则原样返回（引用相同，调用方据此决定是否 recycle）。 */
-    private fun scaleDown(src: Bitmap): Bitmap {
+    private fun scaleDown(src: Bitmap, maxEdge: Int): Bitmap {
         val longEdge = max(src.width, src.height)
-        if (longEdge <= TARGET_LONG_EDGE) return src
-        val ratio = TARGET_LONG_EDGE.toFloat() / longEdge
+        if (longEdge <= maxEdge) return src
+        val ratio = maxEdge.toFloat() / longEdge
         val w = (src.width * ratio).toInt().coerceAtLeast(1)
         val h = (src.height * ratio).toInt().coerceAtLeast(1)
         return Bitmap.createScaledBitmap(src, w, h, true)

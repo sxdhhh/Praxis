@@ -19,16 +19,27 @@ package dev.praxis.core.ai
  * 所以「小图不碰」不是优化，是正确性。
  */
 data class ChatImageCompression(
-    val enabled: Boolean = false,
+    /**
+     * 总开关。**默认开** —— 与现状一致。
+     *
+     * ## 为什么这里与「脱敏」相反（那边默认关）
+     *
+     * `ChatImagePreparer` 一直在压缩附件（硬编码 1024 / 85），理由是三条硬约束：
+     * base64 膨胀 33%、上游请求体 10~20MB 会 413、视觉模型的有效分辨率远低于原图。
+     * 所以「默认关」在这里**等于静默改变所有用户的行为**，还会把 413 的风险放回去。
+     * 脱敏是「新增的改写」才该默认关；压缩是既有行为，默认必须保持。
+     */
+    val enabled: Boolean = true,
     val maxEdge: Int = DEFAULT_MAX_EDGE,
     val quality: Int = DEFAULT_QUALITY,
     val thresholdKb: Int = DEFAULT_THRESHOLD_KB,
 ) {
     companion object {
-        /** 与既有 `ImageThumbnail` 的硬编码值一致（512 / 80）。 */
-        const val DEFAULT_MAX_EDGE: Int = 512
-        const val DEFAULT_QUALITY: Int = 80
-        const val DEFAULT_THRESHOLD_KB: Int = 256
+        /** 与 `ChatImagePreparer` 的既有硬编码一致（1024 / 85）—— 默认不改变现状。 */
+        const val DEFAULT_MAX_EDGE: Int = 1024
+        const val DEFAULT_QUALITY: Int = 85
+        /** 0 = 不按体积豁免（现状就是全部压）。 */
+        const val DEFAULT_THRESHOLD_KB: Int = 0
 
         const val MIN_MAX_EDGE: Int = 128
         const val MAX_MAX_EDGE: Int = 4096

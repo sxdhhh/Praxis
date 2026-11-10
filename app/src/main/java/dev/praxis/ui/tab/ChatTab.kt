@@ -57,6 +57,12 @@ fun ChatTab(
     onToggleTool: ((String, Boolean) -> Unit)? = null,
     modelSettings: ModelSettings,
     /**
+     * 图片压缩策略（文档 §5.18）。默认值 = 既有行为（1024 / 85、默认开），
+     * 所以「不传」与改动前一致。
+     */
+    imageCompression: dev.praxis.core.ai.ChatImageCompression =
+        dev.praxis.core.ai.ChatImageCompression(),
+    /**
      * 当前会话 id。
      *
      * ## 为什么 ChatTab 需要它（而不只是 PraxisApp 内部用）
@@ -425,7 +431,7 @@ fun ChatTab(
         }
         attachmentScope.launch {
             val image = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                dev.praxis.data.chat.ChatImagePreparer.prepare(context, uri)
+                dev.praxis.data.chat.ChatImagePreparer.prepare(context, uri, imageCompression)
             }
             if (image != null) {
                 viewModel.addAttachment(image)
@@ -455,7 +461,7 @@ fun ChatTab(
         }
         attachmentScope.launch {
             val image = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                dev.praxis.data.chat.ChatImagePreparer.prepare(context, uri)
+                dev.praxis.data.chat.ChatImagePreparer.prepare(context, uri, imageCompression)
             }
             if (image != null) {
                 viewModel.addAttachment(image)
@@ -522,7 +528,7 @@ fun ChatTab(
                     val image = kotlinx.coroutines.withContext(
                         kotlinx.coroutines.Dispatchers.IO,
                     ) {
-                        dev.praxis.data.chat.ChatImagePreparer.prepare(context, uri)
+                        dev.praxis.data.chat.ChatImagePreparer.prepare(context, uri, imageCompression)
                     }
                     if (image != null) {
                         viewModel.addAttachment(image)
