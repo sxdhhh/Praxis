@@ -39,16 +39,29 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 一条远端 flux-schnell 放在同一个列表里，用户分不清自己选的是哪条路。
  * 分组的标题本身就是那层说明。
  *
- * ## 为什么「服务商」这一组现在只有一句说明
+ * ## 「服务商」这一组现在是**真实清单**
  *
- * 远端走 `/v1/images/generations` 的客户端还没写（工具目前只认本地引擎）。
- * 摆一堆点了没反应的服务商模型，就是「假入口」。等客户端就位再放出来。
+ * `/v1/images/generations` 的客户端早已实现（`RemoteImageProtocol` + 工具分派）。
+ * 这一组列出模型池里各家的模型名（来自 `gateway_provider.modelsJson`），
+ * 选中即写 `ImageGenTarget.Remote(provider, baseUrl, model)`；清单里没有的仍可手填。
  *
  * ## 点击即生效
  *
  * 与功能模型页的单选弹窗同一取舍：用户心里的动作是「选它」，不是「标记它」。
  * 多一步确认反而让人以为没选中。
  */
+/**
+ * 服务商生图模型（模型池里的一项）：家 + 模型 + 该家的地址。
+ *
+ * 清单来自各家 `modelsJson` 里声明的模型名（用户自己填的），所以这里**不做能力位过滤**
+ * —— 那份能力位只有网关的插件家才有，Praxis 面对的是自定义家。
+ */
+data class ImageGenRemoteModel(
+    val provider: String,
+    val model: String,
+    val baseUrl: String,
+)
+
 @Composable
 fun ImageGenTargetDialog(
     visible: Boolean,
