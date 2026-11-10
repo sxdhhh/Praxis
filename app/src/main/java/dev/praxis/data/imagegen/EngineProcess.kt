@@ -23,7 +23,11 @@ import kotlin.concurrent.thread
  *
  * API 29+ 的 W^X：应用可写目录（`filesDir`）里的二进制**不能执行**，
  * `setExecutable(true, false)` 也改不了。可执行的只有 `nativeLibraryDir` ——
- * 那是系统解压 APK 里 `jniLibs/*.so` 的地方。
+ * 那是系统解压 APK 里 jniLibs 中那些 .so 的地方。
+ *
+ * ⚠️ 这里踩过一个坑：注释里**不能**写出斜杠加星号的连写形式 —— Kotlin 的块注释
+ * 是可嵌套的，那两字符会开一层内层注释，让整个 KDoc 变成「未闭合」
+ * （编译器报的是文件末尾 `Unclosed comment`，而真正的起点在这行）。
  */
 class EngineProcess(
     /** `applicationInfo.nativeLibraryDir`（由 :app 装配时传入）。 */
