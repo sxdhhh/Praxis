@@ -13,10 +13,10 @@ class ImageDownloadSettingsTest {
 
     @Test
     fun `尾部斜杠会被补上`() {
-        // fileUri 拼在 baseUrl 后面：少了斜杠就会拼成 https://github.comxororz/...
-        assertEquals("https://github.com/", ImageDownloadSettingsRules.normalizeBaseUrl("https://github.com"))
-        assertEquals("https://github.com/", ImageDownloadSettingsRules.normalizeBaseUrl("https://github.com/"))
-        assertEquals("https://github.com/", ImageDownloadSettingsRules.normalizeBaseUrl("  https://github.com///  "))
+        // fileUri 拼在 baseUrl 后面：少了斜杠就会拼成 https://huggingface.coxororz/...
+        assertEquals("https://huggingface.co/", ImageDownloadSettingsRules.normalizeBaseUrl("https://huggingface.co"))
+        assertEquals("https://huggingface.co/", ImageDownloadSettingsRules.normalizeBaseUrl("https://huggingface.co/"))
+        assertEquals("https://huggingface.co/", ImageDownloadSettingsRules.normalizeBaseUrl("  https://huggingface.co///  "))
     }
 
     @Test
@@ -86,6 +86,22 @@ class ImageDownloadSettingsTest {
         // 默认仅 Wi-Fi：几 GB 的包走流量是能让人肉疼的失误。
         val defaults = ImageDownloadSettings()
         assertTrue(defaults.wifiOnly)
-        assertEquals("https://github.com/", defaults.baseUrl)
+        assertEquals("https://huggingface.co/", defaults.baseUrl)
+    }
+
+    @Test
+    fun `默认源是 HuggingFace 而不是 GitHub`() {
+        // 曾写错成 github.com：清单里的 fileUri 是 HF 的 `owner/repo/resolve/main/x`
+        // 形状，拼到 GitHub 上必然 404，表现是「点下载永远失败」。
+        assertEquals("https://huggingface.co/", ImageDownloadSettings.DEFAULT_BASE_URL)
+        assertEquals("https://hf-mirror.com/", ImageDownloadSettings.MIRROR_BASE_URL)
+    }
+
+    @Test
+    fun `镜像源也能归一化`() {
+        assertEquals(
+            "https://hf-mirror.com/",
+            ImageDownloadSettingsRules.normalizeBaseUrl("https://hf-mirror.com"),
+        )
     }
 }

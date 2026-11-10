@@ -39,8 +39,28 @@ data class ImageDownloadSettings(
     val concurrency: Int = DEFAULT_CONCURRENCY,
 ) {
     companion object {
-        /** GitHub 的模型发布页（当前内置清单都指到这里）。 */
-        const val DEFAULT_BASE_URL: String = "https://github.com/"
+        /**
+         * 默认下载源：**HuggingFace**。
+         *
+         * ## 这里修过一个真 bug（2026-11-11）
+         *
+         * 此前写的是 `https://github.com/` —— 而内置清单里的 fileUri 是
+         * `xororz/sd-qnn/resolve/main/x.zip` 这种形状，`resolve/main` 是
+         * **HuggingFace 的路径**，拼到 github.com 后面必然 404：
+         * 表现就是「点下载永远失败」，模型一个都装不上、生图自然用不了。
+         *
+         * 上游 Local Dream 的默认值同样是 `https://huggingface.co/`
+         * （见其 `Preferences.getBaseUrl()` 与此处同名的常量）。
+         */
+        const val DEFAULT_BASE_URL: String = "https://huggingface.co/"
+
+        /**
+         * 国内镜像（上游 Local Dream 的「hf-mirror」选项同值）。
+         *
+         * 直连 HuggingFace 在国内经常很慢或不通，而模型包是几个 GB ——
+         * 一个镜像预设能省掉用户自己找源这一步。
+         */
+        const val MIRROR_BASE_URL: String = "https://hf-mirror.com/"
 
         /** 并发上限。再高对移动网络没有意义，只会让每个连接都变慢。 */
         const val MAX_CONCURRENCY: Int = 4
@@ -54,7 +74,7 @@ object ImageDownloadSettingsRules {
      * 归一化：去空白、保证尾部有斜杠。
      *
      * 尾部斜杠是必须的：fileUri 形如 `xororz/sd-qnn/resolve/main/x.zip`，
-     * 拼在 `https://github.com` 后面会变成 `https://github.comxororz/...`。
+     * 拼在 `https://huggingface.co` 后面会变成 `https://huggingface.coxororz/...`。
      */
     fun normalizeBaseUrl(raw: String): String {
         var value = raw.trim()

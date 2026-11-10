@@ -76,7 +76,7 @@ class ParallelProgressTest {
     @Test
     fun `缺 concurrency 字段时用默认值（schema 演进）`() {
         val decoded = ImageDownloadSettingsCodec
-            .decode("""{"baseUrl":"https://github.com/","wifiOnly":true}""")
+            .decode("""{"baseUrl":"https://huggingface.co/","wifiOnly":true}""")
             ?.getOrNull()
         assertNotNull(decoded)
         assertEquals(2, decoded?.concurrency)

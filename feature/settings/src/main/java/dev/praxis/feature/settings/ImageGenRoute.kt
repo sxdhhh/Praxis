@@ -595,9 +595,27 @@ private fun DownloadSourceDialog(
                     value = baseUrl,
                     onValueChange = { baseUrl = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = "https://github.com/",
+                    label = "https://huggingface.co/",
                     useLabelAsPlaceholder = true,
                     singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                // 两个预设：上游 Local Dream 的「设置 → 模型下载地址」就是这个形状
+                // （官方 / hf-mirror）。模型包是几个 GB，让用户自己找源是没必要的门槛。
+                MiuixNavigationItemWidget(
+                    title = "官方源",
+                    description = dev.praxis.core.imagegen.ImageDownloadSettings.DEFAULT_BASE_URL,
+                    onClick = {
+                        baseUrl = dev.praxis.core.imagegen.ImageDownloadSettings.DEFAULT_BASE_URL
+                    },
+                )
+                MiuixNavigationItemWidget(
+                    title = "国内镜像",
+                    description = dev.praxis.core.imagegen.ImageDownloadSettings.MIRROR_BASE_URL +
+                        "（直连 HuggingFace 慢或不通时用）",
+                    onClick = {
+                        baseUrl = dev.praxis.core.imagegen.ImageDownloadSettings.MIRROR_BASE_URL
+                    },
                 )
                 MiuixIntNumberPickerWidget(
                     title = "同时下载几个文件",

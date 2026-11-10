@@ -282,8 +282,16 @@ class ModelDownloader(
     }
 
     companion object {
-        /** GitHub raw/release 的默认源；换源时整条 baseUrl 替换即可。 */
-        const val DEFAULT_BASE_URL: String = "https://github.com/"
+        /**
+         * 默认源：**HuggingFace**（与 core 的 ImageDownloadSettings 同值）。
+         *
+         * 这里此前写的是 github.com —— 而清单里的 fileUri 是 HF 的
+         * `owner/repo/resolve/main/file` 形状，拼到 GitHub 上必然 404，
+         * 表现是「点下载永远失败」。见 ImageDownloadSettings 里的说明。
+         *
+         * 换源时整条 baseUrl 替换即可。
+         */
+        const val DEFAULT_BASE_URL: String = "https://huggingface.co/"
 
         private const val BUFFER_SIZE = 64 * 1024
 
