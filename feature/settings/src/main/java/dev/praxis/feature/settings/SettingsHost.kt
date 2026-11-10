@@ -202,6 +202,14 @@ fun SettingsHost(
     imageGenInstalledModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
     /** 服务商（模型池）里可选的生图模型（文档 §7.1 的「服务商模型」分组）。 */
     imageGenRemoteModels: List<dev.praxis.feature.settings.ImageGenRemoteModel> = emptyList(),
+    // ── 内置引擎的起停（形态 C，文档 §1.1）──
+    /** nativeLibraryDir 里有没有引擎（自用构建才有）。 */
+    engineBundledInstalled: Boolean = false,
+    engineRunning: Boolean = false,
+    /** 起停结果或失败原因（含引擎日志尾部）。 */
+    engineLaunchMessage: String? = null,
+    onStartEngine: () -> Unit = {},
+    onStopEngine: () -> Unit = {},
     /** 当前选中的生图目标（imagegen_target 解码后的值）。 */
     imageGenCurrentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
     onSelectImageGenTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
@@ -420,6 +428,11 @@ fun SettingsHost(
             imageGenAvailability = imageGenAvailability,
             imageGenInstalledModels = imageGenInstalledModels,
             imageGenRemoteModels = imageGenRemoteModels,
+            engineBundledInstalled = engineBundledInstalled,
+            engineRunning = engineRunning,
+            engineLaunchMessage = engineLaunchMessage,
+            onStartEngine = onStartEngine,
+            onStopEngine = onStopEngine,
             imageGenCurrentTarget = imageGenCurrentTarget,
             onSelectImageGenTarget = onSelectImageGenTarget,
             imageGenModelsRootPath = imageGenModelsRootPath,
@@ -648,6 +661,14 @@ private fun SettingsPageBody(
     imageGenInstalledModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
     /** 服务商（模型池）里可选的生图模型（文档 §7.1 的「服务商模型」分组）。 */
     imageGenRemoteModels: List<dev.praxis.feature.settings.ImageGenRemoteModel> = emptyList(),
+    // ── 内置引擎的起停（形态 C，文档 §1.1）──
+    /** nativeLibraryDir 里有没有引擎（自用构建才有）。 */
+    engineBundledInstalled: Boolean = false,
+    engineRunning: Boolean = false,
+    /** 起停结果或失败原因（含引擎日志尾部）。 */
+    engineLaunchMessage: String? = null,
+    onStartEngine: () -> Unit = {},
+    onStopEngine: () -> Unit = {},
     /** 当前选中的生图目标（imagegen_target 解码后的值）。 */
     imageGenCurrentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
     onSelectImageGenTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
@@ -887,6 +908,11 @@ private fun SettingsPageBody(
         )
         PraxisRoute.SettingsImageGen -> ImageGenRoute(
             probeEngine = imageGenProbeEngine,
+            engineBundledInstalled = engineBundledInstalled,
+            engineRunning = engineRunning,
+            engineLaunchMessage = engineLaunchMessage,
+            onStartEngine = onStartEngine,
+            onStopEngine = onStopEngine,
             socModel = imageGenSocModel,
             availability = imageGenAvailability,
             installedModels = imageGenInstalledModels,

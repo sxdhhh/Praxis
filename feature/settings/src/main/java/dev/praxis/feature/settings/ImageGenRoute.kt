@@ -70,6 +70,14 @@ fun ImageGenRoute(
     probeEngine: suspend () -> EngineAvailability,
     /** 本机芯片型号原值（`Build.SOC_MODEL`，API < 31 回落 `Build.HARDWARE`）。 */
     socModel: String,
+    /** 内置引擎装没装（形态 C，文档 §1.1；自用构建才有）。 */
+    engineBundledInstalled: Boolean = false,
+    /** 我们起的引擎进程在不在跑。 */
+    engineRunning: Boolean = false,
+    /** 起停结果或失败原因（可能带引擎日志尾部）。 */
+    engineLaunchMessage: String? = null,
+    onStartEngine: () -> Unit = {},
+    onStopEngine: () -> Unit = {},
     /** 设备门控（文档 §9）：能不能跑本地生图。 */
     availability: dev.praxis.core.imagegen.ImageGenAvailability =
         dev.praxis.core.imagegen.ImageGenAvailability.NpuCapable,
@@ -180,14 +188,44 @@ fun ImageGenRoute(
                                 modifier = Modifier.padding(top = 6.dp),
                             )
                             Text(
-                                text = "三条路（都还没做进 Praxis，先手动准备）：" +
-                                    "① 装 Local Dream 并打开它的 host 模式；" +
-                                    "② 在 Praxis 的 Linux 容器里跑引擎；" +
-                                    "③ 自用构建时把引擎随包内置。",
+                                text = if (engineBundledInstalled) {
+                                    "这台构建**内置了引擎**：点下面「启动内置引擎」就能用，" +
+                                        "不用装别的 App、也不用容器。"
+                                } else {
+                                    "这条路要自己准备（Praxis 不做）：" +
+                                        "① 装 Local Dream 并打开它的 host 模式（连 8081）；" +
+                                        "② 在 Praxis 的 Linux 容器里跑引擎。" +
+                                        "（③「引擎随包内置」是自用构建的选项，这个 APK 没带。）"
+                                },
                                 style = MiuixTheme.textStyles.footnote1,
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 modifier = Modifier.padding(top = 6.dp),
                             )
+                            // 形态 C 的起停入口：只有这个构建带了引擎才画。
+                            if (engineBundledInstalled) {
+                                Spacer(Modifier.height(12.dp))
+                                if (engineRunning) {
+                                    MiuixNavigationItemWidget(
+                                        title = "停止引擎",
+                                        description = "生成完可以停掉，省电",
+                                        onClick = onStopEngine,
+                                    )
+                                } else {
+                                    MiuixNavigationItemWidget(
+                                        title = "启动内置引擎",
+                                        description = "用当前选中的本地模型起引擎（CPU 类型不需要 QNN 库）",
+                                        onClick = onStartEngine,
+                                    )
+                                }
+                                engineLaunchMessage?.let { message ->
+                                    Text(
+                                        text = message,
+                                        style = MiuixTheme.textStyles.footnote1,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        modifier = Modifier.padding(top = 6.dp),
+                                    )
+                                }
+                            }
                         }
                     }
                 }

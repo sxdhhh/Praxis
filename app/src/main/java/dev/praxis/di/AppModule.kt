@@ -116,6 +116,16 @@ val appModule = module {
         )
     }
 
+    // 形态 C：随包引擎的进程管理（文档 §1.1 的 C + §3.1 的起法）。
+    // nativeLibraryDir 是唯一能执行二进制的目录（API 29+ 的 W^X）。
+    single {
+        dev.praxis.data.imagegen.EngineProcess(
+            nativeLibraryDir = {
+                androidContext().applicationInfo.nativeLibraryDir
+            },
+        )
+    }
+
     // 远端生图走网关账号池（文档 §5.1 的 Images 入口）。
     single<dev.praxis.data.imagegen.ImageGatewayAccounts> {
         dev.praxis.data.imagegen.GatewayImageAccountPool(

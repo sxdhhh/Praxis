@@ -626,6 +626,17 @@ fun PraxisApp(
     }
     val imageGenCurrentTarget = imageGenTargetDecoded?.getOrNull()
 
+    // 形态 C：随包引擎的起停（文档 §1.1 的 C + §3.1 的起法）。
+    //
+    // 这是唯一能让「生图完全本地可用」的路：用户不用另装 App、不用容器，
+    // 引擎 .so 就在 APK 里（CPU 类型 sd15cpu 不需要任何 QNN 库）。
+    val engineProcess: dev.praxis.data.imagegen.EngineProcess =
+        org.koin.compose.koinInject()
+    var engineRunning by remember { mutableStateOf(false) }
+    var engineLaunchMessage by remember { mutableStateOf<String?>(null) }
+    // 引擎装没装：nativeLibraryDir 里有没有那个 .so（自用构建才有）。
+    val engineBundledInstalled = remember { engineProcess.isInstalled() }
+
     LaunchedEffect(imageGenDownloadState) {
         val downloadState = imageGenDownloadState
         if (downloadState is dev.praxis.core.imagegen.ImageDownloadState.Completed) {
@@ -1935,6 +1946,38 @@ fun PraxisApp(
                 imageGenSocModel = imageGenSocModel,
                 imageGenAvailability = imageGenAvailability,
                 imageGenInstalledModels = imageGenInstalledModels,
+                engineBundledInstalled = engineBundledInstalled,
+                engineRunning = engineRunning,
+                engineLaunchMessage = engineLaunchMessage,
+                onStartEngine = {
+                    // 起引擎要一个「模型 + 它的目录」：类型也来自模型条目。
+                    val target = imageGenCurrentTarget
+                        as? dev.praxis.core.imagegen.ImageGenTarget.Local
+                    val model = imageGenInstalledModels
+                        .firstOrNull { it.id == target?.modelId }
+                    if (model == null) {
+                        engineLaunchMessage = "先在「模型库」下载一个本地模型，再来起引擎"
+                    } else {
+                        val spec = dev.praxis.core.imagegen.EngineLaunchRules.specFor(
+                            model = model,
+                            enginePath = engineProcess.engineFile().absolutePath,
+                            modelDir = java.io.File(imageGenModelsRoot, model.id)
+                                .absolutePath,
+                        )
+                        val failure = engineProcess.start(spec)
+                        engineRunning = engineProcess.isRunning()
+                        engineLaunchMessage = if (failure == null) {
+                            "已启动（" + model.backendType + "），等端口就绪后点「重新检测」"
+                        } else {
+                            failure.userMessage() + "\n" + engineProcess.logTail(6)
+                        }
+                    }
+                },
+                onStopEngine = {
+                    engineProcess.stop()
+                    engineRunning = false
+                    engineLaunchMessage = "已停止"
+                },
                 imageGenCurrentTarget = imageGenCurrentTarget,
                 onSelectImageGenTarget = { target ->
                     coroutineScope.launch {
