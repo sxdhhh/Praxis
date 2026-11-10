@@ -74,6 +74,10 @@ fun ImageGenRoute(
     engineBundledInstalled: Boolean = false,
     /** 我们起的引擎进程在不在跑。 */
     engineRunning: Boolean = false,
+    /** QNN 运行时（NPU 路线）解好了没。 */
+    engineQnnInstalled: Boolean = false,
+    /** QNN 覆盖到的 Hexagon 版本；空 = 还没解。 */
+    engineQnnCoverage: List<Int> = emptyList(),
     /** 起停结果或失败原因（可能带引擎日志尾部）。 */
     engineLaunchMessage: String? = null,
     onStartEngine: () -> Unit = {},
@@ -217,6 +221,20 @@ fun ImageGenRoute(
                                         onClick = onStartEngine,
                                     )
                                 }
+                                // NPU 路线要先有 QNN 运行时；这里如实说明现状与覆盖范围。
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = if (engineQnnInstalled) {
+                                        "NPU 运行时：已就绪，覆盖 Hexagon V" +
+                                            engineQnnCoverage.joinToString("、V") +
+                                            "（引擎自己按机型挑一套）"
+                                    } else {
+                                        "NPU 运行时：还没解压 —— 选 NPU 模型起引擎时会自动解" +
+                                            "（首次慢一点，之后复用）。CPU 模型不需要它。"
+                                    },
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
                                 engineLaunchMessage?.let { message ->
                                     Text(
                                         text = message,

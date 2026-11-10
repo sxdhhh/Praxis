@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.praxis.core.data.settings.SettingsRepository
+import dev.praxis.core.imagegen.userMessage
 import dev.praxis.core.plugin.collectEntryPoints
 import dev.praxis.feature.settings.capability.MemoryRoute
 import dev.praxis.feature.settings.home.SettingsHomeScreen

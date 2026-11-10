@@ -205,6 +205,10 @@ fun SettingsHost(
     // ── 内置引擎的起停（形态 C，文档 §1.1）──
     /** nativeLibraryDir 里有没有引擎（自用构建才有）。 */
     engineBundledInstalled: Boolean = false,
+    /** QNN 运行时（NPU）解好了没。 */
+    engineQnnInstalled: Boolean = false,
+    /** QNN 覆盖到的 Hexagon 版本（界面展示范围）。 */
+    engineQnnCoverage: List<Int> = emptyList(),
     engineRunning: Boolean = false,
     /** 起停结果或失败原因（含引擎日志尾部）。 */
     engineLaunchMessage: String? = null,
@@ -429,6 +433,8 @@ fun SettingsHost(
             imageGenInstalledModels = imageGenInstalledModels,
             imageGenRemoteModels = imageGenRemoteModels,
             engineBundledInstalled = engineBundledInstalled,
+            engineQnnInstalled = engineQnnInstalled,
+            engineQnnCoverage = engineQnnCoverage,
             engineRunning = engineRunning,
             engineLaunchMessage = engineLaunchMessage,
             onStartEngine = onStartEngine,
@@ -664,6 +670,10 @@ private fun SettingsPageBody(
     // ── 内置引擎的起停（形态 C，文档 §1.1）──
     /** nativeLibraryDir 里有没有引擎（自用构建才有）。 */
     engineBundledInstalled: Boolean = false,
+    /** QNN 运行时（NPU）解好了没。 */
+    engineQnnInstalled: Boolean = false,
+    /** QNN 覆盖到的 Hexagon 版本（界面展示范围）。 */
+    engineQnnCoverage: List<Int> = emptyList(),
     engineRunning: Boolean = false,
     /** 起停结果或失败原因（含引擎日志尾部）。 */
     engineLaunchMessage: String? = null,
@@ -909,6 +919,8 @@ private fun SettingsPageBody(
         PraxisRoute.SettingsImageGen -> ImageGenRoute(
             probeEngine = imageGenProbeEngine,
             engineBundledInstalled = engineBundledInstalled,
+            engineQnnInstalled = engineQnnInstalled,
+            engineQnnCoverage = engineQnnCoverage,
             engineRunning = engineRunning,
             engineLaunchMessage = engineLaunchMessage,
             onStartEngine = onStartEngine,
