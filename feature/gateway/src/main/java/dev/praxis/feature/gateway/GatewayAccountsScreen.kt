@@ -30,6 +30,7 @@ import dev.praxis.core.gateway.GatewayAccountStatus
 import dev.praxis.core.gateway.GatewayStatusText
 import dev.praxis.ui.widgets.MiuixBadge
 import dev.praxis.ui.widgets.MiuixDraggableList
+import dev.praxis.ui.navigation.PraxisRoute
 import dev.praxis.ui.widgets.MiuixNavigationItemWidget
 import dev.praxis.ui.widgets.MiuixSelectableRow
 import dev.praxis.ui.widgets.SettingsSectionHeader
@@ -85,6 +86,8 @@ fun GatewayAccountsScreen(
 ) {
     var batchMode by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // 就地取导航：这一页要把「添加账号」推进三级流程的第一步。
+    val navigator = dev.praxis.ui.navigation.LocalNavigator.current
     var addVisible by remember { mutableStateOf(false) }
     // 顶栏是浮层：内容要能滚到它下面（否则渐进模糊采不到内容，退化成一块实色）。
     val topInset = dev.praxis.ui.design.component.LocalTopBarInset.current
@@ -107,7 +110,10 @@ fun GatewayAccountsScreen(
                     MiuixNavigationItemWidget(
                         title = "添加账号",
                         description = "填地址与 Key；内置家清单要等 Rust 内核",
-                        onClick = { addVisible = true },
+                        // 走文档 §9.9 的三级流程：提供商列表（带搜索）→ 登录方式（直填 Key / 打开登录页）
+                            // → 授权弹窗。旧的一步式弹窗保留在下面，但入口不再指向它：
+                            // 三级流程多了「网页授权」那条路（那是 P1 验收里的关键一步）。
+                            onClick = { navigator.push(PraxisRoute.SettingsGatewayAdd) },
                     )
                 }
             }
@@ -217,6 +223,8 @@ fun GatewayAccountsScreen(
         }
     }
 
+    // 旧的一步式弹窗：入口已经改走三级流程（见上面的 onClick）。
+    // 这里保留是因为它仍被单测/预览引用；`addVisible` 现在恒为 false。
     if (addVisible && onAddAccount != null) {
         AddAccountDialog(
             onDismiss = { addVisible = false },

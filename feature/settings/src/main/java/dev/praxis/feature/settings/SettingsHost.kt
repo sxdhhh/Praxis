@@ -940,8 +940,7 @@ private fun SettingsPageBody(
             modifier = modifier,
         )
         PraxisRoute.SettingsGatewayAccounts -> dev.praxis.feature.gateway.GatewayAccountsScreen(
-            // 走文档 §9.9 的三级流程（提供商列表 → 登录方式 → 授权弹窗）。
-            onAddAccount = { navigator.push(PraxisRoute.SettingsGatewayAdd) },
+            onAddAccount = onAddGatewayAccount,
             onTestConnection = onTestGatewayAccount,
             rows = gatewayAccountRows,
             onMove = { _, _ -> },
