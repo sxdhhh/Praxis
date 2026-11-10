@@ -48,6 +48,15 @@ data class GatewaySystemSettings(
      * 那不是「加个设置」该有的副作用。
      */
     val queueWaitSeconds: Int = 0,
+    /**
+     * 自动续写（文档 §5.18 / §7.5）：回答被腰斩时自动再问一轮把话说完。
+     *
+     * **同脱敏的理由：默认关**。它会**花钱**（多跑一轮），文档原话是
+     * 「自动续写要花钱，不能擅自开」。
+     */
+    val autoContinue: Boolean = false,
+    /** 续写轮数上限（文档 §7.5：3）。 */
+    val autoContinueMaxRounds: Int = 3,
     /** 图片压缩（文档 §5.18）：开关 / 长边 / 质量 / 阈值。 */
     val imageCompress: dev.praxis.core.ai.ChatImageCompression =
         dev.praxis.core.ai.ChatImageCompression(),
@@ -67,6 +76,10 @@ data class GatewaySystemSettings(
         /** 0 = 不限；上限给 300 秒（再长不如让用户直接取消）。 */
         const val MIN_QUEUE_WAIT_SECONDS: Int = 0
         const val MAX_QUEUE_WAIT_SECONDS: Int = 300
+
+        /** 续写至少 1 轮（0 = 等于关掉，那种情况应当用开关表达）。 */
+        const val MIN_AUTO_CONTINUE_ROUNDS: Int = 1
+        const val MAX_AUTO_CONTINUE_ROUNDS: Int = 10
     }
 }
 
@@ -93,6 +106,11 @@ object GatewaySystemSettingsRules {
                 GatewaySystemSettings.MAX_QUEUE_WAIT_SECONDS,
             ),
             imageCompress = settings.imageCompress.normalized(),
+            autoContinue = settings.autoContinue,
+            autoContinueMaxRounds = settings.autoContinueMaxRounds.coerceIn(
+                GatewaySystemSettings.MIN_AUTO_CONTINUE_ROUNDS,
+                GatewaySystemSettings.MAX_AUTO_CONTINUE_ROUNDS,
+            ),
         )
 }
 
@@ -105,6 +123,8 @@ object GatewaySystemSettingsCodec {
         put("maxSwitches", settings.maxSwitches)
         put("debugRawTraffic", settings.debugRawTraffic)
         put("queueWaitSeconds", settings.queueWaitSeconds)
+        put("autoContinue", settings.autoContinue)
+        put("autoContinueMaxRounds", settings.autoContinueMaxRounds)
         // 图片压缩：内嵌对象（与文档 §6.4 的四个键对应，这里合成一组）。
         put(
             "imageCompress",
@@ -131,6 +151,12 @@ object GatewaySystemSettingsCodec {
                     debugRawTraffic = root["debugRawTraffic"]?.jsonPrimitive?.contentOrNull
                         ?.toBooleanStrictOrNull() ?: defaults.debugRawTraffic,
                     queueWaitSeconds = root.intOr("queueWaitSeconds", defaults.queueWaitSeconds),
+                    autoContinue = root["autoContinue"]?.jsonPrimitive?.contentOrNull
+                        ?.toBooleanStrictOrNull() ?: defaults.autoContinue,
+                    autoContinueMaxRounds = root.intOr(
+                        "autoContinueMaxRounds",
+                        defaults.autoContinueMaxRounds,
+                    ),
                     imageCompress = root["imageCompress"]?.jsonObject?.let { nested ->
                         dev.praxis.core.ai.ChatImageCompression(
                             enabled = nested["enabled"]?.jsonPrimitive?.contentOrNull

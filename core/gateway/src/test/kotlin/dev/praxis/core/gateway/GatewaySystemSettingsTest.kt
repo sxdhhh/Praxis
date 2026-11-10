@@ -56,6 +56,38 @@ class GatewaySystemSettingsTest {
     }
 
     @Test
+    fun `自动续写默认关（它会花钱）`() {
+        val d = GatewaySystemSettings()
+        assertEquals(false, d.autoContinue)
+        assertEquals(3, d.autoContinueMaxRounds)
+    }
+
+    @Test
+    fun `续写轮数越界被夹到 1 到 10`() {
+        assertEquals(
+            GatewaySystemSettings.MIN_AUTO_CONTINUE_ROUNDS,
+            GatewaySystemSettingsRules.normalize(
+                GatewaySystemSettings(autoContinueMaxRounds = 0),
+            ).autoContinueMaxRounds,
+        )
+        assertEquals(
+            GatewaySystemSettings.MAX_AUTO_CONTINUE_ROUNDS,
+            GatewaySystemSettingsRules.normalize(
+                GatewaySystemSettings(autoContinueMaxRounds = 99),
+            ).autoContinueMaxRounds,
+        )
+    }
+
+    @Test
+    fun `自动续写能往返`() {
+        val settings = GatewaySystemSettings(autoContinue = true, autoContinueMaxRounds = 5)
+        assertEquals(
+            settings,
+            GatewaySystemSettingsCodec.decode(GatewaySystemSettingsCodec.encode(settings))?.getOrNull(),
+        )
+    }
+
+    @Test
     fun `越界被夹到边界`() {
         val normalized = GatewaySystemSettingsRules.normalize(
             GatewaySystemSettings(connectTimeoutSeconds = 0, readTimeoutSeconds = 99999, maxSwitches = 0),

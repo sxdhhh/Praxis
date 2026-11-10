@@ -55,6 +55,68 @@ object GatewayImporter {
     }
 
     /**
+     * 批量导出形状（网关「导出全部账号」的产物）：`{"accounts":[...]}`。
+     *
+     * ## 为什么必须支持它
+     *
+     * 用户从网关面板导出的是**一整份**（顶层 accounts 数组），不是一个个单账号文件。
+     * 只认单文件形状的话，他下载下来的东西在 Praxis 里会整份被判「不是账号文件」——
+     * 而那是最容易让人放弃的一步。
+     *
+     * 字段名逐字对应真实导出（2026-11 实测的那份）：凭证是 accessToken/refreshToken
+     * （OAuth 型）、地址在 `endpoint`、家是 `provider`。
+     */
+    @kotlinx.serialization.Serializable
+    private data class BulkAccountFile(val accounts: List<BulkAccountEntry> = emptyList())
+
+    @kotlinx.serialization.Serializable
+    private data class BulkAccountEntry(
+        val id: String = "",
+        val provider: String = "",
+        val name: String = "",
+        val nickname: String = "",
+        val apiKey: String? = null,
+        val accessToken: String? = null,
+        val refreshToken: String? = null,
+        /** 真实导出里地址叫 endpoint。 */
+        val endpoint: String? = null,
+        val baseUrl: String? = null,
+    )
+
+    /**
+     * 解析一份文本，得到其中的**全部**账号。
+     *
+     * 先按单账号文件试（网关面板「导出这个账号」的产物），再按批量导出试。
+     * 两种形状共用后面同一套逐条规则 —— 报告因此能精确到**哪一条**、为什么。
+     */
+    fun parseAll(text: String): Result<List<GatewayAccountFile>> = runCatching {
+        parse(text).getOrNull()?.let { single -> return@runCatching listOf(single) }
+        val bulk = runCatching {
+            json.decodeFromString(BulkAccountFile.serializer(), text)
+        }.getOrNull()
+        val entries = bulk?.accounts
+        require(!entries.isNullOrEmpty()) {
+            "既不是网关账号文件（缺 format），也不是批量导出（缺 accounts 数组）"
+        }
+        entries.mapIndexed { index, entry ->
+            require(entry.id.isNotBlank()) { "批量导出第 " + (index + 1) + " 条缺 id" }
+            require(entry.provider.isNotBlank()) {
+                "账号 " + entry.id + " 缺 provider"
+            }
+            GatewayAccountFile(
+                format = ACCOUNT_FORMAT,
+                id = entry.id,
+                provider = entry.provider,
+                name = entry.name.ifBlank { entry.nickname },
+                apiKey = entry.apiKey,
+                baseUrl = entry.endpoint ?: entry.baseUrl,
+                accessToken = entry.accessToken,
+                refreshToken = entry.refreshToken,
+            )
+        }
+    }
+
+    /**
      * 生成导入报告（不落库）。
      *
      * @param files 文件名 → JSON 正文。用文件名是因为失败项要能指向**哪个文件**。
@@ -76,9 +138,10 @@ object GatewayImporter {
         val seenEndpoints = mutableSetOf<String>()
 
         files.forEach { (fileName, text) ->
-            val parsed = parse(text)
-            val file = parsed.getOrNull()
-            if (file == null) {
+            // 一份文本可能是**多个**账号（批量导出），所以是 parseAll。
+            val parsed = parseAll(text)
+            val accounts = parsed.getOrNull()
+            if (accounts == null) {
                 failed += GatewayImportReport.Item(
                     id = fileName,
                     name = fileName,
@@ -87,20 +150,31 @@ object GatewayImporter {
                 return@forEach
             }
 
+            accounts.forEach accountLoop@ { file ->
             val display = file.name.ifBlank { file.id }
             if (file.apiKey.isNullOrBlank()) {
                 val isOauth = !file.accessToken.isNullOrBlank() ||
                     !file.refreshToken.isNullOrBlank()
+                // 两个原因同时成立时**都说出来**：只说一个，用户按那一条补完
+                // 之后还会再撞上第二个 —— 报告的价值就在于「一次说清」。
+                val providerUnknown = !file.provider.startsWith("custom-") &&
+                    file.provider !in knownProviders
+                val credentialReason = if (isOauth) {
+                    "一期仅支持 API Key 型；OAuth 账号需要续期实现，暂不导入"
+                } else {
+                    "文件里没有可用凭证（apiKey / accessToken / refreshToken 都为空）"
+                }
                 skipped += GatewayImportReport.Item(
                     id = file.id,
                     name = display,
-                    reason = if (isOauth) {
-                        "一期仅支持 API Key 型；OAuth 账号需要续期实现，暂不导入"
+                    reason = if (providerUnknown) {
+                        credentialReason + "；另外 Praxis 也还不认识这家提供商：" +
+                            file.provider
                     } else {
-                        "文件里没有可用凭证（apiKey / accessToken / refreshToken 都为空）"
+                        credentialReason
                     },
                 )
-                return@forEach
+                return@accountLoop
             }
 
             val isCustom = file.provider.startsWith("custom-")
@@ -110,7 +184,7 @@ object GatewayImporter {
                     name = display,
                     reason = "Praxis 不认识这家提供商：" + file.provider,
                 )
-                return@forEach
+                return@accountLoop
             }
 
             val endpointKey = file.provider + "|" + file.baseUrl.orEmpty()
@@ -125,6 +199,7 @@ object GatewayImporter {
                 if (providers.none { it.id == provider.id }) providers += provider
             }
             if (file.id in existingIds) updated += item else added += item
+            }
         }
 
         return GatewayImportPlan(
