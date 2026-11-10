@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.runtime.Composable
@@ -147,6 +148,80 @@ fun GatewaySystemScreen(
                     valueSuffix = " 秒",
                     onValueChange = { seconds ->
                         onChange(settings.copy(queueWaitSeconds = seconds))
+                    },
+                )
+            }
+        }
+        item(key = "__img_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Image,
+                title = "图片压缩",
+                subtitle = "发出去的图先缩一缩",
+            )
+        }
+        item(key = "__img_switch__") {
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+                MiuixSwitchWidget(
+                    title = "启用图片压缩",
+                    description = "关掉时原图原样发出去",
+                    checked = settings.imageCompress.enabled,
+                    onCheckedChange = { enabled ->
+                        onChange(
+                            settings.copy(imageCompress = settings.imageCompress.copy(enabled = enabled)),
+                        )
+                    },
+                )
+            }
+        }
+        item(key = "__img_max_edge__") {
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+                MiuixIntNumberPickerWidget(
+                    title = "长边上限",
+                    description = "照片通常 4000+，缩到这个值才像「消息里的图」",
+                    value = settings.imageCompress.maxEdge,
+                    startInt = dev.praxis.core.ai.ChatImageCompression.MIN_MAX_EDGE,
+                    endInt = dev.praxis.core.ai.ChatImageCompression.MAX_MAX_EDGE,
+                    valueSuffix = " 像素",
+                    onValueChange = { value ->
+                        onChange(
+                            settings.copy(imageCompress = settings.imageCompress.copy(maxEdge = value)),
+                        )
+                    },
+                )
+            }
+        }
+        item(key = "__img_quality__") {
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+                MiuixIntNumberPickerWidget(
+                    title = "JPEG 质量",
+                    description = "越低越小越糊",
+                    value = settings.imageCompress.quality,
+                    startInt = dev.praxis.core.ai.ChatImageCompression.MIN_QUALITY,
+                    endInt = dev.praxis.core.ai.ChatImageCompression.MAX_QUALITY,
+                    valueSuffix = "",
+                    onValueChange = { value ->
+                        onChange(
+                            settings.copy(imageCompress = settings.imageCompress.copy(quality = value)),
+                        )
+                    },
+                )
+            }
+        }
+        item(key = "__img_threshold__") {
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+                MiuixIntNumberPickerWidget(
+                    title = "体积阈值",
+                    description = "小于这个体积的图**不动它**（再压只是多掉一层画质）；0 = 不豁免",
+                    value = settings.imageCompress.thresholdKb,
+                    startInt = dev.praxis.core.ai.ChatImageCompression.MIN_THRESHOLD_KB,
+                    endInt = dev.praxis.core.ai.ChatImageCompression.MAX_THRESHOLD_KB,
+                    valueSuffix = " KB",
+                    onValueChange = { value ->
+                        onChange(
+                            settings.copy(
+                                imageCompress = settings.imageCompress.copy(thresholdKb = value),
+                            ),
+                        )
                     },
                 )
             }
