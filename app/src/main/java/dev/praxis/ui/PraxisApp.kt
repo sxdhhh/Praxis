@@ -252,17 +252,12 @@ fun PraxisApp(
      * （GatewayProvider 还没做）。所以账号页现在只会显示「正常」或「已停用」，
      * 这与事实一致，不是写死的。
      */
-    val gatewayRouteState = remember {
-        dev.praxis.core.gateway.RouteState(
-            clock = { System.currentTimeMillis() },
-            breaker = dev.praxis.core.gateway.BreakerConfig(
-                enabled = false,
-                failureThreshold = 3,
-                openMillis = 60_000L,
-                successThreshold = 1,
-            ),
-        )
-    }
+    //
+    // **从 Koin 取，而不是在这里 remember**：远端生图的账号池要用同一个实例，
+    // 否则两边的冷却/熔断各记各的 —— 那「Images 走账号池」就白接了。
+    // 熔断四参由设置页在运行期通过 updateBreakerConfig 推入（见上面那段 LaunchedEffect）。
+    val gatewayRouteState: dev.praxis.core.gateway.RouteState =
+        org.koin.compose.koinInject()
 
     // ── 导入（文档 9.7 的「从剪贴板」入口）──
     //

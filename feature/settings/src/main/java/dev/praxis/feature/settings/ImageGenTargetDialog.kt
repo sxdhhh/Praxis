@@ -214,8 +214,10 @@ fun ImageGenTargetDialog(
                     }
                 }
                 Text(
-                    text = "这些名字来自各家的模型清单；远端生图用的是「Praxis 全局 API Key」，" +
-                        "不是网关账号池。清单里没有想要的？在下面自己填一个。",
+                    text = "这些名字来自各家的模型清单。远端生图**优先用网关账号池**" +
+                        "（换号、退避、熔断、token 预算都对它生效）；" +
+                        "该家不在池里、或池里此刻没有可用账号时才用「Praxis 全局 API Key」。" +
+                        "清单里没有想要的？在下面自己填一个。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 6.dp),

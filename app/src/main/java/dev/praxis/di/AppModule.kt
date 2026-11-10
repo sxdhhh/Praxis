@@ -98,6 +98,33 @@ val appModule = module {
     }
     single { get<PraxisDatabase>().gatewayUsageDao() }
 
+    // 网关的运行态（退避 / 熔断 / 限额）——**单例**，文本请求与生图共用同一份。
+    //
+    // 这是「Images 走账号池」能成立的前提：两份状态各记各的，冷却与熔断就不共享，
+    // 那接了等于没接。熔断参数由设置页在运行期通过 updateBreakerConfig 推入。
+    single {
+        dev.praxis.core.gateway.RouteState(
+            clock = { System.currentTimeMillis() },
+            breaker = dev.praxis.core.gateway.BreakerConfig(
+                enabled = false,
+                failureThreshold = 3,
+                openMillis = 60_000L,
+                successThreshold = 1,
+            ),
+        )
+    }
+
+    // 远端生图走网关账号池（文档 §5.1 的 Images 入口）。
+    single<dev.praxis.data.imagegen.ImageGatewayAccounts> {
+        dev.praxis.data.imagegen.GatewayImageAccountPool(
+            store = get(),
+            // 与文本请求同一个 RouteState（见上面的 single）。
+            state = get(),
+            // 内置家地址；自定义家的地址在 provider 表里，池会自己查。
+            providerBaseUrl = { id -> dev.praxis.data.gateway.BuiltinProviders.baseUrl(id) },
+        )
+    }
+
     // 路由回放（文档 §5.5）：进程内最近 50 条决策，单例才能跨请求累积。
     single { dev.praxis.core.gateway.RouteReplayLog() }
 
@@ -520,6 +547,7 @@ val appModule = module {
                         runner = get(),
                         probe = { locator.probe() },
                         // 设备门控（文档 §9）：ABI 与芯片型号都在 :app 才能读到。
+                        gatewayAccounts = get(),
                         availability = {
                             dev.praxis.core.imagegen.ImageGenAvailabilityRules.decide(
                                 abis = android.os.Build.SUPPORTED_ABIS.toList(),

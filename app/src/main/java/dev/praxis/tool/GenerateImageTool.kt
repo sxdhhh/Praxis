@@ -94,6 +94,12 @@ class GenerateImageTool(
      * 说清楚，而不是把没接线的环境挡掉。:app 会注入真实判定。
      */
     private val availability: () -> ImageGenAvailability = { ImageGenAvailability.NpuCapable },
+    /**
+     * 远端生图走的网关账号池（文档 §5.1 的 Images 入口）。
+     *
+     * null = 不接线：那时远端用「Praxis 全局 API Key」（显式行为，见端口 KDoc）。
+     */
+    private val gatewayAccounts: dev.praxis.data.imagegen.ImageGatewayAccounts? = null,
     /** 落盘：返回绝对路径。放成 lambda 让工具不碰 Context。 */
     private val saveImage: suspend (ByteArray) -> String,
 ) : Tool {
@@ -327,19 +333,35 @@ class GenerateImageTool(
             message = "远端生图没有装配（构建配置问题）",
             stage = ToolFailureStage.Execution,
         )
-        val key = apiKey()
+        // 先问账号池：有可用账号就用它的地址与 key —— 这样换号、退避、熔断、
+        // 限额这些运行态对画图同样生效（用全局 key 时它们全都绕过了）。
+        val poolAccount = gatewayAccounts?.pick(target.provider, target.model)
+        val key = poolAccount?.apiKey ?: apiKey()
+        // 账号自带地址时以它为准（同一家可能有账号级覆盖）。
+        val effectiveTarget = poolAccount?.let { account ->
+            target.copy(baseUrl = account.baseUrl)
+        } ?: target
         val saved = mutableListOf<SavedImage>()
         for (index in 0 until count) {
             val attempt = params.copy(seed = params.seed?.plus(index.toLong()))
-            when (val outcome = generator.generate(target, key, attempt)) {
-                is RemoteImageOutcome.Failure -> return failure(
-                    code = remoteCodeFor(outcome.kind),
-                    message = "远端生图失败：" + outcome.detail,
-                    hint = remoteHintFor(outcome.kind),
-                    saved = saved,
-                    stage = ToolFailureStage.Execution,
-                )
+            when (val outcome = generator.generate(effectiveTarget, key, attempt)) {
+                is RemoteImageOutcome.Failure -> {
+                    // 回报失败：池里的退避/熔断据此更新。
+                    poolAccount?.let { account ->
+                        gatewayAccounts?.report(account.accountId, success = false, outcome.kind)
+                    }
+                    return failure(
+                        code = remoteCodeFor(outcome.kind),
+                        message = "远端生图失败：" + outcome.detail,
+                        hint = remoteHintFor(outcome.kind),
+                        saved = saved,
+                        stage = ToolFailureStage.Execution,
+                    )
+                }
                 is RemoteImageOutcome.Success -> {
+                    poolAccount?.let { account ->
+                        gatewayAccounts?.report(account.accountId, success = true, kind = null)
+                    }
                     outcome.images.forEach { bytes ->
                         val path = saveImage(bytes)
                         // 远端不返回 seed：只回传「请求里带的那个」，没带就是 null。
