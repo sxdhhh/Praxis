@@ -17,6 +17,9 @@ dependencies {
     // 所以这里必须显式声明 —— 否则 `PraxisRadius` 在这个模块里不可见。
     implementation(project(":ui:theme"))
     implementation(project(":core:model"))
+    // 自动续写策略住在 core:gateway（文档 §10 的文件清单）：它是「回答被腰斩后怎么续」，
+    // 而 finish_reason 的语义在流契约（core:ai）里 —— 两边都要，所以这里引 gateway。
+    implementation(project(":core:gateway"))
     implementation(project(":core:ai"))
     implementation(project(":core:tool"))
     // 生图结果的解析（GenerateImageResultCodec）：工具产出的图要在气泡里显示，
