@@ -59,6 +59,13 @@ enum class EngineLaunchError {
     /** `sd15npu` 非 512 画布却没有补丁文件。 */
     MissingPatch,
     BadPort,
+    /**
+     * 参数都合法，但进程就是起不来（权限、SELinux、二进制格式不对…）。
+     *
+     * 单独一条而不是复用 [MissingEngineFile]：那种「归因错误」会让用户
+     * 去查一个根本不存在的问题（文件明明在）。
+     */
+    StartFailed,
 }
 
 fun EngineLaunchError.userMessage(): String = when (this) {
@@ -69,6 +76,7 @@ fun EngineLaunchError.userMessage(): String = when (this) {
     EngineLaunchError.IncompleteLibDir -> "--lib_dir 里要同时有 libQnnHtp.so 与 libQnnSystem.so"
     EngineLaunchError.MissingPatch -> "这个分辨率需要补丁文件（引擎缺了它会**静默回落到 512**）"
     EngineLaunchError.BadPort -> "端口要在 1..65535 之间"
+    EngineLaunchError.StartFailed -> "引擎进程起不来（看下面的引擎日志）"
 }
 
 /**

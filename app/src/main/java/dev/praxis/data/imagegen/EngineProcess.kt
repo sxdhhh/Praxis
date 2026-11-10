@@ -92,13 +92,13 @@ class EngineProcess(
             null
         }.getOrElse { error ->
             process = null
-            EngineLaunchError.MissingEngineFile.let {
-                // 起不来多半是引擎文件/权限问题；把真实异常记进日志尾部供界面显示。
-                synchronized(logLines) {
-                    logLines.addLast("启动失败：" + (error.message ?: error.javaClass.simpleName))
-                }
-                it
+            // 参数已过校验、进程仍起不来：**不要把原因说成「文件不在」** ——
+            // 那会让用户去查一个不存在的问题（文件明明在）。
+            // 真实异常记进日志尾部，界面与 StartFailed 一起显示。
+            synchronized(logLines) {
+                logLines.addLast("启动失败：" + (error.message ?: error.javaClass.simpleName))
             }
+            EngineLaunchError.StartFailed
         }
     }
 
