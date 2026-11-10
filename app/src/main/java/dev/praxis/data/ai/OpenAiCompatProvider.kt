@@ -73,6 +73,8 @@ class OpenAiCompatProvider(
      */
     /** 调试：记请求/响应摘要（不含对话内容）。见 GatewayProvider 的说明。 */
     private val debug: Boolean = false,
+    /** 出站 URL 的查询串后缀（上游 quirks.urlSuffix）。空串 = 不加。 */
+    private val urlSuffix: String = "",
     private val customHeaders: List<dev.praxis.core.model.settings.CustomHeader> =
         emptyList(),
     private val client: OkHttpClient = defaultClient(),
@@ -232,7 +234,7 @@ class OpenAiCompatProvider(
      *
      * 这里只留一行委托，避免出现「上游改了规则、这一份没改」的第二份实现。
      */
-    private fun endpoint(): String = ChatEndpoint.resolve(baseUrl)
+    private fun endpoint(): String = ChatEndpoint.resolve(baseUrl) + urlSuffix
 
     /**
      * 头名是否合法（RFC 7230 token）。

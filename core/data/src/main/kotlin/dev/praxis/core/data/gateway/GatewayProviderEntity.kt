@@ -18,4 +18,19 @@ data class GatewayProviderEntity(
     /** 模型映射（JSON 数组文本，原样保存）。 */
     val mappingsJson: String,
     val createdAt: Long,
+    /**
+     * 额外请求头（JSON 对象文本，如 `{"Anthropic-Beta":"claude-code-20250219"}`）。
+     *
+     * 来自上游预设的 `quirks.headers`（preset-providers.js）：对某些家是**硬门槛**
+     * （Cline 的 `X-CLIENT-TYPE` 缺了一律 403；Anthropic/GLM 的 `Anthropic-Beta`
+     * 决定 beta 特性可用性）。空串 = 没有。
+     */
+    val extraHeadersJson: String = "",
+    /**
+     * 出站 URL 的查询串后缀（上游 `quirks.urlSuffix`）。
+     *
+     * GLM / MiniMax 的 Claude 兼容端点要求 `?beta=true`，缺了部分 beta 特性不可用。
+     * 空串 = 不加。
+     */
+    val urlSuffix: String = "",
 )

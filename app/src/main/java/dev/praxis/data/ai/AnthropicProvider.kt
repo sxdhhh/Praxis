@@ -40,6 +40,10 @@ class AnthropicProvider(
     private val apiKey: String,
     /** 调试：记请求/响应摘要（不含对话内容）。见 GatewayProvider 的说明。 */
     private val debug: Boolean = false,
+    /** 出站 URL 的查询串后缀（上游 quirks.urlSuffix，GLM/MiniMax 要 ?beta=true）。 */
+    private val urlSuffix: String = "",
+    /** 给工具补 type:"custom"（上游 quirks.anthropicToolType，MiniMax 要求）。 */
+    private val toolTypeCustom: Boolean = false,
     private val customHeaders: List<CustomHeader> = emptyList(),
     private val client: OkHttpClient = defaultClient(),
 ) : AiProvider {
@@ -47,7 +51,7 @@ class AnthropicProvider(
     override val displayName: String = "Anthropic Messages"
 
     override fun stream(request: ChatRequest): Flow<AiStreamEvent> = flow {
-        val body = AnthropicRequestBuilder.build(request)
+        val body = AnthropicRequestBuilder.build(request, toolTypeCustom = toolTypeCustom)
         if (debug) {
             dev.praxis.core.data.log.PraxisLogger.i(
                 "gateway",
@@ -133,7 +137,8 @@ class AnthropicProvider(
 
     private fun endpoint(): String {
         val base = baseUrl.trimEnd('/')
-        return base + ProviderProtocols.path(ProviderProtocol.AnthropicMessages)
+        // urlSuffix 追加在路径**之后**（GLM / MiniMax 的 Claude 兼容端点要 ?beta=true）。
+        return base + ProviderProtocols.path(ProviderProtocol.AnthropicMessages) + urlSuffix
     }
 
     private companion object {

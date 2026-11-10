@@ -93,6 +93,7 @@ val appModule = module {
                 // v13 -> v14：请求记录 + 日聚合（报表与 token 预算的数据源）。
                 // 同样是手写 DDL（11->13 的自动迁移不覆盖 13->14），见迁移的 KDoc。
                 PraxisDatabase.MIGRATION_13_14,
+            PraxisDatabase.MIGRATION_14_15,
             )
             .build()
     }

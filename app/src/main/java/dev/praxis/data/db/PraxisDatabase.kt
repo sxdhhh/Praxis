@@ -46,7 +46,7 @@ import dev.praxis.core.data.gateway.GatewayProviderEntity
         GatewayRequestEntity::class,
         GatewayDailyEntity::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = true,
 )
 abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.CharacterDatabase {
@@ -455,6 +455,24 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
          * 上次 12->13 就是这样发现问题的 —— 所以这一条上线前必须在真机上跑一次
          * 「旧版本 -> 新版本」的升级，而不只是全新安装。
          */
+        /**
+         * 14 -> 15：自定义提供商加「额外请求头」与「URL 后缀」两列。
+         *
+         * 来自上游预设的 quirks（preset-providers.js）。不加这两列就没法照抄
+         * 那些家：Cline 的 `X-CLIENT-TYPE` 缺了一律 403，GLM / MiniMax 的
+         * Claude 兼容端点要求 `?beta=true`。默认空串 = 与旧行为一致。
+         */
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `gateway_provider` ADD COLUMN `extraHeadersJson` TEXT NOT NULL DEFAULT ''",
+                )
+                db.execSQL(
+                    "ALTER TABLE `gateway_provider` ADD COLUMN `urlSuffix` TEXT NOT NULL DEFAULT ''",
+                )
+            }
+        }
+
         val MIGRATION_13_14 = object : Migration(13, 14) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(

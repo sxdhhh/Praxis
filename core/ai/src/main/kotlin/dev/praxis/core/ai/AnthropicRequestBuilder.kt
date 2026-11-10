@@ -49,6 +49,13 @@ object AnthropicRequestBuilder {
     fun build(
         request: ChatRequest,
         thinking: Boolean = false,
+        /**
+         * 给每个工具补 `type: "custom"`（上游 quirks.anthropicToolType）。
+         *
+         * MiniMax 的 Claude 兼容端点**拒绝没有 type 的工具**；而 DeepSeek 恰好相反
+         * （拒绝 `type:"custom"`），所以这是**按家特判**，默认关。
+         */
+        toolTypeCustom: Boolean = false,
     ): String {
         val systemParts = request.messages
             .filter { it.role == ChatRole.System }
@@ -76,6 +83,8 @@ object AnthropicRequestBuilder {
                 putJsonArray("tools") {
                     tools.forEach { tool ->
                         addJsonObject {
+                            // 按家特判（quirks.anthropicToolType）：见 build 的参数说明。
+                            if (toolTypeCustom) put("type", "custom")
                             put("name", tool.name)
                             put("description", tool.description)
                             // parametersJson 是**已经序列化好的字符串**，必须原样嵌进去；

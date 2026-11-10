@@ -17,6 +17,8 @@ import dev.praxis.core.gateway.RouteState
 import dev.praxis.core.gateway.RouterSession
 import dev.praxis.core.gateway.toFailureKind
 import dev.praxis.core.model.settings.CustomHeader
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import dev.praxis.data.ai.OpenAiCompatProvider
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -188,21 +190,43 @@ class GatewayProvider(
             //
             // 在换号的循环里判定：一次请求的候选可能跨协议（比如同时配了
             // 官方 Anthropic 与某个 OpenAI 兼容中转），所以不能在外面算一次。
-            val protocol = dev.praxis.core.gateway.ProviderProtocols.of(attempt.provider)
+            //
+            // ⚠️ 协议**优先查内置表**：GLM Coding / Minimax 走的是 Anthropic 协议，
+            // 只按 id 猜（ProviderProtocols.of）会把它们当 OpenAI 兼容发出去 ——
+            // 用户买了套餐却连不上，而且错误来自上游、看不出是这里判错了。
+            val protocol = dev.praxis.data.gateway.BuiltinProviders.protocol(attempt.provider)
+
+            // quirks（上游 preset 注册表的特判）：内置家来自代码里的表，
+            // 自定义家来自记录（建家时随预置模板写入）。
+            val builtinQuirks = dev.praxis.data.gateway.BuiltinProviders.quirks(attempt.provider)
+            val record = providers.firstOrNull { it.id == attempt.provider }
+            val extraHeaders: Map<String, String> = if (record != null) {
+                decodeHeaders(record.extraHeadersJson)
+            } else {
+                builtinQuirks.headers
+            }
+            val urlSuffix = record?.urlSuffix?.takeIf { it.isNotBlank() }
+                ?: builtinQuirks.urlSuffix
+            // 额外头**覆盖**用户自定义头（上游语义：同名覆盖默认头）。
+            val effectiveHeaders = customHeaders + extraHeaders.map { (name, value) ->
+                CustomHeader(name, value)
+            }
             val provider: dev.praxis.core.ai.AiProvider = when (protocol) {
                 dev.praxis.core.gateway.ProviderProtocol.AnthropicMessages ->
                     dev.praxis.data.ai.AnthropicProvider(
                         debug = debugRawTraffic,
                         baseUrl = baseUrl,
                         apiKey = apiKey,
-                        customHeaders = customHeaders,
+                        customHeaders = effectiveHeaders,
+                        urlSuffix = urlSuffix,
+                        toolTypeCustom = builtinQuirks.anthropicToolType,
                         client = client,
                     )
                 dev.praxis.core.gateway.ProviderProtocol.Responses ->
                     dev.praxis.data.ai.ResponsesProvider(
                         baseUrl = baseUrl,
                         apiKey = apiKey,
-                        customHeaders = customHeaders,
+                        customHeaders = effectiveHeaders,
                         client = client,
                     )
                 dev.praxis.core.gateway.ProviderProtocol.OpenAiChat ->
@@ -210,7 +234,8 @@ class GatewayProvider(
                         debug = debugRawTraffic,
                         baseUrl = baseUrl,
                         apiKey = apiKey,
-                        customHeaders = customHeaders,
+                        customHeaders = effectiveHeaders,
+                        urlSuffix = urlSuffix,
                         client = client,
                     )
             }
@@ -289,4 +314,19 @@ class GatewayProvider(
             throw e
         }
     }
+}
+
+/**
+ * 解析自定义家存的额外请求头（JSON 对象文本，见 [GatewayProviderEntity.extraHeadersJson]）。
+ *
+ * 坏内容返回 emptyMap 而不是抛：一个手改坏的设置不该让整次请求发不出去。
+ * 但也不「猜着修」—— 只吞解析失败这一种情况。
+ */
+private fun decodeHeaders(text: String): Map<String, String> {
+    if (text.isBlank()) return emptyMap()
+    return runCatching {
+        kotlinx.serialization.json.Json.parseToJsonElement(text)
+            .jsonObject
+            .mapValues { entry -> entry.value.jsonPrimitive.content }
+    }.getOrDefault(emptyMap())
 }
