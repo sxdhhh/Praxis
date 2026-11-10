@@ -138,7 +138,11 @@ fun GatewayProvidersScreen(
                                     "没声明模型（请求只能靠映射）"
                                 } else {
                                     "声明 " + provider.modelCount + " 个模型"
-                                },
+                                } +
+                                // 快照时间（文档 §5.4.1 第 17 条）：用户要能看出
+                                // 「这份清单是什么时候拉的」，否则下架了也不知道。
+                                "　清单：" + dev.praxis.core.gateway.GatewayModelCatalogCache
+                                    .ageText(provider.modelsFetchedAt, System.currentTimeMillis()),
                             onClick = { onRemove(provider.id) },
                         )
                         // 拉取模型（文档 §5.3）。没接线就不画。
@@ -150,6 +154,11 @@ fun GatewayProvidersScreen(
                                     fetching == provider.id -> "正在请求该家的 /models"
                                     result?.error != null -> result.error
                                     result != null -> "拉到 " + result.modelIds.size + " 个；点这里写入"
+                                    // 快照还新鲜时说明白：这一下是**强制**刷新。
+                                    dev.praxis.core.gateway.GatewayModelCatalogCache.isFresh(
+                                        provider.modelsFetchedAt,
+                                        System.currentTimeMillis(),
+                                    ) -> "快照还新鲜（点这里强制刷新）"
                                     else -> "复用该家账号的出口，与该家转发同一条路"
                                 },
                                 onClick = {

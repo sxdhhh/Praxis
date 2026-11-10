@@ -1726,9 +1726,18 @@ fun PraxisApp(
                     }
                 },
                 onApplyGatewayModels = { providerId, models ->
-                    coroutineScope.launch {
-                        gatewayAccountStore.updateProviderModels(providerId, models)
-                        gatewayRowsRefresh += 1
+                    // 写入前把关（文档 §5.4.1 第 17 条的「失败保留旧清单」）：
+                    // 成功但拉到空清单时**不覆盖** —— 上游临时返回空数组的话，
+                    // 直接写会把用户手填的模型抹掉。
+                    val decision = dev.praxis.core.gateway.GatewayModelCatalogCache
+                        .decideWrite(success = true, fetched = models)
+                    if (decision == dev.praxis.core.gateway.GatewayModelCatalogCache
+                            .WriteDecision.Write
+                    ) {
+                        coroutineScope.launch {
+                            gatewayAccountStore.updateProviderModels(providerId, models)
+                            gatewayRowsRefresh += 1
+                        }
                     }
                 },
                 onRemoveGatewayProvider = { id ->
