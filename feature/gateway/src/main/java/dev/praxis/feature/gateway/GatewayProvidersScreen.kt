@@ -21,6 +21,7 @@ import dev.praxis.ui.widgets.MiuixAnimatedDialog
 import dev.praxis.core.gateway.userMessage
 import dev.praxis.ui.widgets.MiuixNavigationItemWidget
 import dev.praxis.ui.widgets.SettingsSectionHeader
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
@@ -52,11 +53,32 @@ data class GatewayProviderRowUi(
  * 写成 `anthropic` 会走 Messages 协议、`responses` 走 Responses，其余按 OpenAI 兼容。
  * 不写这一句，用户会以为「随便起名都一样」。
  */
+/**
+ * 一次拉取的结果。
+ *
+ * @param modelIds 拉到的模型 id（已去重、已排序）。
+ * @param error 失败原因；null = 成功。失败是**预期路径**（没填 key、这家不提供 /models）。
+ */
+data class GatewayProviderModelsFetch(
+    val modelIds: List<String> = emptyList(),
+    val error: String? = null,
+)
+
 @Composable
 fun GatewayProvidersScreen(
     providers: List<GatewayProviderRowUi> = emptyList(),
     onAdd: (dev.praxis.core.gateway.GatewayProviderDraft) -> Unit = {},
     onRemove: (String) -> Unit = {},
+    /**
+     * 拉取模型清单（文档 §5.3 的 `fetch-models`）。
+     *
+     * null = 没接线 —— 那时**不画**这个入口。
+     * 实现复用 `OkHttpModelCatalogFetcher`，并且**与该家账号的转发走同一出口**
+     * （文档 §5.9：清单与转发不同出口会出「清单能拉、请求 403」）。
+     */
+    onFetchModels: (suspend (providerId: String) -> GatewayProviderModelsFetch)? = null,
+    /** 把拉到的清单写进这家（覆盖 modelsJson）。 */
+    onApplyModels: (providerId: String, models: List<String>) -> Unit = { _, _ -> },
     /** 上次添加失败的原因（校验没过）；null = 没有错误。 */
     addError: String? = null,
     modifier: Modifier = Modifier,
@@ -64,6 +86,12 @@ fun GatewayProvidersScreen(
     val topInset = dev.praxis.ui.design.component.LocalTopBarInset.current
     val scrollLimit = dev.praxis.ui.design.component.LocalScrollBottomLimit.current
     var addDialogVisible by remember { mutableStateOf(false) }
+    // 正在拉取的家 + 最近一次结果（家 id → 结果）。
+    var fetching by remember { mutableStateOf<String?>(null) }
+    var fetchResult by remember {
+        mutableStateOf<Pair<String, GatewayProviderModelsFetch>?>(null)
+    }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -111,6 +139,36 @@ fun GatewayProvidersScreen(
                                 },
                             onClick = { onRemove(provider.id) },
                         )
+                        // 拉取模型（文档 §5.3）。没接线就不画。
+                        if (onFetchModels != null) {
+                            val result = fetchResult?.takeIf { it.first == provider.id }?.second
+                            MiuixNavigationItemWidget(
+                                title = if (fetching == provider.id) "拉取中…" else "拉取模型清单",
+                                description = when {
+                                    fetching == provider.id -> "正在请求该家的 /models"
+                                    result?.error != null -> result.error
+                                    result != null -> "拉到 " + result.modelIds.size + " 个；点这里写入"
+                                    else -> "复用该家账号的出口，与该家转发同一条路"
+                                },
+                                onClick = {
+                                    if (fetching != null) return@MiuixNavigationItemWidget
+                                    // 已有结果时这一下就是「写入」。
+                                    if (result != null && result.error == null) {
+                                        onApplyModels(provider.id, result.modelIds)
+                                        fetchResult = null
+                                    } else {
+                                        fetching = provider.id
+                                        scope.launch {
+                                            val fetched = runCatching {
+                                                onFetchModels.invoke(provider.id)
+                                            }.getOrNull()
+                                            fetchResult = fetched?.let { provider.id to it }
+                                            fetching = null
+                                        }
+                                    }
+                                },
+                            )
+                        }
                         Text(
                             text = "点这一行就是删除它（账号不会被删）",
                             style = MiuixTheme.textStyles.footnote1,

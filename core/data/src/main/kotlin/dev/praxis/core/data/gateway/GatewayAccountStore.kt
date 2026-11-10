@@ -228,6 +228,20 @@ class GatewayAccountStore(
     }
 
     /** 删掉一家自定义提供商；返回是否真的删了（不存在时 false）。 */
+    /**
+     * 覆盖一家的模型清单（文档 §5.3 的 `fetch-models` 写入侧）。
+     *
+     * 只动 modelsJson：地址、映射与创建时间都不碰 —— 拉清单不该有副作用。
+     */
+    suspend fun updateProviderModels(id: String, models: List<String>): Boolean {
+        val existing = providers().firstOrNull { it.id == id } ?: return false
+        val json = models.distinct().sorted().joinToString(separator = ",", prefix = "[", postfix = "]") {
+            model -> "\"" + model.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+        }
+        providerDao.upsert(existing.copy(modelsJson = json))
+        return true
+    }
+
     suspend fun removeProvider(id: String): Boolean {
         if (providerDao.byId(id) == null) return false
         providerDao.delete(id)

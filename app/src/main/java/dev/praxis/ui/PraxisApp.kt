@@ -1676,6 +1676,54 @@ fun PraxisApp(
                             }
                     }
                 },
+                // 拉取模型清单（文档 §5.3）：复用 OkHttpModelCatalogFetcher，
+                // 并且**用该家账号的出口** —— 文档 §5.9 点名过：清单与转发不同出口
+                // 会出「清单能拉、请求 403」，那种错最难查。
+                onFetchGatewayModels = { providerId ->
+                    val baseUrl = dev.praxis.data.gateway.BuiltinProviders.baseUrl(providerId)
+                        ?: gatewayProviderRows.firstOrNull { it.id == providerId }?.baseUrl
+                    if (baseUrl.isNullOrBlank()) {
+                        dev.praxis.feature.gateway.GatewayProviderModelsFetch(
+                            error = "这家还没有地址：先填地址再拉清单",
+                        )
+                    } else {
+                        val view = gatewayAccountStore.routingViews()
+                            .firstOrNull { it.provider == providerId }
+                        val key = view?.let { account ->
+                            (gatewayAccountStore.credentialOf(account.id).getOrNull()
+                                as? dev.praxis.core.gateway.GatewayCredential.ApiKey)?.apiKey
+                        }.orEmpty()
+                        val client = view?.let { account ->
+                            proxyResolver.clientFor(account.id)
+                        } ?: gatewayHttpClient
+                        // 没有 Key 的家按「无需鉴权」发（Ollama 这类）。
+                        val kind = if (key.isBlank()) {
+                            dev.praxis.core.ai.ModelCatalogFetcher.ProviderKind.NoAuth
+                        } else {
+                            dev.praxis.core.ai.ModelCatalogFetcher.ProviderKind.Bearer
+                        }
+                        val result = dev.praxis.data.ai.OkHttpModelCatalogFetcher(client)
+                            .fetch(baseUrl, key, kind)
+                        result.fold(
+                            onSuccess = { options ->
+                                dev.praxis.feature.gateway.GatewayProviderModelsFetch(
+                                    modelIds = options.map { it.id },
+                                )
+                            },
+                            onFailure = { error ->
+                                dev.praxis.feature.gateway.GatewayProviderModelsFetch(
+                                    error = error.message ?: "拉取失败",
+                                )
+                            },
+                        )
+                    }
+                },
+                onApplyGatewayModels = { providerId, models ->
+                    coroutineScope.launch {
+                        gatewayAccountStore.updateProviderModels(providerId, models)
+                        gatewayRowsRefresh += 1
+                    }
+                },
                 onRemoveGatewayProvider = { id ->
                     coroutineScope.launch {
                         gatewayAccountStore.removeProvider(id)
