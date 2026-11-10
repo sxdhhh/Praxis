@@ -2,6 +2,7 @@ package dev.praxis.core.ai
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 
@@ -97,6 +98,17 @@ class RequestThrottle(
     val requestLimitPerMinute: Int = 0,
     /** 最大并发请求数。0 或负数 = 不限。 */
     val maxConcurrentRequests: Int = 0,
+    /**
+     * 排队等待上限（毫秒）。0 = 不限（等到底，与旧行为一致）。
+     *
+     * ## 为什么需要它（文档 §5.18 的「请求队列：最多等待 / 等待秒数」）
+     *
+     * `acquire()` 是**无限等**的：并发位被别人占着就一直挂着。上游全忙时
+     * 用户看到的是「转了十分钟才报错」，而中间没有任何可操作的提示。
+     * 给了上限之后，超时能变成一句明确的话：「排队超时，稍后再试」——
+     * 那比无限等更像一个能用的产品。
+     */
+    val maxWaitMs: Long = 0L,
 ) {
     private val rateLimiter: SlidingWindowRateLimiter? =
         if (requestLimitPerMinute > 0) {
@@ -133,6 +145,17 @@ class RequestThrottle(
             throw t
         }
         return Permit(sem)
+    }
+
+    /**
+     * 有上限地等：等不到就返回 null（调用方据此报「排队超时」）。
+     *
+     * 与 [acquire] 分开而不是改它的签名：`acquire` 的「一定拿到」对不关心
+     * 排队的调用点仍然是正确语义，改签名会逼所有调用点处理 null。
+     */
+    suspend fun tryAcquire(nowMs: () -> Long = { System.currentTimeMillis() }): Permit? {
+        if (maxWaitMs <= 0L) return acquire()
+        return withTimeoutOrNull(maxWaitMs) { acquire() }
     }
 
     /** 并发名额的持有凭证。`close()` 幂等。 */
