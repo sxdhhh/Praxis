@@ -49,7 +49,7 @@ class GatewayImporterBulkTest {
 
     @Test
     fun `批量导出能解析出全部账号`() {
-        val accounts = GatewayImporter.parseAll(bulk).getOrThrow()
+        val accounts = GatewayImporter.parseAll(bulk).getOrThrow().accounts
         assertEquals(3, accounts.size)
         assertEquals("workbuddy", accounts[0].provider)
         // 名字优先 name，空则用 nickname。
@@ -80,7 +80,7 @@ class GatewayImporterBulkTest {
     @Test
     fun `单账号文件仍然能解析`() {
         val single = """{"format":"agent2api-account","id":"a1","provider":"openai","name":"n","apiKey":"sk"}"""
-        val accounts = GatewayImporter.parseAll(single).getOrThrow()
+        val accounts = GatewayImporter.parseAll(single).getOrThrow().accounts
         assertEquals(1, accounts.size)
         assertEquals("a1", accounts[0].id)
     }
@@ -102,5 +102,35 @@ class GatewayImporterBulkTest {
             "要说清第几条：" + result.exceptionOrNull()?.message,
             result.exceptionOrNull()?.message.orEmpty().contains("第 2 条"),
         )
+    }
+
+    @Test
+    fun `批量导出里的自定义家会进计划（含启停过滤）`() {
+        val withProviders = """
+{
+  "accounts": [
+    {"id": "user-key-1", "provider": "custom-e1a0f12f950e", "name": "Gemini", "apiKey": "sk-1"}
+  ],
+  "customProviders": [
+    {"id": "custom-e1a0f12f950e", "name": "Gemini", "baseUrl": "http://1.2.3.4:3001/v1",
+     "models": [
+       {"id": "gemini-3.8-flash", "enabled": true, "reasoning": ""},
+       {"id": "gemini-3.8-flash-tts", "enabled": true, "reasoning": ""},
+       {"id": "retired-model", "enabled": false, "reasoning": ""}
+     ]}
+  ]
+}
+"""
+        val plan = GatewayImporter.prepare(
+            files = mapOf("agent2api-accounts.json" to withProviders),
+            existingIds = emptySet(),
+            knownProviders = emptySet(),
+        )
+        assertEquals("custom-* 一律放行", 1, plan.accepted.size)
+        assertEquals(1, plan.providers.size)
+        val provider = plan.providers[0]
+        assertEquals("http://1.2.3.4:3001/v1", provider.baseUrl)
+        assertEquals(2, provider.models.size)
+        assertTrue("关掉的模型不该导入", !provider.models.contains("retired-model"))
     }
 }

@@ -67,7 +67,33 @@ object GatewayImporter {
      * （OAuth 型）、地址在 `endpoint`、家是 `provider`。
      */
     @kotlinx.serialization.Serializable
-    private data class BulkAccountFile(val accounts: List<BulkAccountEntry> = emptyList())
+    private data class BulkAccountFile(
+        val accounts: List<BulkAccountEntry> = emptyList(),
+        /**
+         * 顶层还带着自定义家（真实导出实测有这一项）。
+         *
+         * 必须解析：`custom-*` 账号的「家」就在这里，不导入它的话，
+         * 那些账号导进来也没有地址与模型清单（等于半个账号）。
+         */
+        val customProviders: List<BulkCustomProvider> = emptyList(),
+    )
+
+    /** 批量导出里的自定义家（字段名逐字对应真实导出）。 */
+    @kotlinx.serialization.Serializable
+    private data class BulkCustomProvider(
+        val id: String = "",
+        val name: String = "",
+        val baseUrl: String? = null,
+        /** 真实形状是对象数组：`[{enabled,id,reasoning}]`。 */
+        val models: List<BulkModel> = emptyList(),
+    )
+
+    @kotlinx.serialization.Serializable
+    private data class BulkModel(
+        val id: String = "",
+        /** 关掉的模型不导入（文档 §5.4 的「逐模型启停」）。 */
+        val enabled: Boolean = true,
+    )
 
     @kotlinx.serialization.Serializable
     private data class BulkAccountEntry(
@@ -89,8 +115,15 @@ object GatewayImporter {
      * 先按单账号文件试（网关面板「导出这个账号」的产物），再按批量导出试。
      * 两种形状共用后面同一套逐条规则 —— 报告因此能精确到**哪一条**、为什么。
      */
-    fun parseAll(text: String): Result<List<GatewayAccountFile>> = runCatching {
-        parse(text).getOrNull()?.let { single -> return@runCatching listOf(single) }
+    data class ParsedExport(
+        val accounts: List<GatewayAccountFile>,
+        val providers: List<GatewayCustomProvider>,
+    )
+
+    fun parseAll(text: String): Result<ParsedExport> = runCatching {
+        parse(text).getOrNull()?.let { single ->
+            return@runCatching ParsedExport(listOf(single), single.customProviders)
+        }
         val bulk = runCatching {
             json.decodeFromString(BulkAccountFile.serializer(), text)
         }.getOrNull()
@@ -98,7 +131,7 @@ object GatewayImporter {
         require(!entries.isNullOrEmpty()) {
             "既不是网关账号文件（缺 format），也不是批量导出（缺 accounts 数组）"
         }
-        entries.mapIndexed { index, entry ->
+        val accounts = entries.mapIndexed { index, entry ->
             require(entry.id.isNotBlank()) { "批量导出第 " + (index + 1) + " 条缺 id" }
             require(entry.provider.isNotBlank()) {
                 "账号 " + entry.id + " 缺 provider"
@@ -114,6 +147,18 @@ object GatewayImporter {
                 refreshToken = entry.refreshToken,
             )
         }
+        // 关掉的模型不导入 —— 那与网关的「逐模型启停」是同一个意思。
+        val providers = (bulk?.customProviders ?: emptyList()).mapNotNull { provider ->
+            if (provider.id.isBlank()) return@mapNotNull null
+            GatewayCustomProvider(
+                id = provider.id,
+                name = provider.name,
+                baseUrl = provider.baseUrl,
+                models = provider.models.filter { it.enabled }.map { it.id }
+                    .filter { it.isNotBlank() },
+            )
+        }
+        ParsedExport(accounts, providers)
     }
 
     /**
@@ -140,8 +185,8 @@ object GatewayImporter {
         files.forEach { (fileName, text) ->
             // 一份文本可能是**多个**账号（批量导出），所以是 parseAll。
             val parsed = parseAll(text)
-            val accounts = parsed.getOrNull()
-            if (accounts == null) {
+            val exported = parsed.getOrNull()
+            if (exported == null) {
                 failed += GatewayImportReport.Item(
                     id = fileName,
                     name = fileName,
@@ -150,7 +195,12 @@ object GatewayImporter {
                 return@forEach
             }
 
-            accounts.forEach accountLoop@ { file ->
+            // 顶层带来的自定义家先记上：它们是 custom-* 账号的「家」。
+            exported.providers.forEach { provider ->
+                if (providers.none { it.id == provider.id }) providers += provider
+            }
+
+            exported.accounts.forEach accountLoop@ { file ->
             val display = file.name.ifBlank { file.id }
             if (file.apiKey.isNullOrBlank()) {
                 val isOauth = !file.accessToken.isNullOrBlank() ||
