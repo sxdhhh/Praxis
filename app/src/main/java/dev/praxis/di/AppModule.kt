@@ -116,6 +116,14 @@ val appModule = module {
         )
     }
 
+    // QNN 运行时解压（NPU 路线；文档 §1.4）。
+    single {
+        dev.praxis.data.imagegen.QnnRuntimeInstaller(
+            assets = { androidContext().assets },
+            targetRoot = { java.io.File(androidContext().filesDir, "qnn") },
+        )
+    }
+
     // 形态 C：随包引擎的进程管理（文档 §1.1 的 C + §3.1 的起法）。
     // nativeLibraryDir 是唯一能执行二进制的目录（API 29+ 的 W^X）。
     single {

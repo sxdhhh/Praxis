@@ -636,6 +636,17 @@ fun PraxisApp(
     var engineLaunchMessage by remember { mutableStateOf<String?>(null) }
     // 引擎装没装：nativeLibraryDir 里有没有那个 .so（自用构建才有）。
     val engineBundledInstalled = remember { engineProcess.isInstalled() }
+    // QNN 运行时（NPU 路线）：解出来才给引擎当 --lib_dir。
+    val qnnRuntimeInstaller: dev.praxis.data.imagegen.QnnRuntimeInstaller =
+        org.koin.compose.koinInject()
+    var engineQnnInstalled by remember { mutableStateOf(qnnRuntimeInstaller.isInstalled()) }
+    var engineQnnCoverage by remember {
+        mutableStateOf(if (qnnRuntimeInstaller.isInstalled()) {
+            qnnRuntimeInstaller.coveredVersions()
+        } else {
+            emptyList<Int>()
+        })
+    }
 
     LaunchedEffect(imageGenDownloadState) {
         val downloadState = imageGenDownloadState
@@ -1956,6 +1967,8 @@ fun PraxisApp(
                 engineBundledInstalled = engineBundledInstalled,
                 engineRunning = engineRunning,
                 engineLaunchMessage = engineLaunchMessage,
+                engineQnnInstalled = engineQnnInstalled,
+                engineQnnCoverage = engineQnnCoverage,
                 onStartEngine = {
                     // 起引擎要一个「模型 + 它的目录」：类型也来自模型条目。
                     val target = imageGenCurrentTarget
@@ -1965,18 +1978,39 @@ fun PraxisApp(
                     if (model == null) {
                         engineLaunchMessage = "先在「模型库」下载一个本地模型，再来起引擎"
                     } else {
-                        val spec = dev.praxis.core.imagegen.EngineLaunchRules.specFor(
-                            model = model,
-                            enginePath = engineProcess.engineFile().absolutePath,
-                            modelDir = java.io.File(imageGenModelsRoot, model.id)
-                                .absolutePath,
-                        )
-                        val failure = engineProcess.start(spec)
-                        engineRunning = engineProcess.isRunning()
-                        engineLaunchMessage = if (failure == null) {
-                            "已启动（" + model.backendType + "），等端口就绪后点「重新检测」"
-                        } else {
-                            failure.userMessage() + "\n" + engineProcess.logTail(6)
+                        coroutineScope.launch {
+                            // NPU 路线（sd15npu / sdxl / anima）要先有 QNN 运行时；
+                            // CPU 路线（sd15cpu，MNN）不需要它 —— 那正是「只内置引擎就能出图」的原因。
+                            val needsQnn = dev.praxis.core.imagegen.EngineLaunchRules
+                                .requiresQnn(model.backendType)
+                            var libDir: String? = null
+                            if (needsQnn) {
+                                engineLaunchMessage = "正在解压 QNN 运行时（首次会慢一点）…"
+                                val installed = qnnRuntimeInstaller.install()
+                                val dir = installed.getOrNull()
+                                if (dir == null) {
+                                    engineLaunchMessage = "QNN 运行时装不上：" +
+                                        (installed.exceptionOrNull()?.message ?: "未知原因")
+                                    return@launch
+                                }
+                                libDir = dir.absolutePath
+                                engineQnnInstalled = true
+                                engineQnnCoverage = qnnRuntimeInstaller.coveredVersions()
+                            }
+                            val spec = dev.praxis.core.imagegen.EngineLaunchRules.specFor(
+                                model = model,
+                                enginePath = engineProcess.engineFile().absolutePath,
+                                modelDir = java.io.File(imageGenModelsRoot, model.id)
+                                    .absolutePath,
+                                libDir = libDir,
+                            )
+                            val failure = engineProcess.start(spec)
+                            engineRunning = engineProcess.isRunning()
+                            engineLaunchMessage = if (failure == null) {
+                                "已启动（" + model.backendType + "），等端口就绪后点「重新检测」"
+                            } else {
+                                failure.userMessage() + "\n" + engineProcess.logTail(6)
+                            }
                         }
                     }
                 },
