@@ -54,6 +54,13 @@ fun ImageGenTargetDialog(
     visible: Boolean,
     onDismiss: () -> Unit,
     localModels: List<ImageModel>,
+    /**
+     * 服务商（模型池）里可选的生图模型（文档 §7.1 的「服务商模型」分组）。
+     *
+     * 由 :app 从「内置家 + 自定义家」的模型清单拼出来：那些名字就是
+     * `gateway_provider.modelsJson` 里声明的，选中的组合会被原样发给上游。
+     */
+    remoteModels: List<ImageGenRemoteModel> = emptyList(),
     current: ImageGenTarget?,
     onSelect: (ImageGenTarget) -> Unit,
 ) {
@@ -133,12 +140,69 @@ fun ImageGenTargetDialog(
                 HorizontalDivider(color = MiuixTheme.colorScheme.dividerLine)
                 Spacer(Modifier.height(8.dp))
                 Text(text = "服务商生图模型", style = MiuixTheme.textStyles.body2)
+                if (remoteModels.isEmpty()) {
+                    Text(
+                        text = "模型池里还没有模型。先在「网关 → 自定义提供商」里加一家" +
+                            "并在模型清单里写上它的模型名，这里就会列出来。",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                } else {
+                    remoteModels.forEach { remote ->
+                        val selected = (current as? ImageGenTarget.Remote)?.let { target ->
+                            target.provider == remote.provider && target.model == remote.model
+                        } == true
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onSelect(
+                                        ImageGenTarget.Remote(
+                                            provider = remote.provider,
+                                            baseUrl = remote.baseUrl,
+                                            model = remote.model,
+                                        ),
+                                    )
+                                    onDismiss()
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Image,
+                                contentDescription = null,
+                                tint = if (selected) {
+                                    MiuixTheme.colorScheme.primary
+                                } else {
+                                    MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                },
+                            )
+                            Column {
+                                Text(
+                                    text = remote.provider + " / " + remote.model,
+                                    style = MiuixTheme.textStyles.body2,
+                                )
+                                Text(
+                                    text = remote.baseUrl,
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                            if (selected) {
+                                Text(
+                                    text = "当前",
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = MiuixTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                }
                 Text(
-                    // 这句话此前写的是「客户端未写」—— 那是**旧信息**：
-                    // /v1/images/generations 的客户端（RemoteImageProtocol +
-                    // OkHttpRemoteImageGenerator）早已实现并有单测，缺的是「界面能选到」。
-                    text = "远端客户端已实现，但还没有内置清单 —— 点下面自己填一个。" +
-                        "注意：远端走的是「Praxis 全局 API Key」，不是网关的账号池。",
+                    text = "这些名字来自各家的模型清单；远端生图用的是「Praxis 全局 API Key」，" +
+                        "不是网关账号池。清单里没有想要的？在下面自己填一个。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 6.dp),

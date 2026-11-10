@@ -90,6 +90,8 @@ fun FunctionModelRoute(
      */
     imageGenTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
     imageModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
+    /** 服务商（模型池）里可选的生图模型。 */
+    imageRemoteModels: List<dev.praxis.feature.settings.ImageGenRemoteModel> = emptyList(),
     onImageGenTargetChange: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -308,6 +310,7 @@ fun FunctionModelRoute(
         visible = imageTargetDialogVisible,
         onDismiss = { imageTargetDialogVisible = false },
         localModels = imageModels,
+        remoteModels = imageRemoteModels,
         current = imageGenTarget,
         onSelect = { target ->
             onImageGenTargetChange(target)

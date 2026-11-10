@@ -73,6 +73,8 @@ fun ImageGenRoute(
     /** 设备门控（文档 §9）：能不能跑本地生图。 */
     availability: dev.praxis.core.imagegen.ImageGenAvailability =
         dev.praxis.core.imagegen.ImageGenAvailability.NpuCapable,
+    /** 服务商（模型池）里可选的生图模型；空 = 还没配自定义家。 */
+    remoteModels: List<ImageGenRemoteModel> = emptyList(),
     /** 已安装的模型（选择器要用 id）。 */
     installedModels: List<dev.praxis.core.imagegen.ImageModel>,
     /** 当前选中的生图目标；null = 还没选。 */
@@ -494,6 +496,7 @@ fun ImageGenRoute(
         visible = targetPickerVisible,
         onDismiss = { targetPickerVisible = false },
         localModels = installedModels,
+        remoteModels = remoteModels,
         current = currentTarget,
         onSelect = onSelectTarget,
     )

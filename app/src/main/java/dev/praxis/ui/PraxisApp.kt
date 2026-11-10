@@ -726,6 +726,51 @@ fun PraxisApp(
         }
     }
 
+    // ── 添加账号三级流程 + 生图的「服务商模型」清单（都吃模型池）──
+    //
+    // 服务商模型 = 各家在 `modelsJson` 里声明的模型名 × 那家的地址。
+    // nativeModels() 是挂起函数，所以这里用 state + LaunchedEffect（不能在 remember 里调）。
+    var imageGenRemoteModels by remember {
+        mutableStateOf<List<dev.praxis.feature.settings.ImageGenRemoteModel>>(emptyList())
+    }
+    LaunchedEffect(gatewayProviderRows, gatewayRowsRefresh) {
+        val baseUrls = buildMap {
+            dev.praxis.data.gateway.BuiltinProviders.ids().forEach { id ->
+                dev.praxis.data.gateway.BuiltinProviders.baseUrl(id)?.let { url ->
+                    put(id, url)
+                }
+            }
+            gatewayProviderRows.forEach { row -> put(row.id, row.baseUrl) }
+        }
+        imageGenRemoteModels = gatewayAccountStore.nativeModels().mapNotNull { native ->
+            baseUrls[native.provider]?.let { url ->
+                dev.praxis.feature.settings.ImageGenRemoteModel(
+                    provider = native.provider,
+                    model = native.id,
+                    baseUrl = url,
+                )
+            }
+        }
+    }
+
+    // ① 提供商列表（内置家 + 自定义家）。
+    val gatewayProviderChoices = remember(gatewayProviderRows) {
+        dev.praxis.data.gateway.BuiltinProviders.ids().map { id ->
+            dev.praxis.feature.gateway.GatewayProviderChoice(
+                id = id,
+                name = id,
+                baseUrl = dev.praxis.data.gateway.BuiltinProviders.baseUrl(id),
+            )
+        } + gatewayProviderRows.map { row ->
+            dev.praxis.feature.gateway.GatewayProviderChoice(
+                id = row.id,
+                name = row.name,
+                baseUrl = row.baseUrl,
+            )
+        }
+    }
+    var gatewayAccountSaveError by remember { mutableStateOf<String?>(null) }
+
     // 日志页的「请求记录」视图（文档 §5.8）：按需加载，不跟着每轮刷新。
     //
     // 放在 gatewayUsageStore 声明**之后** —— 这个文件里已经栽过两次
@@ -1535,6 +1580,21 @@ fun PraxisApp(
                 gatewayReportTopModels = gatewayReportTopModels,
                 gatewayRequestRecords = gatewayRequestRecords,
                 gatewayProviderRows = gatewayProviderRows,
+                imageGenRemoteModels = imageGenRemoteModels,
+                gatewayProviderChoices = gatewayProviderChoices,
+                gatewayAccountSaveError = gatewayAccountSaveError,
+                onSaveGatewayAccount = { draft ->
+                    coroutineScope.launch {
+                        gatewayAccountStore.addAccount(draft)
+                            .onSuccess {
+                                gatewayAccountSaveError = null
+                                gatewayRowsRefresh += 1
+                            }
+                            .onFailure { error ->
+                                gatewayAccountSaveError = error.message ?: "保存失败"
+                            }
+                    }
+                },
                 gatewayProviderAddError = gatewayProviderAddError,
                 onAddGatewayProvider = { draft ->
                     coroutineScope.launch {

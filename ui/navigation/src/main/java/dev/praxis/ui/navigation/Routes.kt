@@ -182,6 +182,19 @@ data object SettingsGatewayImport : PraxisRoute
 data object SettingsGatewayRouting : PraxisRoute
 
 /**
+ * 添加账号 ①：提供商列表（文档 §9.9 的三级流程）。
+ */
+data object SettingsGatewayAdd : PraxisRoute
+
+/**
+ * 添加账号 ②：登录方式（按提供商）。
+ *
+ * 带参路由：文档 §9.9 就是这么定的。`Navigator.push` 收的是路由对象本身，
+ * 整个栈用 kotlinx.serialization 存 Bundle，所以带参路由能正确恢复。
+ */
+data class SettingsGatewayAddLogin(val providerId: String) : PraxisRoute
+
+/**
  * 网关系统设置页（设置 -> 网关 -> 系统设置）。
  *
  * 文档 §5.18：只包含真的接上了消费者的项（超时/换号上限/debug 摘要）。

@@ -123,6 +123,12 @@ fun SettingsHost(
     /** 自定义提供商（文档 §5.3）。 */
     gatewayProviderRows: List<dev.praxis.feature.gateway.GatewayProviderRowUi> = emptyList(),
     onAddGatewayProvider: (dev.praxis.core.gateway.GatewayProviderDraft) -> Unit = {},
+    /** 添加账号 ① 用：可选提供商（内置家 + 自定义家）。 */
+    gatewayProviderChoices: List<dev.praxis.feature.gateway.GatewayProviderChoice> = emptyList(),
+    /** 添加账号 ② 保存：草稿 -> 落库（加密在存储层做）。 */
+    onSaveGatewayAccount: (dev.praxis.core.gateway.GatewayAccountDraft) -> Unit = {},
+    /** 保存失败的原因。 */
+    gatewayAccountSaveError: String? = null,
     onRemoveGatewayProvider: (String) -> Unit = {},
     gatewayProviderAddError: String? = null,
     onLoadGatewayRequestRecords: () -> Unit = {},
@@ -173,6 +179,8 @@ fun SettingsHost(
     imageGenAvailability: dev.praxis.core.imagegen.ImageGenAvailability =
         dev.praxis.core.imagegen.ImageGenAvailability.NpuCapable,
     imageGenInstalledModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
+    /** 服务商（模型池）里可选的生图模型（文档 §7.1 的「服务商模型」分组）。 */
+    imageGenRemoteModels: List<dev.praxis.feature.settings.ImageGenRemoteModel> = emptyList(),
     /** 当前选中的生图目标（imagegen_target 解码后的值）。 */
     imageGenCurrentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
     onSelectImageGenTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
@@ -325,6 +333,7 @@ fun SettingsHost(
     ) { _ ->
         SettingsPageBody(
             route = route,
+            navigator = navigator,
             gatewayAccountRows = gatewayAccountRows,
             onClearGatewayRuntime = onClearGatewayRuntime,
             gatewayImportReport = gatewayImportReport,
@@ -352,6 +361,9 @@ fun SettingsHost(
             gatewayRequestRecords = gatewayRequestRecords,
             gatewayProviderRows = gatewayProviderRows,
             onAddGatewayProvider = onAddGatewayProvider,
+            gatewayProviderChoices = gatewayProviderChoices,
+            onSaveGatewayAccount = onSaveGatewayAccount,
+            gatewayAccountSaveError = gatewayAccountSaveError,
             onRemoveGatewayProvider = onRemoveGatewayProvider,
             gatewayProviderAddError = gatewayProviderAddError,
             onLoadGatewayRequestRecords = onLoadGatewayRequestRecords,
@@ -377,6 +389,7 @@ fun SettingsHost(
             imageGenSocModel = imageGenSocModel,
             imageGenAvailability = imageGenAvailability,
             imageGenInstalledModels = imageGenInstalledModels,
+            imageGenRemoteModels = imageGenRemoteModels,
             imageGenCurrentTarget = imageGenCurrentTarget,
             onSelectImageGenTarget = onSelectImageGenTarget,
             imageGenModelsRootPath = imageGenModelsRootPath,
@@ -433,6 +446,9 @@ fun SettingsHost(
 @Composable
 private fun SettingsPageBody(
     route: PraxisRoute,
+    // 就地取导航（与上面 SettingsHost 同样的写法）：这一层要用它把
+    // 「选完提供商」推进 ② 登录方式页。
+    navigator: dev.praxis.ui.navigation.Navigator,
     repository: SettingsRepository,
     versionName: String,
     versionCode: Int,
@@ -531,6 +547,12 @@ private fun SettingsPageBody(
     /** 自定义提供商（文档 §5.3）。 */
     gatewayProviderRows: List<dev.praxis.feature.gateway.GatewayProviderRowUi> = emptyList(),
     onAddGatewayProvider: (dev.praxis.core.gateway.GatewayProviderDraft) -> Unit = {},
+    /** 添加账号 ① 用：可选提供商（内置家 + 自定义家）。 */
+    gatewayProviderChoices: List<dev.praxis.feature.gateway.GatewayProviderChoice> = emptyList(),
+    /** 添加账号 ② 保存：草稿 -> 落库（加密在存储层做）。 */
+    onSaveGatewayAccount: (dev.praxis.core.gateway.GatewayAccountDraft) -> Unit = {},
+    /** 保存失败的原因。 */
+    gatewayAccountSaveError: String? = null,
     onRemoveGatewayProvider: (String) -> Unit = {},
     gatewayProviderAddError: String? = null,
     onLoadGatewayRequestRecords: () -> Unit = {},
@@ -575,6 +597,8 @@ private fun SettingsPageBody(
     imageGenAvailability: dev.praxis.core.imagegen.ImageGenAvailability =
         dev.praxis.core.imagegen.ImageGenAvailability.NpuCapable,
     imageGenInstalledModels: List<dev.praxis.core.imagegen.ImageModel> = emptyList(),
+    /** 服务商（模型池）里可选的生图模型（文档 §7.1 的「服务商模型」分组）。 */
+    imageGenRemoteModels: List<dev.praxis.feature.settings.ImageGenRemoteModel> = emptyList(),
     /** 当前选中的生图目标（imagegen_target 解码后的值）。 */
     imageGenCurrentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
     onSelectImageGenTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
@@ -619,6 +643,7 @@ private fun SettingsPageBody(
             // 与上面那些功能位的 FunctionModelOverride 不是一套。
             imageGenTarget = imageGenCurrentTarget,
             imageModels = imageGenInstalledModels,
+            imageRemoteModels = imageGenRemoteModels,
             onImageGenTargetChange = onSelectImageGenTarget,
         )
         PraxisRoute.SettingsSystemPrompt -> SystemPromptRoute(repository, modifier)
@@ -816,6 +841,7 @@ private fun SettingsPageBody(
             socModel = imageGenSocModel,
             availability = imageGenAvailability,
             installedModels = imageGenInstalledModels,
+            remoteModels = imageGenRemoteModels,
             currentTarget = imageGenCurrentTarget,
             onSelectTarget = onSelectImageGenTarget,
             modelsRootPath = imageGenModelsRootPath,
@@ -837,6 +863,27 @@ private fun SettingsPageBody(
         )
         // 账号页：账号池的存储层已经就绪，但还没有「添加账号」的界面（P1 剩余部分），
         // 所以这里传的是真实状态（空列表），不是占位数据。
+        PraxisRoute.SettingsGatewayAdd -> dev.praxis.feature.gateway.GatewayAddProviderScreen(
+            providers = gatewayProviderChoices,
+            onPick = { choice ->
+                // ② 带参路由：提供商 id 跟着路由走（返回栈恢复后仍然正确）。
+                navigator.push(PraxisRoute.SettingsGatewayAddLogin(choice.id))
+            },
+            modifier = modifier,
+        )
+        is PraxisRoute.SettingsGatewayAddLogin -> {
+            val choice = gatewayProviderChoices.firstOrNull {
+                it.id == route.providerId
+            }
+            dev.praxis.feature.gateway.GatewayAddLoginScreen(
+                providerId = route.providerId,
+                providerLabel = choice?.name ?: route.providerId,
+                baseUrl = choice?.baseUrl,
+                onSave = onSaveGatewayAccount,
+                saveError = gatewayAccountSaveError,
+                modifier = modifier,
+            )
+        }
         PraxisRoute.SettingsGatewaySystem -> dev.praxis.feature.gateway.GatewaySystemScreen(
             settings = gatewaySystemSettings,
             onChange = onGatewaySystemSettingsChange,
@@ -893,7 +940,8 @@ private fun SettingsPageBody(
             modifier = modifier,
         )
         PraxisRoute.SettingsGatewayAccounts -> dev.praxis.feature.gateway.GatewayAccountsScreen(
-            onAddAccount = onAddGatewayAccount,
+            // 走文档 §9.9 的三级流程（提供商列表 → 登录方式 → 授权弹窗）。
+            onAddAccount = { navigator.push(PraxisRoute.SettingsGatewayAdd) },
             onTestConnection = onTestGatewayAccount,
             rows = gatewayAccountRows,
             onMove = { _, _ -> },
