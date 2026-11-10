@@ -8,8 +8,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.praxis.ui.widgets.MiuixIntNumberPickerWidget
@@ -17,6 +20,7 @@ import dev.praxis.ui.widgets.MiuixSwitchWidget
 import dev.praxis.ui.widgets.SettingsSectionHeader
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -42,10 +46,18 @@ fun GatewaySystemScreen(
     settings: dev.praxis.core.gateway.GatewaySystemSettings =
         dev.praxis.core.gateway.GatewaySystemSettings(),
     onChange: (dev.praxis.core.gateway.GatewaySystemSettings) -> Unit = {},
+    /** 出站脱敏（文档 §5.18）：开关 + 规则。 */
+    sanitize: dev.praxis.core.ai.SanitizeSettings = dev.praxis.core.ai.SanitizeSettings(),
+    onSanitizeChange: (dev.praxis.core.ai.SanitizeSettings) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val topInset = dev.praxis.ui.design.component.LocalTopBarInset.current
     val scrollLimit = dev.praxis.ui.design.component.LocalScrollBottomLimit.current
+    // 规则文本框的本地态：直接绑到 settings.rules 会在每次按键时重建列表，
+    // 光标也会随重组抖动（用户正在输入正则）。
+    var sanitizeRulesText by remember(sanitize.rules) {
+        mutableStateOf(dev.praxis.core.ai.SanitizeRuleLines.toText(sanitize.rules))
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -137,6 +149,62 @@ fun GatewaySystemScreen(
                         onChange(settings.copy(queueWaitSeconds = seconds))
                     },
                 )
+            }
+        }
+        item(key = "__sanitize_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Security,
+                title = "出站脱敏",
+                subtitle = "发送前把命中规则的片段替换掉",
+            )
+        }
+        item(key = "__sanitize_switch__") {
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+                MiuixSwitchWidget(
+                    title = "启用脱敏",
+                    description = "关掉时规则保留、只是不生效（不用重写一遍）",
+                    checked = sanitize.enabled,
+                    onCheckedChange = { enabled ->
+                        onSanitizeChange(sanitize.copy(enabled = enabled))
+                    },
+                )
+            }
+        }
+        item(key = "__sanitize_rules__") {
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "规则（一行一条正则；# 开头是注释）",
+                        style = MiuixTheme.textStyles.body2,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TextField(
+                        value = sanitizeRulesText,
+                        onValueChange = { text ->
+                            sanitizeRulesText = text
+                            onSanitizeChange(
+                                sanitize.copy(
+                                    rules = dev.praxis.core.ai.SanitizeRuleLines.fromText(text),
+                                ),
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "例如 \\d{11}",
+                        useLabelAsPlaceholder = true,
+                        minLines = 3,
+                    )
+                    // 坏正则单独报出来（它们不会让发送失败，只是那一条不生效）。
+                    val broken = dev.praxis.core.ai.OutboundSanitizer.compile(sanitize.rules).broken
+                    if (broken.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "有 " + broken.size + " 条正则写错了，会被跳过：" +
+                                broken.joinToString("、"),
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
         }
         item(key = "__system_debug__") {

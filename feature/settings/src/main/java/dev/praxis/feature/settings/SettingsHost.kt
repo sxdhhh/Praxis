@@ -168,6 +168,10 @@ fun SettingsHost(
     onApplyGatewayModels: (providerId: String, models: List<String>) -> Unit = { _, _ -> },
     onGatewaySystemSettingsChange:
         (dev.praxis.core.gateway.GatewaySystemSettings) -> Unit = {},
+    /** 出站脱敏（文档 §5.18）：开关 + 规则。 */
+    gatewaySanitize: dev.praxis.core.ai.SanitizeSettings =
+        dev.praxis.core.ai.SanitizeSettings(),
+    onGatewaySanitizeChange: (dev.praxis.core.ai.SanitizeSettings) -> Unit = {},
     gatewayReplayEntries: () -> List<dev.praxis.core.gateway.RouteReplayEntry> = {
         emptyList()
     },
@@ -401,6 +405,8 @@ fun SettingsHost(
             onGatewayProxySettingsChange = onGatewayProxySettingsChange,
             onTestGatewayModel = onTestGatewayModel,
             onGatewaySystemSettingsChange = onGatewaySystemSettingsChange,
+            gatewaySanitize = gatewaySanitize,
+            onGatewaySanitizeChange = onGatewaySanitizeChange,
             onFetchGatewayModels = onFetchGatewayModels,
             onApplyGatewayModels = onApplyGatewayModels,
             gatewayModelError = gatewayModelError,
@@ -614,6 +620,10 @@ private fun SettingsPageBody(
     onApplyGatewayModels: (providerId: String, models: List<String>) -> Unit = { _, _ -> },
     onGatewaySystemSettingsChange:
         (dev.praxis.core.gateway.GatewaySystemSettings) -> Unit = {},
+    /** 出站脱敏（文档 §5.18）：开关 + 规则。 */
+    gatewaySanitize: dev.praxis.core.ai.SanitizeSettings =
+        dev.praxis.core.ai.SanitizeSettings(),
+    onGatewaySanitizeChange: (dev.praxis.core.ai.SanitizeSettings) -> Unit = {},
     gatewayReplayEntries: () -> List<dev.praxis.core.gateway.RouteReplayEntry> = {
         emptyList()
     },
@@ -932,6 +942,8 @@ private fun SettingsPageBody(
         PraxisRoute.SettingsGatewaySystem -> dev.praxis.feature.gateway.GatewaySystemScreen(
             settings = gatewaySystemSettings,
             onChange = onGatewaySystemSettingsChange,
+            sanitize = gatewaySanitize,
+            onSanitizeChange = onGatewaySanitizeChange,
             modifier = modifier,
         )
         PraxisRoute.SettingsGatewayProviders -> dev.praxis.feature.gateway.GatewayProvidersScreen(

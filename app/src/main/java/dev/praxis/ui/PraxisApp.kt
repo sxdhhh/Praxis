@@ -396,6 +396,15 @@ fun PraxisApp(
             .build()
     }
 
+    // 出站脱敏（文档 §5.18）：开关 + 规则。
+    val gatewaySanitizeJson by settingsRepository.gatewaySanitizeJson
+        .collectAsState(initial = null)
+    val gatewaySanitize = remember(gatewaySanitizeJson) {
+        dev.praxis.core.ai.SanitizeSettingsCodec.decode(gatewaySanitizeJson)
+            ?.getOrNull()
+            ?: dev.praxis.core.ai.SanitizeSettings()
+    }
+
     // 代理池（文档 §5.9）：每账号绑定出口。
     //
     // 节点一变就重建解析器（`remember` 的键里有 proxySettings），
@@ -1042,6 +1051,8 @@ fun PraxisApp(
                         repository = settingsRepository,
                         // 请求队列等待上限（文档 §5.18）：0 = 不限（旧行为）。
                         queueWaitSeconds = { gatewaySystem.queueWaitSeconds },
+                        // 脱敏：传**生效**的规则（开关关着就是空，等于不改写）。
+                        sanitizeRules = { gatewaySanitize.effectiveRules },
                         // 网关出站：与账号页共用同一个 RouteState，
                         // 这样「清空运行状态」与真实请求看到的是同一份状态。
                         gatewayProvider = dev.praxis.data.gateway.GatewayProvider(
@@ -1269,6 +1280,8 @@ fun PraxisApp(
                         repository = settingsRepository,
                         // 请求队列等待上限（文档 §5.18）：0 = 不限（旧行为）。
                         queueWaitSeconds = { gatewaySystem.queueWaitSeconds },
+                        // 脱敏：传**生效**的规则（开关关着就是空，等于不改写）。
+                        sanitizeRules = { gatewaySanitize.effectiveRules },
                         // 网关出站：与账号页共用同一个 RouteState，
                         // 这样「清空运行状态」与真实请求看到的是同一份状态。
                         gatewayProvider = dev.praxis.data.gateway.GatewayProvider(
@@ -1974,6 +1987,14 @@ fun PraxisApp(
                 gatewayReplayEntries = { routeReplayLog.recent() },
                 gatewayRouteGroups = gatewayRouteGroups,
                 gatewaySystemSettings = gatewaySystem,
+                gatewaySanitize = gatewaySanitize,
+                onGatewaySanitizeChange = { updated ->
+                    coroutineScope.launch {
+                        settingsRepository.setGatewaySanitizeJson(
+                            dev.praxis.core.ai.SanitizeSettingsCodec.encode(updated),
+                        )
+                    }
+                },
                 gatewayProxySettings = gatewayProxy,
                 onTestGatewayModel = { _, model ->
                     val (ok, detail) = gatewayProbeProvider.testModel(model)
