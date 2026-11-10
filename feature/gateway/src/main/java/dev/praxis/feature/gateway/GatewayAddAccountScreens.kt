@@ -186,35 +186,37 @@ fun GatewayAddLoginScreen(
         }
     }
 
-    if (apiDialogVisible) {
-        ApiKeyAccountDialog(
-            providerId = providerId,
-            providerLabel = providerLabel,
-            initialBaseUrl = baseUrl.orEmpty(),
-            onDismiss = { apiDialogVisible = false },
-            onConfirm = { draft ->
-                onSave(draft)
-                apiDialogVisible = false
-            },
-        )
-    }
-    if (authDialogVisible) {
-        WebAuthDialog(
-            providerId = providerId,
-            providerLabel = providerLabel,
-            initialBaseUrl = baseUrl.orEmpty(),
-            onDismiss = { authDialogVisible = false },
-            onConfirm = { draft ->
-                onSave(draft)
-                authDialogVisible = false
-            },
-        )
-    }
+    // 两个弹窗都**常驻挂载**（文档 §9.0）：`visible` 控制显隐，退场动画才播得完。
+    ApiKeyAccountDialog(
+        visible = apiDialogVisible,
+        providerId = providerId,
+        providerLabel = providerLabel,
+        initialBaseUrl = baseUrl.orEmpty(),
+        onDismiss = { apiDialogVisible = false },
+        onConfirm = { draft ->
+            onSave(draft)
+            apiDialogVisible = false
+        },
+    )
+    WebAuthDialog(
+        visible = authDialogVisible,
+        providerId = providerId,
+        providerLabel = providerLabel,
+        initialBaseUrl = baseUrl.orEmpty(),
+        onDismiss = { authDialogVisible = false },
+        onConfirm = { draft ->
+            onSave(draft)
+            authDialogVisible = false
+        },
+    )
 }
 
 /** 直填 Key 的表单。 */
 @Composable
 private fun ApiKeyAccountDialog(
+    // 常驻挂载 + visible 参数（文档 §9.0 禁止 `if (visible) { Dialog }`：
+    // 那样退场动画来不及播）。下同。
+    visible: Boolean = true,
     providerId: String,
     providerLabel: String,
     initialBaseUrl: String,
@@ -226,7 +228,7 @@ private fun ApiKeyAccountDialog(
     var apiKey by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
 
-    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+    MiuixAnimatedDialog(visible = visible, onDismissRequest = onDismiss) {
         Card {
             Column(modifier = Modifier.padding(vertical = 12.dp)) {
                 AddField("名字", name) { name = it }
@@ -278,6 +280,7 @@ private fun ApiKeyAccountDialog(
  */
 @Composable
 private fun WebAuthDialog(
+    visible: Boolean = true,
     providerId: String,
     providerLabel: String,
     initialBaseUrl: String,
@@ -289,7 +292,7 @@ private fun WebAuthDialog(
     var containerVisible by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+    MiuixAnimatedDialog(visible = visible, onDismissRequest = onDismiss) {
         Card {
             Column(modifier = Modifier.padding(vertical = 12.dp)) {
                 Text(
@@ -357,15 +360,14 @@ private fun WebAuthDialog(
         }
     }
 
-    if (containerVisible) {
-        MiuixAnimatedDialog(visible = true, onDismissRequest = { containerVisible = false }) {
-            Card {
-                Column(modifier = Modifier.fillMaxWidth().height(520.dp)) {
-                    PraxisWebViewSheet(
-                        url = landingUrl,
-                        onClose = { containerVisible = false },
-                    )
-                }
+    // 常驻挂载（文档 §9.0）：容器也要能播退场动画。
+    MiuixAnimatedDialog(visible = containerVisible, onDismissRequest = { containerVisible = false }) {
+        Card {
+            Column(modifier = Modifier.fillMaxWidth().height(520.dp)) {
+                PraxisWebViewSheet(
+                    url = landingUrl,
+                    onClose = { containerVisible = false },
+                )
             }
         }
     }
