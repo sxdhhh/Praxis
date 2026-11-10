@@ -109,6 +109,10 @@ xz = "1.10"
 # 版本 2.0.0 有依据（依赖升级记录里出现过 1.9.40 → 2.0.0）。
 # 文档的顺序本来就是「先试 jeziellago，不兼容换 KevinnZou」。
 composeWebview = "2.0.0"
+# ⏸ **暂未启用**：依赖能解析，但本环境读不到该库的 API 面（Maven 被沙箱拦、
+# 本地无 artifact、官方文档不可达），两次按记忆写的调用都编译不过。
+# 证据与「换库需要什么」写在 ui/widgets/PraxisWebViewSheet.kt 的文件头。
+# 库版本与坐标留着：等拿到 API 后只改那一个函数体。
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
