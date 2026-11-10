@@ -103,6 +103,13 @@ paparazzi = "2.0.0-alpha05.1"
 # `xz` 命令（系统里没有）。用纯 Java 实现。
 xz = "1.10"
 
+# H5 容器（文档 §9.10）。文档首选 jeziellago/compose-webview，但**版本号查不到**
+# （Maven 站点在本机被沙箱 DNS 拦、Gradle 缓存里也没有），写一个猜的版本会让
+# 所有人的构建失败。所以取文档给的**备选**：KevinnZou 的 compose-webview-multiplatform，
+# 版本 2.0.0 有依据（依赖升级记录里出现过 1.9.40 → 2.0.0）。
+# 文档的顺序本来就是「先试 jeziellago，不兼容换 KevinnZou」。
+composeWebview = "2.0.0"
+
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 # 迁移测试（G2）：room-testing 提供 MigrationTestHelper，需要在 androidTest 里跑真实 SQLite。
@@ -126,6 +133,7 @@ androidx-recyclerview = { module = "androidx.recyclerview:recyclerview", version
 androidx-annotation = { module = "androidx.annotation:annotation", version = "1.9.1" }
 androidx-activity = { module = "androidx.activity:activity", version.ref = "activityCompose" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+compose-webview = { module = "io.github.kevinnzou:compose-webview-multiplatform", version.ref = "composeWebview" }
 androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
@@ -240,3 +248,5 @@ kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 # 不应用时构造函数里 Paths.get(null) 直接 NPE —— 表现是「测试编译过了但
 # 5 个用例全挂在 ScreenPreviewTest.<init>」。（2026-11-01 实测）
 paparazzi = { id = "app.cash.paparazzi", version.ref = "paparazzi" }
+
+# 既有段落追加：H5 容器的库条目见 [versions] 里 composeWebview 的说明。

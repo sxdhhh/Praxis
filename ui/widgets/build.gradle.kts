@@ -26,6 +26,9 @@ dependencies {
     api(libs.miuix.ui)
     api(libs.miuix.icons)
     api(libs.miuix.preference)
+  // H5 容器（文档 §9.10）。文档明写「不要自己写 AndroidView { WebView } 包一层」，
+  // 所以容器本体用库，本模块只留宿主壳（进度/错误/返回键/回调拦截）。
+  implementation(libs.compose.webview)
 
     testImplementation(libs.junit)
 }
