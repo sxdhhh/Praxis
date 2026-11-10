@@ -164,11 +164,6 @@ fun SettingsHost(
         (suspend (providerId: String) ->
             dev.praxis.feature.gateway.GatewayProviderModelsFetch)? = null,
     onApplyGatewayModels: (providerId: String, models: List<String>) -> Unit = { _, _ -> },
-    /** 拉取模型清单（文档 §5.3 fetch-models）。 */
-    onFetchGatewayModels:
-        (suspend (providerId: String) ->
-            dev.praxis.feature.gateway.GatewayProviderModelsFetch)? = null,
-    onApplyGatewayModels: (providerId: String, models: List<String>) -> Unit = { _, _ -> },
     onGatewaySystemSettingsChange:
         (dev.praxis.core.gateway.GatewaySystemSettings) -> Unit = {},
     gatewayReplayEntries: () -> List<dev.praxis.core.gateway.RouteReplayEntry> = {
@@ -607,6 +602,11 @@ private fun SettingsPageBody(
             dev.praxis.feature.gateway.GatewayModelTestReport?)? = null,
     gatewaySystemSettings: dev.praxis.core.gateway.GatewaySystemSettings =
         dev.praxis.core.gateway.GatewaySystemSettings(),
+    /** 拉取模型清单（文档 §5.3 fetch-models）。 */
+    onFetchGatewayModels:
+        (suspend (providerId: String) ->
+            dev.praxis.feature.gateway.GatewayProviderModelsFetch)? = null,
+    onApplyGatewayModels: (providerId: String, models: List<String>) -> Unit = { _, _ -> },
     onGatewaySystemSettingsChange:
         (dev.praxis.core.gateway.GatewaySystemSettings) -> Unit = {},
     gatewayReplayEntries: () -> List<dev.praxis.core.gateway.RouteReplayEntry> = {
