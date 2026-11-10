@@ -9,15 +9,18 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -31,6 +34,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -38,40 +43,47 @@ import androidx.compose.ui.viewinterop.AndroidView
 /**
  * H5 容器（docs/PORTING-GATEWAY.md §9.10）—— 登录/授权页的宿主。
  *
- * ## ⚠️ 这是文档里那条「最后手段」，而且试过两次库都失败了
+ * ## 这是文档里那条「最后手段」，而且试过两次库都失败了
  *
- * 文档 §9.10 的选型顺序：`dev.jeziellago:compose-webview`（首选）→ KevinnZou →
- * **`AndroidView { WebView }`（最后手段，且要评审）**。这里用的是最后手段。
- * **两次尝试库的记录（都留证据，不是「懒得试」）**：
+ * 文档 §9.10：`jeziellago`（首选）→ KevinnZou → **`AndroidView { WebView }`（最后手段，且要评审）**。
+ * 两次试库的记录（都留证据，不是「懒得试」）：
  *
  * | 尝试 | 结果 |
  * |---|---|
- * | 首选 jeziellago | **版本号查不到**（Maven Central 在本机被沙箱 DNS 拦、Gradle 缓存里也没有）。写猜的版本会让所有人的构建失败 |
- * | 备选 KevinnZou 2.0.0（依赖能解析 ✓） | 第一次报 16 个错：`ComposeWebView` 不存在；第二次改名为 `WebView` 后 composable 解析成功，但 `onCreated` / `onDispose` / `webViewClient` 参数与该库实际签名不符，且 `AccompanistWebViewClient` 并不暴露 Android `WebViewClient` 的覆写点（报 'onPageStarted' overrides nothing） |
+ * | 首选 jeziellago | **版本号查不到**（Maven Central 在本机被沙箱 DNS 拦、Gradle 缓存也没有） |
+ * | 备选 KevinnZou 2.0.0（依赖能解析 ✓） | `WebView` composable 在，但 `onCreated` / `onDispose` / `webViewClient` 参数与实际签名不符，`AccompanistWebViewClient` 也不暴露 Android `WebViewClient` 的覆写点 |
  *
- * 阻断点很具体：**本环境读不到这个库的 API 面** —— Maven 被拦、本地没有 artifact、
- * 官方文档站点也不可达。而每次猜都要烧一个 CI 周期，用户又要求少 push。
- * 所以回到能编译的最后手段，并把「换库需要什么」写在这里。
+ * 阻断点：**本环境读不到该库的 API 面**。换库需要先拿到 API（CI 里打印 artifact 签名，或贴一份 README）。
  *
- * ## 换成库需要什么（谁来做都行）
+ * ## 两个真实 bug 的修法来自另一个项目（用户提供）
  *
- * 1. 拿到该库的 API：CI 里加一步打印 artifact 的类与函数签名（`unzip -l` + `javap`），
- *    或直接把它的 README/sample 贴进来；
- * 2. 然后只改 [PraxisWebViewSheet] 一个函数体 —— 调用方零改动（签名与行为不变）。
+ * `cn.apixiaoyuan.app` 的 H5 容器（同样是 AndroidView 路线）踩过并解决了这两条：
  *
- * ## 评审要点（文档要求「最后手段要评审」）
+ * ### ① 容器限位：顶部让出状态栏 + 那条带子用页面底色填充
  *
- * - 这里「自己写的」是**宿主壳**：加载进度、错误重试、返回键、回调拦截、新窗口、
- *   Cookie/UA 六件事，**零绘制**（没有一行画 UI）。文档反对的是自己画控件。
- * - 平台 `WebView` 本身是系统组件，Compose 里只能用 `AndroidView` 承载 ——
- *   那些库内部做的是同一件事。
- * - 六件事逐条对应见下面各段注释。
+ * 根因（他的原话）：「App 开了 `enableEdgeToEdge()`，内容区一直画到屏幕最顶端，
+ * **状态栏是浮在内容之上的**」，而容器 `Column` 没有 background → 露出窗口底色 →
+ * **一条白带子压在深色页面上**。
+ *
+ * 修法两条：让出状态栏高度（[applyTopInset]），并用**页面自己的底色**填那一条。
+ *
+ * ### ② 页面底色自适应（[WebPageColor]）
+ *
+ * 不问就不猜：向 H5 要 `getComputedStyle(html).backgroundColor` → `body` →
+ * `<meta name=theme-color>`（优先级同他的实现，理由见那边的注释：html 的背景会铺满视口）。
+ *
+ * **与他的实现有一处不同**：他在 Kotlin 侧解析 CSS 色值，我让 JS 直接算成 ARGB 整数
+ * 回来 —— Kotlin 侧少一个解析器，也就少一处能出错的地方。
  *
  * @param url 要打开的地址。
  * @param onClose 用户关闭容器（含「返回无可退」时）。
  * @param onCallbackUrl 命中 [allowedHosts] 的地址：**容器不跳转**，把它交出去（OAuth 回调靠它）。
  * @param allowedHosts 允许作为回调的主机名片段（大小写不敏感）；空 = 不拦截。
  * @param userAgentSuffix 追加到系统 UA 后面的标识；null = 不改。
+ * @param applyTopInset 是否让出状态栏高度。
+ *  - **全屏页面**（路由承载的容器）应当传 true：edge-to-edge 下不让出就会被状态栏压住；
+ *  - **弹窗里的容器**（当前用法，授权窗）传 false：外层的对话框已经处理了 insets，
+ *    再让一次会多出一条空白。
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -81,12 +93,22 @@ fun PraxisWebViewSheet(
     onCallbackUrl: (String) -> Unit = {},
     allowedHosts: List<String> = emptyList(),
     userAgentSuffix: String? = null,
+    applyTopInset: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var progress by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var currentUrl by remember { mutableStateOf(url) }
     var webView by remember { mutableStateOf<WebView?>(null) }
+    // 页面底色：探测到之前是 null（用主题色兜底），探测到之后铺满整页。
+    var pageColor by remember { mutableStateOf<Color?>(null) }
+
+    val density = LocalDensity.current
+    val statusBarTop = if (applyTopInset) {
+        WindowInsets.statusBars.getTop(density)
+    } else {
+        0
+    }
 
     fun isCallback(target: String?): Boolean {
         if (target.isNullOrBlank() || allowedHosts.isEmpty()) return false
@@ -109,7 +131,15 @@ fun PraxisWebViewSheet(
         }
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
+    // 整页背景用页面底色：那条状态栏带子与页面浑然一体（见文件头 ①）。
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(pageColor ?: MaterialTheme.colorScheme.surface),
+    ) {
+        if (statusBarTop > 0) {
+            Spacer(Modifier.height(with(density) { statusBarTop.toDp() }))
+        }
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -146,6 +176,8 @@ fun PraxisWebViewSheet(
                             settings.userAgentString = settings.userAgentString + " " + suffix
                         }
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                        // 页面底色：透明窗口会让带子露出下一层，所以先给个不透明底。
+                        setBackgroundColor(android.graphics.Color.WHITE)
                         webViewClient = object : WebViewClient() {
                             override fun shouldOverrideUrlLoading(
                                 view: WebView?,
@@ -169,6 +201,12 @@ fun PraxisWebViewSheet(
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 currentUrl = url ?: currentUrl
                                 progress = 100
+                                // 每次加载完成都探一次：SPA 内部导航会换「页面」，底色未必相同。
+                                view?.let { web ->
+                                    web.evaluateJavascript(PAGE_COLOR_PROBE) { raw ->
+                                        parsePageColor(raw)?.let { color -> pageColor = color }
+                                    }
+                                }
                             }
 
                             override fun onReceivedError(
@@ -225,4 +263,50 @@ fun PraxisWebViewSheet(
             }
         }
     }
+}
+
+/**
+ * 问页面「你的底色是什么」，直接返回 **ARGB 整数**（`null` = 问不出来）。
+ *
+ * 优先级 `html` → `body` → `<meta theme-color>`：`html` 的背景会铺满整个视口
+ * （CSS 的背景传播规则），是「页面实际看起来的底色」；`body` 常常是 transparent；
+ * `theme-color` 是页面给浏览器壳的提示色，作最后兜底。
+ *
+ * 算成整数再回来，是为了让 Kotlin 侧不需要一个 CSS 色值解析器（少一处能出错的地方）。
+ */
+private const val PAGE_COLOR_PROBE = """
+(function(){
+  try{
+    function bg(el){ try{ return (el && getComputedStyle(el).backgroundColor) || ''; }catch(e){ return ''; } }
+    function argb(c){
+      if(!c || c==='transparent') return -1;
+      var m = String(c).match(/^#([0-9a-fA-F]{6})$/);
+      if(m) return (0xff000000 | parseInt(m[1],16)) | 0;
+      var r = String(c).match(/rgba?\(([^)]+)\)/);
+      if(!r) return -1;
+      var p = r[1].split(',').map(function(x){ return parseFloat(x); });
+      if(p.length < 3 || isNaN(p[0])) return -1;
+      var a = p.length > 3 ? p[3] : 1;
+      if(!a) return -1;
+      return ((Math.round(a*255) << 24) | (p[0] << 16) | (p[1] << 8) | p[2]) | 0;
+    }
+    var h = argb(bg(document.documentElement));
+    var b = argb(bg(document.body));
+    var t = -1;
+    try{
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if(meta) t = argb(meta.getAttribute('content') || '');
+    }catch(e){}
+    var v = h !== -1 ? h : (b !== -1 ? b : t);
+    return v === -1 ? 'null' : String(v);
+  }catch(e){ return 'null'; }
+})()
+"""
+
+/** 解析 [PAGE_COLOR_PROBE] 的返回值（`evaluateJavascript` 会给字符串加引号）。 */
+internal fun parsePageColor(raw: String?): Color? {
+    val text = raw?.trim()?.trim('"') ?: return null
+    if (text.isEmpty() || text == "null") return null
+    val argb = text.toLongOrNull() ?: return null
+    return Color(argb.toInt())
 }
