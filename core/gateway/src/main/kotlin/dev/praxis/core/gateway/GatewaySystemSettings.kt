@@ -48,6 +48,9 @@ data class GatewaySystemSettings(
      * 那不是「加个设置」该有的副作用。
      */
     val queueWaitSeconds: Int = 0,
+    /** 图片压缩（文档 §5.18）：开关 / 长边 / 质量 / 阈值。 */
+    val imageCompress: dev.praxis.core.ai.ChatImageCompression =
+        dev.praxis.core.ai.ChatImageCompression(),
 ) {
     companion object {
         const val DEFAULT_CONNECT_SECONDS: Int = 15
@@ -89,6 +92,7 @@ object GatewaySystemSettingsRules {
                 GatewaySystemSettings.MIN_QUEUE_WAIT_SECONDS,
                 GatewaySystemSettings.MAX_QUEUE_WAIT_SECONDS,
             ),
+            imageCompress = settings.imageCompress.normalized(),
         )
 }
 
@@ -101,6 +105,16 @@ object GatewaySystemSettingsCodec {
         put("maxSwitches", settings.maxSwitches)
         put("debugRawTraffic", settings.debugRawTraffic)
         put("queueWaitSeconds", settings.queueWaitSeconds)
+        // 图片压缩：内嵌对象（与文档 §6.4 的四个键对应，这里合成一组）。
+        put(
+            "imageCompress",
+            buildJsonObject {
+                put("enabled", settings.imageCompress.enabled)
+                put("maxEdge", settings.imageCompress.maxEdge)
+                put("quality", settings.imageCompress.quality)
+                put("thresholdKb", settings.imageCompress.thresholdKb)
+            },
+        )
     }.toString()
 
     /** @param text null/空白 = 没配过（返回 null）；缺字段用默认值（schema 演进）。 */
@@ -117,6 +131,18 @@ object GatewaySystemSettingsCodec {
                     debugRawTraffic = root["debugRawTraffic"]?.jsonPrimitive?.contentOrNull
                         ?.toBooleanStrictOrNull() ?: defaults.debugRawTraffic,
                     queueWaitSeconds = root.intOr("queueWaitSeconds", defaults.queueWaitSeconds),
+                    imageCompress = root["imageCompress"]?.jsonObject?.let { nested ->
+                        dev.praxis.core.ai.ChatImageCompression(
+                            enabled = nested["enabled"]?.jsonPrimitive?.contentOrNull
+                                ?.toBooleanStrictOrNull() ?: defaults.imageCompress.enabled,
+                            maxEdge = nested.intOr("maxEdge", defaults.imageCompress.maxEdge),
+                            quality = nested.intOr("quality", defaults.imageCompress.quality),
+                            thresholdKb = nested.intOr(
+                                "thresholdKb",
+                                defaults.imageCompress.thresholdKb,
+                            ),
+                        )
+                    } ?: defaults.imageCompress,
                 ),
             )
         }
