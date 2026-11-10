@@ -6,20 +6,30 @@ import dev.praxis.core.gateway.ProviderProtocols
 /**
  * 内置家：地址 + 显示名 + 协议。
  *
- * ## 关于「地址从哪来」（这一点必须写清楚）
+ * ## ⚠️ 这份表**抄自上游注册表**，不要自己写地址
  *
- * 每一条都来自该家**公开的 API 文档**（见每行后面的注释指向的文档站点），
- * 但**没有在本环境逐个抓取验证**（沙箱里外网抓取被拦）。所以：
+ * 上游权威源（本机）：
+ * `C:\creat-agent\Agent2API\desktop-tauri\ui\preset-providers.js`
+ * 那张表本身抄自 9Router 的 `open-sse/providers/registry`，并注明了每家的特判。
  *
- * - 界面上把这一层说成「内置地址，可覆盖」，而不是「绝对正确」；
- * - 账号级 `baseUrlOverride` 与「自定义提供商」两条路都能改掉它；
- * - 地址错了会**响亮地失败**：客户端现在会把响应正文带进错误消息
- *   （那是之前修的一个缺口），不会变成「默默不回话」。
+ * 我此前凭印象写了一份 25 家的地址表，与上游**多处不符**（例如智谱：上游用的是
+ * Coding 套餐的 `api.z.ai/api/anthropic` 与中国站 `open.bigmodel.cn/api/coding/paas/v4`，
+ * 而不是我以为的 `/api/paas/v4`；HuggingFace 我也漏了）。那份表已作废。
  *
- * ## 为什么只给「能对上协议」的家
+ * ## 还没搬的部分（明确标注，不装完整）
  *
- * 这些都是 OpenAI 兼容的 `/chat/completions`（或 Anthropic Messages）。
- * 有自己一套私有协议的（例如某些家的签名鉴权）**不列**：列了也连不上。
+ * 上游每条还带 `quirks` —— 对某些家是**硬门槛**：
+ *
+ * | quirks | 谁需要 | 缺了会怎样 |
+ * |---|---|---|
+ * | `headers: Anthropic-Beta` | Anthropic / GLM Coding | 部分 beta 特性不可用 |
+ * | `headers: HTTP-Referer / X-Title` | OpenRouter | 不影响转发（推荐标识头） |
+ * | `urlSuffix: ?beta=true` | GLM Coding | 缺了 beta 特性不可用 |
+ * | `clientEmulation` | OpenCode Zen | 上游按客户端形态校验，一律 403 |
+ *
+ * 这些**必须先扩端口再列家**：现在的自定义家模型没有「静态额外头 / URL 后缀」两个字段，
+ * 列出来会让用户连不上而看不出原因。所以本表暂时只列**不加 quirks 也能连**的家。
+ * 下一步：给 provider 记录加 `extraHeaders` / `urlSuffix` 两列（一次迁移），再续抄剩余条目。
  */
 object BuiltinProviders {
 
@@ -29,35 +39,20 @@ object BuiltinProviders {
         val baseUrl: String,
     )
 
+    /**
+     * 与上游 `preset-providers.js` 逐条对应的子集（只取无需 quirks 的）。
+     *
+     * 地址语义与上游一致：`chat_completions` 家填到版本段（客户端 `ChatEndpoint.resolve`
+     * 会补 `/chat/completions`），`anthropic` 家填到站点根（协议路径补 `/v1/messages`）。
+     */
     private val TABLE: List<Builtin> = listOf(
-        // ── 国际 ──
         Builtin("openai", "OpenAI", "https://api.openai.com/v1"),
         Builtin("anthropic", "Anthropic", "https://api.anthropic.com"),
         Builtin("openrouter", "OpenRouter", "https://openrouter.ai/api/v1"),
-        Builtin("groq", "Groq", "https://api.groq.com/openai/v1"),
-        Builtin("mistral", "Mistral", "https://api.mistral.ai/v1"),
-        Builtin("together", "Together AI", "https://api.together.xyz/v1"),
-        Builtin("xai", "xAI", "https://api.x.ai/v1"),
-        Builtin("fireworks", "Fireworks", "https://api.fireworks.ai/inference/v1"),
-        // 这两家的端点**不带 /v1**，所以直接写完整端点（resolve 会原样使用）。
-        Builtin("perplexity", "Perplexity", "https://api.perplexity.ai/chat/completions"),
-        Builtin("deepinfra", "DeepInfra", "https://api.deepinfra.com/v1/openai/chat/completions"),
-        Builtin("cerebras", "Cerebras", "https://api.cerebras.ai/v1"),
-        Builtin("nvidia", "NVIDIA NIM", "https://integrate.api.nvidia.com/v1"),
-        // ── 国内 ──
+        Builtin("huggingface", "HuggingFace", "https://router.huggingface.co/v1"),
+        Builtin("nvidia", "NVIDIA", "https://integrate.api.nvidia.com/v1"),
         Builtin("deepseek", "DeepSeek", "https://api.deepseek.com"),
-        Builtin("moonshot", "Kimi / Moonshot", "https://api.moonshot.cn/v1"),
-        Builtin("dashscope", "通义千问（百炼）", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-        Builtin("zhipu", "智谱 GLM", "https://open.bigmodel.cn/api/paas/v4"),
-        Builtin("siliconflow", "硅基流动", "https://api.siliconflow.cn/v1"),
-        Builtin("ark", "火山方舟（豆包）", "https://ark.cn-beijing.volces.com/api/v3"),
-        Builtin("hunyuan", "腾讯混元", "https://api.hunyuan.cloud.tencent.com/v1"),
-        Builtin("baichuan", "百川", "https://api.baichuan-ai.com/v1"),
-        Builtin("minimax", "MiniMax", "https://api.minimax.chat/v1"),
-        Builtin("stepfun", "阶跃星辰", "https://api.stepfun.com/v1"),
-        Builtin("lingyiwanwu", "零一万物", "https://api.lingyiwanwu.com/v1"),
-        Builtin("qianfan", "百度千帆", "https://qianfan.baidubce.com/v2"),
-        Builtin("sensenova", "商汤日日新", "https://api.sensenova.cn/compatible-mode/v1"),
+        Builtin("glm-cn", "GLM 中国", "https://open.bigmodel.cn/api/coding/paas/v4"),
     )
 
     /** 全部内置家 id（顺序即界面顺序）。 */
