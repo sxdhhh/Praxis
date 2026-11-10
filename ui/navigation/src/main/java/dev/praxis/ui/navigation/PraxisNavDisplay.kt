@@ -147,6 +147,7 @@ fun PraxisNavDisplay(
     entry<PraxisRoute.SettingsGatewayReport>(swipeDismiss = swipe) { route -> content(route) }
     entry<PraxisRoute.SettingsGatewayProviders>(swipeDismiss = swipe) { route -> content(route) }
     entry<PraxisRoute.SettingsGatewaySystem>(swipeDismiss = swipe) { route -> content(route) }
+    entry<PraxisRoute.SettingsGatewayProxy>(swipeDismiss = swipe) { route -> content(route) }
     entry<PraxisRoute.SettingsGatewayAdd>(swipeDismiss = swipe) { route -> content(route) }
     entry<PraxisRoute.SettingsGatewayAddLogin>(swipeDismiss = swipe) { route -> content(route) }
     // 与 SettingsModel 一致：主设置页不允许侧滑返回，避免误退（文档 §7.1 的表）。
@@ -202,6 +203,7 @@ fun PraxisRoute.title(): String = when (this) {
     PraxisRoute.SettingsGatewayReport -> "报表"
     PraxisRoute.SettingsGatewayProviders -> "自定义提供商"
     PraxisRoute.SettingsGatewaySystem -> "系统设置"
+    PraxisRoute.SettingsGatewayProxy -> "代理"
     PraxisRoute.SettingsGatewayAdd -> "选择提供商"
     // 标题不带提供商名：路由只负责「去哪」，文案要展示什么由页面自己填
     // （这条约定写在 Routes.kt 的 KDoc 里）。

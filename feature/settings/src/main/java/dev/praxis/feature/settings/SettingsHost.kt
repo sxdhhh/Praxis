@@ -147,6 +147,12 @@ fun SettingsHost(
     onAddGatewayRouteGroup: (dev.praxis.core.gateway.GatewayRouteGroup) -> Unit = {},
     onRemoveGatewayRouteGroup: (String) -> Unit = {},
     /** 网关系统设置（文档 §5.18 的可用子集）。 */
+    /** 代理池与每账号绑定（文档 §5.9）。 */
+    gatewayProxySettings: dev.praxis.core.gateway.ProxySettings =
+        dev.praxis.core.gateway.ProxySettings(),
+    /** 账号 id 到显示名：绑定时要选择。 */
+    gatewayProxyAccounts: List<Pair<String, String>> = emptyList(),
+    onGatewayProxySettingsChange: (dev.praxis.core.gateway.ProxySettings) -> Unit = {},
     gatewaySystemSettings: dev.praxis.core.gateway.GatewaySystemSettings =
         dev.praxis.core.gateway.GatewaySystemSettings(),
     onGatewaySystemSettingsChange:
@@ -378,6 +384,9 @@ fun SettingsHost(
             onAddGatewayRouteGroup = onAddGatewayRouteGroup,
             onRemoveGatewayRouteGroup = onRemoveGatewayRouteGroup,
             gatewaySystemSettings = gatewaySystemSettings,
+            gatewayProxySettings = gatewayProxySettings,
+            gatewayProxyAccounts = gatewayProxyAccounts,
+            onGatewayProxySettingsChange = onGatewayProxySettingsChange,
             onGatewaySystemSettingsChange = onGatewaySystemSettingsChange,
             gatewayModelError = gatewayModelError,
             onAddGatewayAccount = onAddGatewayAccount,
@@ -571,6 +580,10 @@ private fun SettingsPageBody(
     onAddGatewayRouteGroup: (dev.praxis.core.gateway.GatewayRouteGroup) -> Unit = {},
     onRemoveGatewayRouteGroup: (String) -> Unit = {},
     /** 网关系统设置（文档 §5.18 的可用子集）。 */
+    gatewayProxySettings: dev.praxis.core.gateway.ProxySettings =
+        dev.praxis.core.gateway.ProxySettings(),
+    gatewayProxyAccounts: List<Pair<String, String>> = emptyList(),
+    onGatewayProxySettingsChange: (dev.praxis.core.gateway.ProxySettings) -> Unit = {},
     gatewaySystemSettings: dev.praxis.core.gateway.GatewaySystemSettings =
         dev.praxis.core.gateway.GatewaySystemSettings(),
     onGatewaySystemSettingsChange:
@@ -884,6 +897,12 @@ private fun SettingsPageBody(
                 modifier = modifier,
             )
         }
+        PraxisRoute.SettingsGatewayProxy -> dev.praxis.feature.gateway.GatewayProxyScreen(
+            settings = gatewayProxySettings,
+            accounts = gatewayProxyAccounts,
+            onChange = onGatewayProxySettingsChange,
+            modifier = modifier,
+        )
         PraxisRoute.SettingsGatewaySystem -> dev.praxis.feature.gateway.GatewaySystemScreen(
             settings = gatewaySystemSettings,
             onChange = onGatewaySystemSettingsChange,

@@ -730,6 +730,17 @@ class SettingsRepository(
 
     suspend fun setGatewaySystemSettingsJson(text: String) = put(KEY_GATEWAY_SYSTEM, text)
 
+    /**
+     * 代理池与每账号绑定（文档 §5.9）。
+     *
+     * 文档 §6.4 给网关的代理键留的是逐键命名（`gateway_proxy_*`），
+     * 这里用一个 JSON 键 —— **这是一处已记录的偏离**：节点是可变长列表，
+     * 逐键命名要拼 key 前缀，维护成本高于收益。代价是导入导出要写映射。
+     */
+    val gatewayProxyJson: Flow<String?> = dataStore.data.map { it[KEY_GATEWAY_PROXY] }
+
+    suspend fun setGatewayProxyJson(text: String) = put(KEY_GATEWAY_PROXY, text)
+
     suspend fun setGatewayRouteGroupsJson(text: String) =
         put(KEY_GATEWAY_ROUTE_GROUPS, text)
 
@@ -1455,6 +1466,9 @@ private val KEY_GATEWAY_ROUTE_GROUPS = stringPreferencesKey("gateway_route_group
 
 /** 网关系统设置，见 [SettingsRepository.gatewaySystemSettingsJson]。 */
 private val KEY_GATEWAY_SYSTEM = stringPreferencesKey("gateway_system")
+
+/** 代理池，见 [SettingsRepository.gatewayProxyJson]。 */
+private val KEY_GATEWAY_PROXY = stringPreferencesKey("gateway_proxy")
 
 /**
  * 用户改写过的内置人格。空 = 用出厂人格（`SystemPromptSettings.BUILTIN_PERSONA`）。

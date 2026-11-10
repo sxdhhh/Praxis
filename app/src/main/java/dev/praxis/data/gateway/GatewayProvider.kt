@@ -99,6 +99,14 @@ class GatewayProvider(
     private val debugRawTraffic: Boolean = false,
     private val customHeaders: List<CustomHeader> = emptyList(),
     private val client: OkHttpClient = OkHttpClient(),
+    /**
+     * 这个账号该用哪个客户端（文档 §5.9：**每账号绑定出口**）。
+     *
+     * 默认忽略账号、一律用 [client]（没配代理时就是这样）。
+     * 装配点传 `ProxyResolver::clientFor` 的包装：出口解析在那一处，
+     * 拉清单与转发都走它 —— 否则会出「清单能拉、请求 403」。
+     */
+    private val clientFor: (String) -> OkHttpClient = { client },
 ) : AiProvider {
 
     override val displayName: String = "网关"
@@ -196,6 +204,9 @@ class GatewayProvider(
             // 用户买了套餐却连不上，而且错误来自上游、看不出是这里判错了。
             val protocol = dev.praxis.data.gateway.BuiltinProviders.protocol(attempt.provider)
 
+            // 这个账号的出口（没绑定就是基线客户端）。
+            val attemptClient = clientFor(attempt.accountId)
+
             // quirks（上游 preset 注册表的特判）：内置家来自代码里的表，
             // 自定义家来自记录（建家时随预置模板写入）。
             val builtinQuirks = dev.praxis.data.gateway.BuiltinProviders.quirks(attempt.provider)
@@ -220,14 +231,14 @@ class GatewayProvider(
                         customHeaders = effectiveHeaders,
                         urlSuffix = urlSuffix,
                         toolTypeCustom = builtinQuirks.anthropicToolType,
-                        client = client,
+                        client = attemptClient,
                     )
                 dev.praxis.core.gateway.ProviderProtocol.Responses ->
                     dev.praxis.data.ai.ResponsesProvider(
                         baseUrl = baseUrl,
                         apiKey = apiKey,
                         customHeaders = effectiveHeaders,
-                        client = client,
+                        client = attemptClient,
                     )
                 dev.praxis.core.gateway.ProviderProtocol.OpenAiChat ->
                     OpenAiCompatProvider(
@@ -236,7 +247,7 @@ class GatewayProvider(
                         apiKey = apiKey,
                         customHeaders = effectiveHeaders,
                         urlSuffix = urlSuffix,
-                        client = client,
+                        client = attemptClient,
                     )
             }
 

@@ -396,6 +396,23 @@ fun PraxisApp(
             .build()
     }
 
+    // 代理池（文档 §5.9）：每账号绑定出口。
+    //
+    // 节点一变就重建解析器（`remember` 的键里有 proxySettings），
+    // 于是 OkHttp 客户端缓存也跟着失效 —— 用户改完地址不需要重启。
+    val gatewayProxyJson by settingsRepository.gatewayProxyJson.collectAsState(initial = null)
+    val gatewayProxy = remember(gatewayProxyJson) {
+        dev.praxis.core.gateway.ProxySettingsCodec.decode(gatewayProxyJson)
+            ?.getOrNull()
+            ?: dev.praxis.core.gateway.ProxySettings()
+    }
+    val proxyResolver = remember(gatewayHttpClient, gatewayProxy) {
+        dev.praxis.data.gateway.ProxyResolver(
+            settings = { gatewayProxy },
+            baseClient = { gatewayHttpClient },
+        )
+    }
+
     // 路由组（文档 §5.5）：对外名 → 跨家成员。
     val gatewayRouteGroupsJson by settingsRepository.gatewayRouteGroupsJson
         .collectAsState(initial = null)
@@ -961,6 +978,11 @@ fun PraxisApp(
                                 maxSwitches = gatewaySystem.maxSwitches,
                             ),
                             debugRawTraffic = gatewaySystem.debugRawTraffic,
+                            // 每账号出口：装配点只在这里做一次解析，
+                            // 拉清单与转发共用同一个 ProxyResolver（文档 §5.9 的要点）。
+                            clientFor = { accountId ->
+                                proxyResolver.clientFor(accountId) ?: gatewayHttpClient
+                            },
                             client = gatewayHttpClient,
                             state = gatewayRouteState,
                         ),
@@ -1181,6 +1203,11 @@ fun PraxisApp(
                                 maxSwitches = gatewaySystem.maxSwitches,
                             ),
                             debugRawTraffic = gatewaySystem.debugRawTraffic,
+                            // 每账号出口：装配点只在这里做一次解析，
+                            // 拉清单与转发共用同一个 ProxyResolver（文档 §5.9 的要点）。
+                            clientFor = { accountId ->
+                                proxyResolver.clientFor(accountId) ?: gatewayHttpClient
+                            },
                             client = gatewayHttpClient,
                         ),
                     ),
@@ -1799,6 +1826,18 @@ fun PraxisApp(
                 gatewayReplayEntries = { routeReplayLog.recent() },
                 gatewayRouteGroups = gatewayRouteGroups,
                 gatewaySystemSettings = gatewaySystem,
+                gatewayProxySettings = gatewayProxy,
+                // 绑定要选账号：用「账号 id → 显示名」。
+                gatewayProxyAccounts = gatewayAccountRows.map { it.id to it.name },
+                onGatewayProxySettingsChange = { updated ->
+                    coroutineScope.launch {
+                        settingsRepository.setGatewayProxyJson(
+                            dev.praxis.core.gateway.ProxySettingsCodec.encode(
+                                dev.praxis.core.gateway.ProxyRules.pruneBinding(updated),
+                            ),
+                        )
+                    }
+                },
                 onGatewaySystemSettingsChange = { updated ->
                     coroutineScope.launch {
                         settingsRepository.setGatewaySystemSettingsJson(

@@ -165,16 +165,15 @@ fun GatewayReportScreen(
         }
     }
 
-    if (retentionDialogVisible) {
-        RetentionDialog(
+    RetentionDialog(
+        visible = retentionDialogVisible,
             current = retentionDays,
             onDismiss = { retentionDialogVisible = false },
             onConfirm = { days ->
                 onRetentionDaysChange(days)
                 retentionDialogVisible = false
             },
-        )
-    }
+    )
 }
 
 /**
@@ -185,6 +184,7 @@ fun GatewayReportScreen(
  */
 @Composable
 private fun RetentionDialog(
+    visible: Boolean = true,
     current: Int,
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit,
@@ -192,7 +192,7 @@ private fun RetentionDialog(
     // 滑块：1~365 天，非法值不可表达（此前用文本框 + 解析，还得处理"填了中文"）。
     var days by remember { mutableIntStateOf(current.coerceIn(1, 365)) }
 
-    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+    MiuixAnimatedDialog(visible = visible, onDismissRequest = onDismiss) {
         Card {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(text = "记录保留", style = MiuixTheme.textStyles.body2)

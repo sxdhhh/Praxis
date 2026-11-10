@@ -187,20 +187,20 @@ fun GatewayModelsScreen(
         }
     }
 
-    if (addVisible) {
-        AddModelDialog(
+    AddModelDialog(
+        visible = addVisible,
             onDismiss = { addVisible = false },
             onConfirm = { provider, id, name ->
                 onAdd(provider, id, name)
                 addVisible = false
             },
-        )
-    }
+    )
 }
 
 /** 添加条目：provider 与模型 id 必填，名称可留空（留空就用 id）。 */
 @Composable
 private fun AddModelDialog(
+    visible: Boolean = true,
     onDismiss: () -> Unit,
     onConfirm: (String, String, String) -> Unit,
 ) {
@@ -209,7 +209,7 @@ private fun AddModelDialog(
     var name by remember { mutableStateOf("") }
     val canConfirm = provider.trim().isNotEmpty() && id.trim().isNotEmpty()
 
-    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+    MiuixAnimatedDialog(visible = visible, onDismissRequest = onDismiss) {
         Card {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(text = "添加模型条目", style = MiuixTheme.textStyles.body1)

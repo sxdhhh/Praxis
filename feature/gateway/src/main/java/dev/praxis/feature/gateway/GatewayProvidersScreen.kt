@@ -150,15 +150,14 @@ fun GatewayProvidersScreen(
         }
     }
 
-    if (addDialogVisible) {
-        AddProviderDialog(
+    AddProviderDialog(
+        visible = addDialogVisible,
             onDismiss = { addDialogVisible = false },
             onConfirm = { draft ->
                 onAdd(draft)
                 addDialogVisible = false
             },
-        )
-    }
+    )
 }
 
 /** 与其它页一致的卡片外壳（自带横向 12dp / 底部 12dp 间距）。 */
@@ -184,6 +183,7 @@ private fun FinalCard(content: @Composable () -> Unit) {
  */
 @Composable
 private fun AddProviderDialog(
+    visible: Boolean = true,
     onDismiss: () -> Unit,
     onConfirm: (dev.praxis.core.gateway.GatewayProviderDraft) -> Unit,
 ) {
@@ -193,7 +193,7 @@ private fun AddProviderDialog(
     var models by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
 
-    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+    MiuixAnimatedDialog(visible = visible, onDismissRequest = onDismiss) {
         Card {
             Column(modifier = Modifier.padding(vertical = 12.dp)) {
                 Text(

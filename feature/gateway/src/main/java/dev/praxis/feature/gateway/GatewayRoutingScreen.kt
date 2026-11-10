@@ -383,38 +383,35 @@ fun GatewayRoutingScreen(
         }
     }
 
-    if (budgetDialogVisible) {
-        BudgetDialog(
+    BudgetDialog(
+        visible = budgetDialogVisible,
             policy = policy,
             onDismiss = { budgetDialogVisible = false },
             onConfirm = { updated ->
                 onPolicyChange(updated)
                 budgetDialogVisible = false
             },
-        )
-    }
+    )
 
-    if (groupDialogVisible) {
-        AddRouteGroupDialog(
+    AddRouteGroupDialog(
+        visible = groupDialogVisible,
             existing = routeGroups,
             onDismiss = { groupDialogVisible = false },
             onConfirm = { group ->
                 onAddRouteGroup(group)
                 groupDialogVisible = false
             },
-        )
-    }
+    )
 
-    if (faultDialogVisible) {
-        FaultParamsDialog(
+    FaultParamsDialog(
+        visible = faultDialogVisible,
             policy = policy,
             onDismiss = { faultDialogVisible = false },
             onConfirm = { updated ->
                 onPolicyChange(updated)
                 faultDialogVisible = false
             },
-        )
-    }
+    )
 }
 
 /**
@@ -431,6 +428,8 @@ fun GatewayRoutingScreen(
  */
 @Composable
 private fun FaultParamsDialog(
+    // 常驻挂载 + visible（文档 §9.0 禁止 if (visible) { Dialog }）。
+    visible: Boolean = true,
     policy: dev.praxis.core.gateway.GatewayRoutingPolicy,
     onDismiss: () -> Unit,
     onConfirm: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit,
@@ -448,7 +447,7 @@ private fun FaultParamsDialog(
         mutableIntStateOf(policy.breakerSuccessThreshold.coerceIn(1, 10))
     }
 
-    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+    MiuixAnimatedDialog(visible = visible, onDismissRequest = onDismiss) {
         Card {
             // 滑块自带 16dp 内边距，这里只留纵向间距，避免双重缩进。
             Column(modifier = Modifier.padding(vertical = 12.dp)) {
@@ -529,6 +528,8 @@ private fun budgetText(tokens: Long): String {
  */
 @Composable
 private fun BudgetDialog(
+    // 常驻挂载 + visible（文档 §9.0 禁止 if (visible) { Dialog }）。
+    visible: Boolean = true,
     policy: dev.praxis.core.gateway.GatewayRoutingPolicy,
     onDismiss: () -> Unit,
     onConfirm: (dev.praxis.core.gateway.GatewayRoutingPolicy) -> Unit,
@@ -539,7 +540,7 @@ private fun BudgetDialog(
     }
     var hours by remember { mutableIntStateOf(policy.budgetWindowHours.coerceIn(1, 720)) }
 
-    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+    MiuixAnimatedDialog(visible = visible, onDismissRequest = onDismiss) {
         Card {
             Column(modifier = Modifier.padding(vertical = 12.dp)) {
                 Text(
@@ -605,6 +606,8 @@ private fun replayTimeText(atMillis: Long): String =
  */
 @Composable
 private fun AddRouteGroupDialog(
+    // 常驻挂载 + visible（文档 §9.0 禁止 if (visible) { Dialog }）。
+    visible: Boolean = true,
     existing: List<dev.praxis.core.gateway.GatewayRouteGroup>,
     onDismiss: () -> Unit,
     onConfirm: (dev.praxis.core.gateway.GatewayRouteGroup) -> Unit,
@@ -613,7 +616,7 @@ private fun AddRouteGroupDialog(
     var members by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
 
-    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+    MiuixAnimatedDialog(visible = visible, onDismissRequest = onDismiss) {
         Card {
             Column(modifier = Modifier.padding(vertical = 12.dp)) {
                 Text(

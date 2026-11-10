@@ -470,27 +470,25 @@ fun ImageGenRoute(
         }
     }
 
-    if (defaultsDialogVisible) {
-        GenerationParamsDialog(
+    GenerationParamsDialog(
+        visible = defaultsDialogVisible,
             defaults = imageDefaults,
             onDismiss = { defaultsDialogVisible = false },
             onConfirm = { updated ->
                 onImageDefaultsChange(updated)
                 defaultsDialogVisible = false
             },
-        )
-    }
+    )
 
-    if (sourceDialogVisible) {
-        DownloadSourceDialog(
+    DownloadSourceDialog(
+        visible = sourceDialogVisible,
             settings = downloadSettings,
             onDismiss = { sourceDialogVisible = false },
             onConfirm = { updated ->
                 onDownloadSettingsChange(updated)
                 sourceDialogVisible = false
             },
-        )
-    }
+    )
 
     ImageGenTargetDialog(
         visible = targetPickerVisible,
@@ -571,6 +569,7 @@ private val PLAN_LINES = listOf(
  */
 @Composable
 private fun DownloadSourceDialog(
+    visible: Boolean = true,
     settings: dev.praxis.core.imagegen.ImageDownloadSettings,
     onDismiss: () -> Unit,
     onConfirm: (dev.praxis.core.imagegen.ImageDownloadSettings) -> Unit,
@@ -582,7 +581,7 @@ private fun DownloadSourceDialog(
     }
     var error by remember { mutableStateOf<String?>(null) }
 
-    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+    MiuixAnimatedDialog(visible = visible, onDismissRequest = onDismiss) {
         Card {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(text = "下载源", style = MiuixTheme.textStyles.body1)
@@ -664,6 +663,7 @@ private fun formatCfg(cfg: Float): String =
  */
 @Composable
 private fun GenerationParamsDialog(
+    visible: Boolean = true,
     defaults: dev.praxis.core.imagegen.ImageGenDefaults,
     onDismiss: () -> Unit,
     onConfirm: (dev.praxis.core.imagegen.ImageGenDefaults) -> Unit,
@@ -675,7 +675,7 @@ private fun GenerationParamsDialog(
     var negative by remember { mutableStateOf(defaults.negative) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+    MiuixAnimatedDialog(visible = visible, onDismissRequest = onDismiss) {
         Card {
             Column(
                 modifier = Modifier

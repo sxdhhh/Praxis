@@ -195,6 +195,11 @@ data object SettingsGatewayAdd : PraxisRoute
 data class SettingsGatewayAddLogin(val providerId: String) : PraxisRoute
 
 /**
+ * 代理池页（设置 -> 网关 -> 代理，文档 §5.9）。
+ */
+data object SettingsGatewayProxy : PraxisRoute
+
+/**
  * 网关系统设置页（设置 -> 网关 -> 系统设置）。
  *
  * 文档 §5.18：只包含真的接上了消费者的项（超时/换号上限/debug 摘要）。

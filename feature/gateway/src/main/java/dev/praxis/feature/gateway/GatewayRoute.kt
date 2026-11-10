@@ -167,6 +167,21 @@ fun GatewayRoute(
                 subtitle = "这次会先用谁、谁被跳过",
             )
         }
+        item(key = "__proxy_card__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                MiuixNavigationItemWidget(
+                    title = "代理",
+                    description = "命名出口 + 每账号绑定",
+                    onClick = { navigator.push(PraxisRoute.SettingsGatewayProxy) },
+                )
+            }
+        }
+
         item(key = "__system_card__") {
             Card(
                 modifier = Modifier

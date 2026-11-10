@@ -243,16 +243,15 @@ fun ImageGenTargetDialog(
     }
 
     // 自定义远端表单：与主对话框并列（主对话框在它后面不消失）。
-    if (remoteDialogVisible) {
-        RemoteTargetDialog(
+    RemoteTargetDialog(
+        visible = remoteDialogVisible,
             onDismiss = { remoteDialogVisible = false },
             onConfirm = { target ->
                 onSelect(target)
                 remoteDialogVisible = false
                 onDismiss()
             },
-        )
-    }
+    )
 }
 /**
  * 自定义远端生图目标（`/v1/images/generations`）。
@@ -270,6 +269,7 @@ fun ImageGenTargetDialog(
  */
 @Composable
 private fun RemoteTargetDialog(
+    visible: Boolean = true,
     onDismiss: () -> Unit,
     onConfirm: (ImageGenTarget) -> Unit,
 ) {
@@ -278,7 +278,7 @@ private fun RemoteTargetDialog(
     var model by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
 
-    MiuixAnimatedDialog(visible = true, onDismissRequest = onDismiss) {
+    MiuixAnimatedDialog(visible = visible, onDismissRequest = onDismiss) {
         Card {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(text = "自定义远端", style = MiuixTheme.textStyles.body2)
