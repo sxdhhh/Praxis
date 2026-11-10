@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Tune
@@ -226,6 +227,47 @@ fun GatewaySystemScreen(
                         )
                     },
                 )
+            }
+        }
+        item(key = "__autocontinue_title__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Autorenew,
+                title = "自动续写",
+                subtitle = "回答被腰斩时自动再问一轮把话说完",
+            )
+        }
+        item(key = "__autocontinue_switch__") {
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+                MiuixSwitchWidget(
+                    title = "启用自动续写",
+                    description = "**默认关**：它会多跑一轮、多花钱",
+                    checked = settings.autoContinue,
+                    onCheckedChange = { enabled ->
+                        onChange(settings.copy(autoContinue = enabled))
+                    },
+                )
+            }
+        }
+        if (settings.autoContinue) {
+            item(key = "__autocontinue_rounds__") {
+                Card(
+                    modifier = Modifier.fillMaxWidth()
+                        .padding(horizontal = 12.dp).padding(bottom = 12.dp),
+                ) {
+                    MiuixIntNumberPickerWidget(
+                        title = "最多续几轮",
+                        description = "到上限会停下并提示（文档 §7.5 的默认是 3）",
+                        value = settings.autoContinueMaxRounds,
+                        startInt = dev.praxis.core.gateway.GatewaySystemSettings
+                            .MIN_AUTO_CONTINUE_ROUNDS,
+                        endInt = dev.praxis.core.gateway.GatewaySystemSettings
+                            .MAX_AUTO_CONTINUE_ROUNDS,
+                        valueSuffix = " 轮",
+                        onValueChange = { rounds ->
+                            onChange(settings.copy(autoContinueMaxRounds = rounds))
+                        },
+                    )
+                }
             }
         }
         item(key = "__sanitize_title__") {

@@ -89,6 +89,14 @@ class ChatViewModel(
      */
     private val imageGallery: ImageGalleryPort? = null,
     /**
+     * 自动续写配置（文档 §7.5 / §5.18）。**每次现取**：设置页改完下一轮就生效。
+     *
+     * 默认 `AutoContinueConfig()` = 关闭（它会多跑一轮、花钱，文档原话是
+     * 「不能擅自开」）。
+     */
+    private val autoContinueConfig: () -> dev.praxis.core.gateway.AutoContinueConfig =
+        { dev.praxis.core.gateway.AutoContinueConfig() },
+    /**
      * 已启用技能拼成的提示词片段（可为空）。
      *
      * 用 `suspend () -> String` 而不是 String：技能列表可能在设置页被改，
@@ -182,6 +190,15 @@ class ChatViewModel(
 
     private val _state = MutableStateFlow(ChatState())
     val state: StateFlow<ChatState> = _state.asStateFlow()
+
+    /**
+     * 本轮回答已经自动续过几轮（用户主动发下一条时清零）。
+     *
+     * 必须是 VM 字段而不是 `runStream` 的局部变量：续写是**跨调用**的
+     * （`continueGeneration` 会再进一次 `runStream`），局部变量一进新调用
+     * 就归零，于是「最多 3 轮」会变成无限循环。
+     */
+    private var autoContinueRounds: Int = 0
 
     private var nextId = 0L
     private var streamingJob: Job? = null
@@ -1235,6 +1252,9 @@ class ChatViewModel(
     }
 
     fun send() {
+        // 用户主动发新的一条：上一轮的自动续写计数归零（文档 §7.5 的「一轮」
+        // 指的是**这一次回答**，不是整个会话）。
+        autoContinueRounds = 0
         // ## `/` 命令拦截必须**先于** trim 与各种早退（2026-11-06）
         //
         // 用户打 `/compact` 按回车，意图是执行命令而不是发一句话。
@@ -2242,6 +2262,9 @@ class ChatViewModel(
 
         streamingJob = viewModelScope.launch {
             val buffer = StringBuilder()
+            // 这一轮的结束信号与被腰斩的气泡 id：自动续写（文档 §7.5）用。
+            var truncatedSignal = dev.praxis.core.gateway.FinishSignal.Normal
+            var truncatedAtId: Long? = null
             // 思考过程单独一个缓冲：它不进 `buffer`（正文），也不进 history。
             // 见 `ReasoningDelta` 的说明。
             val reasoningBuffer = StringBuilder()
@@ -2519,6 +2542,11 @@ class ChatViewModel(
                                     text = buffer.toString(),
                                 )
                                 rememberIfWorth(buffer.toString())
+                                // 记下这一轮的结束原因：自动续写要靠它判「是不是被腰斩」
+                                // （文档 §7.5：finish_reason=length 或上游断流）。
+                                truncatedSignal = dev.praxis.core.gateway.FinishSignalRules
+                                    .of(event.finishReason)
+                                truncatedAtId = assistantId
                             }
                         }
                     }
@@ -2532,6 +2560,43 @@ class ChatViewModel(
                 // 放在「成功」分支而不是 finally：失败时用户手边有错误要读，
                 // 自动把下一条发出去会让他看不到错误。
                 drainQueueIfIdle()
+
+                // ── 自动续写（文档 §7.5 / §5.18）──
+                //
+                // 回答被**腰斩**（finish_reason=length 或上游断流）时，用户看到的
+                // 是半句话，而他往往要的就是「把话说完」。判定交给 core 的纯函数
+                // （10 例单测），这里只负责触发。
+                //
+                // 三条边界：
+                //  · 默认**关**（多跑一轮要花钱，文档原话「不能擅自开」）；
+                //  · 轮数上限由策略管（默认 3），到达就停并向用户说明；
+                //  · 续写走的是**同一个** `continueGeneration`（手动「继续」那条路），
+                //    所以历史/落盘/滚动都一致，不另开一条写入路径。
+                val signal = truncatedSignal
+                val decision = dev.praxis.core.gateway.AutoContinuePolicy.decide(
+                    config = autoContinueConfig(),
+                    signal = signal,
+                    roundsDone = autoContinueRounds,
+                )
+                if (decision is dev.praxis.core.gateway.AutoContinueDecision.Continue) {
+                    val target = truncatedAtId
+                    if (target != null) {
+                        autoContinueRounds = decision.nextRound
+                        continueGeneration(target)
+                    }
+                } else if (
+                    decision is dev.praxis.core.gateway.AutoContinueDecision.Stop &&
+                    decision.reason ==
+                    dev.praxis.core.gateway.AutoContinueStopReason.MaxRoundsReached
+                ) {
+                    // 到上限要让用户知道：否则他会奇怪「怎么又停了」。
+                    _state.update {
+                        it.copy(
+                            notice = "已自动续写 " + autoContinueRounds +
+                                " 轮（到设置的上限了）",
+                        )
+                    }
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // ★ 必须排在 `catch (e: Exception)` 之前。
                 //

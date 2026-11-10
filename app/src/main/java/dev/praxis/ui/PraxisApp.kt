@@ -1099,6 +1099,13 @@ fun PraxisApp(
                         ),
                     ),
                 model = DEFAULT_MODEL,
+                // 自动续写（文档 §7.5 / §5.18）：关着时行为与从前完全一致。
+                autoContinueConfig = {
+                    dev.praxis.core.gateway.AutoContinueConfig(
+                        enabled = gatewaySystem.autoContinue,
+                        maxRounds = gatewaySystem.autoContinueMaxRounds,
+                    )
+                },
                 toolRegistry = toolRegistry,
                 toolExecutor = toolExecutor,
                 toolContext = toolContext,
