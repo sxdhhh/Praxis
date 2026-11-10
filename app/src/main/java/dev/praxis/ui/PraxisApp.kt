@@ -724,46 +724,6 @@ fun PraxisApp(
     var gatewayProviderRows by remember {
         mutableStateOf<List<dev.praxis.feature.gateway.GatewayProviderRowUi>>(emptyList())
     }
-    var gatewayProviderAddError by remember { mutableStateOf<String?>(null) }
-    var gatewayProviderTick by remember { mutableStateOf(0) }
-    LaunchedEffect(gatewayRowsRefresh, gatewayProviderTick) {
-        gatewayProviderRows = gatewayAccountStore.providers().map { entity ->
-            dev.praxis.feature.gateway.GatewayProviderRowUi(
-                id = entity.id,
-                name = entity.name,
-                baseUrl = entity.baseUrl,
-                modelCount = entity.modelsJson
-                    .split("\n")
-                    .count { line -> line.trim().isNotEmpty() },
-            )
-        }
-    }
-
-    // ── 添加账号三级流程 + 生图的「服务商模型」清单（都吃模型池）──
-    //
-    // 服务商模型 = 各家在 `modelsJson` 里声明的模型名 × 那家的地址。
-    // nativeModels() 是挂起函数，所以这里用 state + LaunchedEffect（不能在 remember 里调）。
-    var imageGenRemoteModels by remember {
-        mutableStateOf<List<dev.praxis.feature.settings.ImageGenRemoteModel>>(emptyList())
-    }
-    LaunchedEffect(gatewayProviderRows, gatewayRowsRefresh) {
-        val baseUrls = buildMap {
-            dev.praxis.data.gateway.BuiltinProviders.ids().forEach { id ->
-                dev.praxis.data.gateway.BuiltinProviders.baseUrl(id)?.let { url ->
-                    put(id, url)
-                }
-            }
-            gatewayProviderRows.forEach { row -> put(row.id, row.baseUrl) }
-        }
-        imageGenRemoteModels = gatewayAccountStore.nativeModels().mapNotNull { native ->
-            baseUrls[native.provider]?.let { url ->
-                dev.praxis.feature.settings.ImageGenRemoteModel(
-                    provider = native.provider,
-                    model = native.id,
-                    baseUrl = url,
-                )
-            }
-        }
 
     // 模型测试用实例（文档 §5.4.1 第 16 条）。
     //
@@ -805,6 +765,47 @@ fun PraxisApp(
             client = gatewayHttpClient,
         )
     }
+    var gatewayProviderAddError by remember { mutableStateOf<String?>(null) }
+    var gatewayProviderTick by remember { mutableStateOf(0) }
+    LaunchedEffect(gatewayRowsRefresh, gatewayProviderTick) {
+        gatewayProviderRows = gatewayAccountStore.providers().map { entity ->
+            dev.praxis.feature.gateway.GatewayProviderRowUi(
+                id = entity.id,
+                name = entity.name,
+                baseUrl = entity.baseUrl,
+                modelCount = entity.modelsJson
+                    .split("\n")
+                    .count { line -> line.trim().isNotEmpty() },
+            )
+        }
+    }
+
+    // ── 添加账号三级流程 + 生图的「服务商模型」清单（都吃模型池）──
+    //
+    // 服务商模型 = 各家在 `modelsJson` 里声明的模型名 × 那家的地址。
+    // nativeModels() 是挂起函数，所以这里用 state + LaunchedEffect（不能在 remember 里调）。
+    var imageGenRemoteModels by remember {
+        mutableStateOf<List<dev.praxis.feature.settings.ImageGenRemoteModel>>(emptyList())
+    }
+    LaunchedEffect(gatewayProviderRows, gatewayRowsRefresh) {
+        val baseUrls = buildMap {
+            dev.praxis.data.gateway.BuiltinProviders.ids().forEach { id ->
+                dev.praxis.data.gateway.BuiltinProviders.baseUrl(id)?.let { url ->
+                    put(id, url)
+                }
+            }
+            gatewayProviderRows.forEach { row -> put(row.id, row.baseUrl) }
+        }
+        imageGenRemoteModels = gatewayAccountStore.nativeModels().mapNotNull { native ->
+            baseUrls[native.provider]?.let { url ->
+                dev.praxis.feature.settings.ImageGenRemoteModel(
+                    provider = native.provider,
+                    model = native.id,
+                    baseUrl = url,
+                )
+            }
+        }
+
     }
 
     // ① 提供商列表（内置家 + 自定义家）。
@@ -1688,7 +1689,7 @@ fun PraxisApp(
                         )
                     } else {
                         val view = gatewayAccountStore.routingViews()
-                            .firstOrNull { it.provider == providerId }
+                            .firstOrNull { it.providerId == providerId }
                         val key = view?.let { account ->
                             (gatewayAccountStore.credentialOf(account.id).getOrNull()
                                 as? dev.praxis.core.gateway.GatewayCredential.ApiKey)?.apiKey
