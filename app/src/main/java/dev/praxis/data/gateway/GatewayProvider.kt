@@ -111,7 +111,56 @@ class GatewayProvider(
 
     override val displayName: String = "网关"
 
-    override fun stream(request: ChatRequest): Flow<AiStreamEvent> = flow {
+    override fun stream(request: ChatRequest): Flow<AiStreamEvent> =
+        streamInternal(request, isTest = false)
+
+    /**
+     * 连通性测试（文档 §5.4.1 第 16 条）：走**同一条**链路，只是请求体最小。
+     *
+     * ## 为什么必须复用 stream 的实体
+     *
+     * 文档特意写明：测试要「走 `GatewayProvider`，**不要另写一条内部探测**」。
+     * 因为另写一条测出来的结论与生产不一致 —— 用户看到「测试通过」后仍然发不出去，
+     * 那比没有测试按钮更糟。这里连换号、退避、熔断、出口都一起走。
+     *
+     * @return (是否成功, 人话说明)
+     */
+    suspend fun testModel(model: String): Pair<Boolean, String> {
+        val startedAt = System.currentTimeMillis()
+        val probe = ChatRequest(
+            model = model,
+            messages = listOf(
+                dev.praxis.core.ai.ChatMessage(
+                    role = dev.praxis.core.ai.ChatRole.User,
+                    text = "ping",
+                ),
+            ),
+            // 只要一个 token：测试不该烧额度（文档 §5.4 的要点）。
+            maxTokens = 1,
+        )
+        return try {
+            var sawAny = false
+            streamInternal(probe, isTest = true).collect { sawAny = true }
+            val cost = System.currentTimeMillis() - startedAt
+            if (sawAny) {
+                true to ("通了（" + cost + "ms）")
+            } else {
+                false to "上游没有返回任何内容"
+            }
+        } catch (error: dev.praxis.core.ai.AiException) {
+            val cost = System.currentTimeMillis() - startedAt
+            false to ((error.error.message ?: "失败") + "（" + cost + "ms）")
+        } catch (error: Throwable) {
+            false to (error.message ?: "失败")
+        }
+    }
+
+    /**
+     * 真正干活的实现。
+     *
+     * @param isTest 测试请求不入报表（文档 §5.7 的真实事故：人工样本会把趋势读歪）。
+     */
+    private fun streamInternal(request: ChatRequest, isTest: Boolean): Flow<AiStreamEvent> = flow {
         val rules = modelRules()
 
         val chain = CandidateChain.of(
@@ -162,7 +211,7 @@ class GatewayProvider(
         var lastAttempt: PlannedAttempt? = null
 
         // 成功/失败都记一条；失败按文档 §5.7 清零 token（规则在 core 的 GatewayUsageRules）。
-        suspend fun record(success: Boolean, status: Int, error: String?) {
+        suspend fun record(success: Boolean, status: Int, error: String?, isTest: Boolean) {
             val draft = dev.praxis.core.gateway.GatewayUsageDraft(
                 model = request.model,
                 upstreamModel = lastAttempt?.wireModel,
@@ -175,6 +224,7 @@ class GatewayProvider(
                 completionTokens = lastUsage?.completionTokens ?: 0,
                 cacheReadTokens = lastUsage?.cacheReadTokens ?: 0,
                 durationMs = System.currentTimeMillis() - startedAt,
+                isTest = isTest,
             )
             recordUsage(dev.praxis.core.gateway.GatewayUsageRules.build(draft, success))
         }
@@ -259,7 +309,7 @@ class GatewayProvider(
                     emit(event)
                 }
                 session.onSuccess(attempt)
-                record(success = true, status = dev.praxis.core.gateway.GatewayUsageRules.STATUS_OK, error = null)
+                record(success = true, status = dev.praxis.core.gateway.GatewayUsageRules.STATUS_OK, error = null, isTest = isTest)
                 replayLog?.record(
                     dev.praxis.core.gateway.RouteReplayEntry(
                         model = request.model,
@@ -298,6 +348,7 @@ class GatewayProvider(
                     success = false,
                     status = dev.praxis.core.gateway.GatewayUsageRules.STATUS_NO_RESPONSE,
                     error = e.error.message,
+                    isTest = isTest,
                 )
                 // 失败时的回放最有价值：用户问的就是「这次为什么没走那个账号」。
                 val outcome = session.outcome()

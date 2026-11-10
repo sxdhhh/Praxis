@@ -147,6 +147,10 @@ fun SettingsHost(
     onAddGatewayRouteGroup: (dev.praxis.core.gateway.GatewayRouteGroup) -> Unit = {},
     onRemoveGatewayRouteGroup: (String) -> Unit = {},
     /** 网关系统设置（文档 §5.18 的可用子集）。 */
+    /** 模型测试（文档 §5.4.1 第 16 条）：走真实链路，测试请求不入报表。 */
+    onTestGatewayModel:
+        (suspend (provider: String, id: String) ->
+            dev.praxis.feature.gateway.GatewayModelTestReport?)? = null,
     /** 代理池与每账号绑定（文档 §5.9）。 */
     gatewayProxySettings: dev.praxis.core.gateway.ProxySettings =
         dev.praxis.core.gateway.ProxySettings(),
@@ -387,6 +391,7 @@ fun SettingsHost(
             gatewayProxySettings = gatewayProxySettings,
             gatewayProxyAccounts = gatewayProxyAccounts,
             onGatewayProxySettingsChange = onGatewayProxySettingsChange,
+            onTestGatewayModel = onTestGatewayModel,
             onGatewaySystemSettingsChange = onGatewaySystemSettingsChange,
             gatewayModelError = gatewayModelError,
             onAddGatewayAccount = onAddGatewayAccount,
@@ -584,6 +589,10 @@ private fun SettingsPageBody(
         dev.praxis.core.gateway.ProxySettings(),
     gatewayProxyAccounts: List<Pair<String, String>> = emptyList(),
     onGatewayProxySettingsChange: (dev.praxis.core.gateway.ProxySettings) -> Unit = {},
+    /** 模型测试（文档 §5.4.1 第 16 条）：走真实链路，测试请求不入报表。 */
+    onTestGatewayModel:
+        (suspend (provider: String, id: String) ->
+            dev.praxis.feature.gateway.GatewayModelTestReport?)? = null,
     gatewaySystemSettings: dev.praxis.core.gateway.GatewaySystemSettings =
         dev.praxis.core.gateway.GatewaySystemSettings(),
     onGatewaySystemSettingsChange:
@@ -929,6 +938,7 @@ private fun SettingsPageBody(
             onToggle = onToggleGatewayModel,
             onDelete = onDeleteGatewayModel,
             onAdd = onAddGatewayModel,
+            onTest = onTestGatewayModel,
             modifier = modifier,
         )
         PraxisRoute.SettingsGatewayRouting -> dev.praxis.feature.gateway.GatewayRoutingScreen(

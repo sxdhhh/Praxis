@@ -24,10 +24,18 @@ import dev.praxis.ui.widgets.MiuixAnimatedDialog
 import dev.praxis.ui.widgets.MiuixNavigationItemWidget
 import dev.praxis.ui.widgets.MiuixSwitchWidget
 import dev.praxis.ui.widgets.SettingsSectionHeader
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+/**
+ * 一次连通性测试的结果。
+ *
+ * @param detail 人话（成功带耗时；失败带上游原因）。
+ */
+data class GatewayModelTestReport(val isSuccess: Boolean, val detail: String)
 
 /**
  * 网关 → 模型管理（`gateway_model` 表的写入口）。
@@ -51,11 +59,23 @@ fun GatewayModelsScreen(
     onDelete: (String, String) -> Unit = { _, _ -> },
     /** provider / id / name —— 添加。 */
     onAdd: (String, String, String) -> Unit = { _, _, _ -> },
+    /**
+     * 连通性测试（文档 §5.4.1 第 16 条）。
+     *
+     * null = 没接线 —— 那时**不画**测试入口，而不是画一个点了没反应的按钮。
+     * 实现必须走 `GatewayProvider` 的真实链路（换号/退避/熔断/出口都走），
+     * 另写一条内部探测会得到与生产不一致的结论。
+     */
+    onTest: (suspend (provider: String, id: String) -> GatewayModelTestReport?)? = null,
     /** 最近一次写入失败的原因；null = 没有。 */
     error: String? = null,
     modifier: Modifier = Modifier,
 ) {
     var addVisible by remember { mutableStateOf(false) }
+    // 正在测的模型（provider|id）与最近一次结果。
+    var testing by remember { mutableStateOf<String?>(null) }
+    var testReport by remember { mutableStateOf<Pair<String, GatewayModelTestReport>?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     // 顶栏是浮层：内容要能滚到它下面（否则渐进模糊采不到内容，退化成一块实色）。
     val topInset = dev.praxis.ui.design.component.LocalTopBarInset.current
@@ -138,6 +158,30 @@ fun GatewayModelsScreen(
                                 onToggle(row.provider, row.id, enabled)
                             },
                         )
+                        // 测试入口：没接线就不画（不是画一个没反应的按钮）。
+                        if (onTest != null) {
+                            val key = row.provider + "/" + row.id
+                            val report = testReport?.takeIf { it.first == key }?.second
+                            MiuixNavigationItemWidget(
+                                title = if (testing == key) "测试中…" else "测试",
+                                description = when {
+                                    testing == key -> "正在发一个只要 1 个 token 的真实请求",
+                                    report != null -> report.detail,
+                                    else -> "会真打上游、烧一点点额度；测试请求不计入报表",
+                                },
+                                onClick = {
+                                    if (testing != null) return@MiuixNavigationItemWidget
+                                    testing = key
+                                    scope.launch {
+                                        val result = runCatching {
+                                            onTest.invoke(row.provider, row.id)
+                                        }.getOrNull()
+                                        testReport = result?.let { key to it }
+                                        testing = null
+                                    }
+                                },
+                            )
+                        }
                         MiuixNavigationItemWidget(
                             title = "删除",
                             description = "只删这条记录，不动账号与目录名",

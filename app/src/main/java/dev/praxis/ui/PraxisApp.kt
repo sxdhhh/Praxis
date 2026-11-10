@@ -413,6 +413,47 @@ fun PraxisApp(
         )
     }
 
+    // 模型测试用实例（文档 §5.4.1 第 16 条）。
+    //
+    // ## 为什么另建一个实例而不是复用聊天页那个
+    //
+    // 聊天页与标题生成那两处构造点的参数并**不相同**（一处带用户规则与策略，
+    // 一处只带默认规则）。为了做测试去动那两处，会顺带改变生产请求的行为 ——
+    // 那是另一个改动。这里用同一套接线（同一个 RouteState、同一份策略与出口解析）
+    // 建独立实例：测试走的是**同一条链路**，只是不碰生产实例的参数。
+    val gatewayProbeProvider = remember(
+        gatewayModelRulesJson,
+        gatewayRoutingPolicy,
+        gatewaySystem,
+        proxyResolver,
+        gatewayHttpClient,
+        gatewayRouteGroups,
+        gatewayRowsRefresh,
+    ) {
+        dev.praxis.data.gateway.GatewayProvider(
+            store = gatewayAccountStore,
+            modelRules = { gatewayModelRules },
+            policy = { gatewayRoutingPolicy },
+            state = gatewayRouteState,
+            recordUsage = { draft -> gatewayUsageStore.record(draft) },
+            providerBaseUrl = { id ->
+                dev.praxis.data.gateway.BuiltinProviders.baseUrl(id)
+                    ?: gatewayProviderRows.firstOrNull { it.id == id }?.baseUrl
+            },
+            accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
+            replayLog = routeReplayLog,
+            groups = { gatewayRouteGroups },
+            budget = dev.praxis.core.gateway.FailoverBudget(
+                maxSwitches = gatewaySystem.maxSwitches,
+            ),
+            debugRawTraffic = gatewaySystem.debugRawTraffic,
+            clientFor = { accountId ->
+                proxyResolver.clientFor(accountId) ?: gatewayHttpClient
+            },
+            client = gatewayHttpClient,
+        )
+    }
+
     // 路由组（文档 §5.5）：对外名 → 跨家成员。
     val gatewayRouteGroupsJson by settingsRepository.gatewayRouteGroupsJson
         .collectAsState(initial = null)
@@ -1827,6 +1868,13 @@ fun PraxisApp(
                 gatewayRouteGroups = gatewayRouteGroups,
                 gatewaySystemSettings = gatewaySystem,
                 gatewayProxySettings = gatewayProxy,
+                onTestGatewayModel = { _, model ->
+                    val (ok, detail) = gatewayProbeProvider.testModel(model)
+                    dev.praxis.feature.gateway.GatewayModelTestReport(
+                        isSuccess = ok,
+                        detail = detail,
+                    )
+                },
                 // 绑定要选账号：用「账号 id → 显示名」。
                 gatewayProxyAccounts = gatewayAccountRows.map { it.id to it.name },
                 onGatewayProxySettingsChange = { updated ->
