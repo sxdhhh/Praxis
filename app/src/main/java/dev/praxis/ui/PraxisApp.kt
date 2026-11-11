@@ -2278,8 +2278,13 @@ fun PraxisApp(
                             }
                             val plan = dev.praxis.core.gateway.GatewayExportPlanner.build(
                                 accounts = accounts,
-                                // 路由/重试/超时 Praxis 还没持久化 —— 传 null，由计划层把这条写进 notes。
-                                routing = null,
+                                // 路由/重试/超时/压缩/自动续写：Praxis 早就持久化了
+                                // （gatewayRoutingPolicy + gatewaySystem），只是此前没往导出里装 ——
+                                // 于是「导出成功，但文件里没有我改过的那些设置」。
+                                // 映射在 core 的 GatewaySettingsExport（只写**与默认不同**的键，
+                                // 免得把「用户从未做过的选择」替他在网关那边钉死）。
+                                routing = dev.praxis.core.gateway.GatewaySettingsExport
+                                    .toRoutingConfig(gatewayRoutingPolicy, gatewaySystem),
                                 modelRules = gatewayModelRulesJson?.let {
                                     kotlinx.serialization.json.Json.parseToJsonElement(it)
                                 },
