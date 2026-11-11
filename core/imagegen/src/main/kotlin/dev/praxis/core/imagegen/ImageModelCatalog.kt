@@ -55,6 +55,25 @@ data class ImageModel(
  * 表里之所以大量条目都是 `8gen2`：那是同一代 NPU 驱动的一批型号，
  * 真正的分水岭在 8gen1 与 8gen2 之间。
  */
+/**
+ * 这个模型跑起来还需要什么（文档 §1.4.1：DiT 引擎是另一个产物）。
+ *
+ * 单独一个函数而不是让界面自己判 `isDit`：判据会随引擎版本变
+ * （3.0.0 才有 DiT 型），写在数据旁边更不容易漂移。
+ */
+/** 模型「跑得起来」的前置条件（目前只有 DiT 这一条）。 */
+object ImageModelRequirement {
+
+    /**
+     * 这个模型是不是还得有 DiT 引擎才跑得起来。
+     *
+     * 界面上要据此**明说**（自编那份没有 libdit_engine.so）——
+     * 让用户下载一个跑不了的模型是最糟的结果。
+     */
+    fun requiresDitEngine(model: ImageModel): Boolean =
+        EngineLaunchRules.isDitType(model.backendType)
+}
+
 object ChipsetTier {
 
     private val SUFFIXES: Map<String, String> = mapOf(

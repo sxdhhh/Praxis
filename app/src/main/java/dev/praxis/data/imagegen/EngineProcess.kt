@@ -66,6 +66,11 @@ class EngineProcess(
             spec = spec,
             engineExists = runCatching { engine.isFile }.getOrDefault(false),
             modelDirEmpty = !File(spec.modelDir).isDirectory,
+            // DiT 型的 --lib_dir 指向 libdit_engine.so；本机自编那份没产出它，
+            // 所以这里要如实告诉 validate —— 否则用户会拿到一句难懂的加载失败。
+            ditEngineAvailable = runCatching {
+                File(nativeLibraryDir(), DIT_ENGINE_NAME).isFile
+            }.getOrDefault(false),
             libDirFiles = spec.libDir?.let { dir ->
                 runCatching {
                     File(dir).listFiles()?.map { it.name } ?: emptyList()
@@ -119,6 +124,9 @@ class EngineProcess(
     }
 
     companion object {
+        /** DiT 引擎文件名（本机自编那份**没有产出**它，见 BUILD-INFO.txt）。 */
+        const val DIT_ENGINE_NAME: String = "libdit_engine.so"
+
         /** 引擎可执行文件名（Local Dream 的 BackendService 同款常量名）。 */
         const val ENGINE_NAME: String = "libstable_diffusion_core.so"
 

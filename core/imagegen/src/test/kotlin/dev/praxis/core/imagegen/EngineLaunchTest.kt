@@ -137,6 +137,63 @@ class EngineLaunchTest {
     }
 
     @Test
+    fun `3-0-0 的新类型都认得`() {
+        // 自编 3.0.0 的 usage（从二进制里抽出）：多了 sdxlmnn 与 4 个 DiT 型。
+        val types = EngineLaunchRules.KNOWN_TYPES
+        listOf("sdxlmnn", "zimage", "klein", "qwen21", "krea2turbo").forEach { type ->
+            assertTrue("应当认这个类型：" + type, type in types)
+        }
+    }
+
+    @Test
+    fun `sdxlmnn 是 MNN 不需要 QNN 库`() {
+        assertTrue(!EngineLaunchRules.requiresQnn("sdxlmnn"))
+        assertNull(EngineLaunchRules.validate(spec(type = "sdxlmnn")))
+        assertTrue(!EngineLaunchRules.command(spec(type = "sdxlmnn")).contains("--lib_dir"))
+    }
+
+    @Test
+    fun `DiT 型缺 libdit_engine 时要拦（本机自编那份就没产出它）`() {
+        val error = EngineLaunchRules.validate(
+            spec(type = "zimage", libDir = "/dit"),
+            ditEngineAvailable = false,
+        )
+        assertEquals(EngineLaunchError.MissingDitEngine, error)
+        assertTrue(error!!.userMessage().contains("DiT"))
+        // 有它就能过（validate 不该顺手把 DiT 判死）。
+        assertNull(
+            EngineLaunchRules.validate(
+                spec(type = "zimage", libDir = "/dit"),
+                ditEngineAvailable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `qnn_lib_dir 只在给了的时候才拼进命令`() {
+        // 3.0.0 起才有这个参数（DiT 进程内放大用）。
+        val without = EngineLaunchRules.command(spec(type = "zimage", libDir = "/dit"))
+        assertTrue(!without.contains("--qnn_lib_dir"))
+        val with = EngineLaunchRules.command(
+            spec(type = "zimage", libDir = "/dit").copy(qnnLibDir = "/qnn"),
+        )
+        val index = with.indexOf("--qnn_lib_dir")
+        assertTrue(index > 0)
+        assertEquals("/qnn", with[index + 1])
+        // 顺序：--lib_dir 在 --port 之前，--qnn_lib_dir 紧跟 --lib_dir 之后。
+        assertTrue(with.indexOf("--lib_dir") < index)
+        assertTrue(index < with.indexOf("--port"))
+    }
+
+    @Test
+    fun `isDitType 只认那四个`() {
+        assertTrue(EngineLaunchRules.isDitType("zimage"))
+        assertTrue(EngineLaunchRules.isDitType("krea2turbo"))
+        assertTrue(!EngineLaunchRules.isDitType("sdxl"))
+        assertTrue(!EngineLaunchRules.isDitType("sd15cpu"))
+    }
+
+    @Test
     fun `每种错误都有人话`() {
         EngineLaunchError.entries.forEach { error ->
             assertTrue(error.userMessage().isNotBlank())

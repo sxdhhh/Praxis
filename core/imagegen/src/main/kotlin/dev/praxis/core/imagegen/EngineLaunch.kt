@@ -35,6 +35,13 @@ data class EngineLaunchSpec(
     val type: String,
     val modelDir: String,
     val libDir: String? = null,
+    /**
+     * DiT 进程里做放大时的 QNN 运行时目录（3.0.0 起才有这个参数）。
+     *
+     * 只有 DiT 类型会用到：DiT 引擎本身在 `--lib_dir`，而它**再调 QNN 放大**时
+     * 需要另一份 QNN 运行时路径。SD1.5/SDXL 那条线没有它。
+     */
+    val qnnLibDir: String? = null,
     val port: Int = DEFAULT_PORT,
     val patchFile: String? = null,
     val lowram: Boolean = false,
@@ -60,7 +67,14 @@ enum class EngineLaunchError {
     MissingPatch,
     BadPort,
     /**
-     * 参数都合法，但进程就是起不来（权限、SELinux、二进制格式不对…）。
+     * DiT 型模型需要 `libdit_engine.so`，而这个构建没有它。
+     *
+     * 单独一条而不是复用 [MissingLibDir]：那会让用户去查一个**查不到**的东西
+     * （QNN 目录明明在，缺的是另一个 .so）。
+     */
+    MissingDitEngine,
+    /**
+     * 参数都合法，但进程就是不起来（权限、SELinux、二进制格式不对…）。
      *
      * 单独一条而不是复用 [MissingEngineFile]：那种「归因错误」会让用户
      * 去查一个根本不存在的问题（文件明明在）。
@@ -76,6 +90,8 @@ fun EngineLaunchError.userMessage(): String = when (this) {
     EngineLaunchError.IncompleteLibDir -> "--lib_dir 里要同时有 libQnnHtp.so 与 libQnnSystem.so"
     EngineLaunchError.MissingPatch -> "这个分辨率需要补丁文件（引擎缺了它会**静默回落到 512**）"
     EngineLaunchError.BadPort -> "端口要在 1..65535 之间"
+    EngineLaunchError.MissingDitEngine ->
+        "这类模型（Z-Image / Klein / Qwen-Image / Krea）需要 DiT 引擎，这个构建没有内置它"
     EngineLaunchError.StartFailed -> "引擎进程起不来（看下面的引擎日志）"
 }
 
@@ -87,8 +103,26 @@ object EngineLaunchRules {
     /** QNN 类型：需要 `--lib_dir`。`sd15cpu` 是 MNN，纯 CPU 不需要 QNN 库。 */
     val QNN_TYPES: Set<String> = setOf("sd15npu", "sdxl", "anima")
 
-    /** 引擎认的全部类型（文档 §3.1 的 usage）。 */
-    val KNOWN_TYPES: Set<String> = setOf("sd15cpu", "sd15npu", "sdxl", "anima")
+    /**
+     * 引擎认的全部类型。
+     *
+     * **3.0.0 起**（本机自编那版，usage 从二进制里抽出）：
+     * `sd15cpu|sd15npu|sdxl|sdxlmnn|anima|zimage|klein|qwen21|krea2turbo`。
+     * 与 2.8.1 的差别见文档 §1.5：多了 `sdxlmnn`（MNN 的 SDXL）与 4 个 DiT 型。
+     */
+    val KNOWN_TYPES: Set<String> = setOf(
+        "sd15cpu", "sd15npu", "sdxl", "sdxlmnn", "anima",
+        "zimage", "klein", "qwen21", "krea2turbo",
+    )
+
+    /**
+     * DiT 型：它们的 `--lib_dir` 指向 **`libdit_engine.so`**（不是 QNN 公共库）。
+     *
+     * ⚠️ 本机自编那份**没有产出 `libdit_engine.so`**（DiT 工程需要另装 Qualcomm
+     * Hexagon SDK，见 BUILD-INFO.txt），所以这四类现在**起不来** ——
+     * 界面上要明说，不能让用户下一个跑不了的模型。
+     */
+    val DIT_TYPES: Set<String> = setOf("zimage", "klein", "qwen21", "krea2turbo")
 
     /** QNN 目录里必须同时存在的两个文件。 */
     val REQUIRED_QNN_FILES: List<String> = listOf("libQnnHtp.so", "libQnnSystem.so")
@@ -110,6 +144,7 @@ object EngineLaunchRules {
      * @param modelDirEmpty 模型目录是不是空的。
      * @param libDirFiles `--lib_dir` 目录里的文件名（null = 没给该参数）。
      * @param needsPatch 这个画布需要补丁（只有 `sd15npu` 非 512 时才为 true）。
+     * @param ditEngineAvailable `libdit_engine.so` 在不在（DiT 型必查）。
      */
     fun validate(
         spec: EngineLaunchSpec,
@@ -117,10 +152,16 @@ object EngineLaunchRules {
         modelDirEmpty: Boolean = false,
         libDirFiles: List<String>? = null,
         needsPatch: Boolean = false,
+        ditEngineAvailable: Boolean = true,
     ): EngineLaunchError? {
         if (!engineExists) return EngineLaunchError.MissingEngineFile
         if (spec.port !in 1..65535) return EngineLaunchError.BadPort
         if (spec.type !in KNOWN_TYPES) return EngineLaunchError.UnknownType
+        // DiT 型：`--lib_dir` 要指向 libdit_engine.so。本机自编那份没产出它，
+        // 所以这里要**明确拦住**并说清原因，而不是让引擎自己报一句难懂的加载失败。
+        if (spec.type in DIT_TYPES && !ditEngineAvailable) {
+            return EngineLaunchError.MissingDitEngine
+        }
         if (modelDirEmpty) return EngineLaunchError.MissingModelDir
         if (requiresQnn(spec.type)) {
             val dir = spec.libDir
@@ -146,6 +187,9 @@ object EngineLaunchRules {
         out += listOf("--type", spec.type)
         out += listOf("--model_dir", spec.modelDir)
         spec.libDir?.takeIf { it.isNotBlank() }?.let { out += listOf("--lib_dir", it) }
+        // 3.0.0 起才有：DiT 进程内做放大时的 QNN 运行时目录。
+        spec.qnnLibDir?.takeIf { it.isNotBlank() }
+            ?.let { out += listOf("--qnn_lib_dir", it) }
         out += listOf("--port", spec.port.toString())
         spec.patchFile?.takeIf { it.isNotBlank() }?.let { out += listOf("--patch", it) }
         if (spec.lowram) out += "--lowram"
@@ -168,6 +212,8 @@ object EngineLaunchRules {
         patchFile: String? = null,
         port: Int = EngineLaunchSpec.DEFAULT_PORT,
         listenAll: Boolean = false,
+        /** DiT 型才有：放大用的 QNN 目录（3.0.0 契约）。 */
+        qnnLibDir: String? = null,
     ): EngineLaunchSpec = EngineLaunchSpec(
         enginePath = enginePath,
         type = model.backendType,
@@ -175,9 +221,13 @@ object EngineLaunchRules {
         libDir = libDir,
         port = port,
         patchFile = patchFile,
+        qnnLibDir = qnnLibDir,
         lowram = prefersLowRam(model.backendType),
         listenAll = listenAll,
     )
+
+    /** 这个类型是不是 DiT（需要 libdit_engine.so）。 */
+    fun isDitType(type: String): Boolean = type in DIT_TYPES
 
     /** 这个模型在当前画布下是否需要补丁文件。 */
     fun needsPatch(model: ImageModel, size: Int): Boolean =

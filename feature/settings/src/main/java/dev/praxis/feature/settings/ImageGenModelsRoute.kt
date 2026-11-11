@@ -216,5 +216,9 @@ private fun backendLabel(model: ImageModel): String = when {
     model.runOnCpu -> "CPU"
     model.isSdxl -> "NPU · SDXL"
     model.isAnima -> "NPU · Anima"
+    // DiT 型要另有一个 .so（libdit_engine.so），而自编那份**没有产出它**。
+    // 不写出来的话，用户会下一个跑不了的模型 —— 那是最糟的结果。
+    dev.praxis.core.imagegen.ImageModelRequirement.requiresDitEngine(model) ->
+        "DiT · 需要 DiT 引擎（本构建没有）"
     else -> "NPU"
 }

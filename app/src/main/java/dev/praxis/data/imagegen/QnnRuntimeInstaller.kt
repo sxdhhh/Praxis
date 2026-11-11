@@ -94,6 +94,6 @@ class QnnRuntimeInstaller(
          * 现在这版与随包的引擎同版本（都是从 2.8.1 官方 APK 提取的），
          * 两者契约一致（文档 §1.5 特意警告过不要混版本）。
          */
-        const val STAMP: String = "qnn-2.8.1"
+        const val STAMP: String = "qnn-3.0.0"
     }
 }

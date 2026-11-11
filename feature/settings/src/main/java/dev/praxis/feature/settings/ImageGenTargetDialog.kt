@@ -132,6 +132,17 @@ fun ImageGenTargetDialog(
                             )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(text = model.name, style = MiuixTheme.textStyles.body2)
+                                // DiT 型要另一个 .so（本构建没有）—— 在选择器里就说清，
+                                // 否则用户选完起不来，还以为是引擎坏了。
+                                if (dev.praxis.core.imagegen.ImageModelRequirement
+                                        .requiresDitEngine(model)
+                                ) {
+                                    Text(
+                                        text = "需要 DiT 引擎（本构建没有）",
+                                        style = MiuixTheme.textStyles.footnote1,
+                                        color = MiuixTheme.colorScheme.error,
+                                    )
+                                }
                                 Text(
                                     text = model.approximateSize + " · " + if (model.runOnCpu) "CPU" else "NPU",
                                     style = MiuixTheme.textStyles.footnote1,
