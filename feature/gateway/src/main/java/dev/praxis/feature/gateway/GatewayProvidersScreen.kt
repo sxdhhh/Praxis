@@ -67,7 +67,6 @@ data class GatewayProviderModelsFetch(
     val error: String? = null,
 )
 
-@Composable
 /**
  * 内置家的一行（OpenAI / DeepSeek / 智谱…）。
  *
