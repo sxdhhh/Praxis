@@ -741,6 +741,28 @@ fun PraxisApp(
     }
 
 
+    // 内置家的模型清单（拉取后存在设置里）：不并上这一份，内置家的账号就选不出模型。
+    val gatewayBuiltinModelsJson by settingsRepository.gatewayBuiltinModelsJson
+        .collectAsState(initial = null)
+    val gatewayBuiltinModels = remember(gatewayBuiltinModelsJson) {
+        dev.praxis.core.gateway.BuiltinModelsCodec
+            .decode(gatewayBuiltinModelsJson)
+            ?.getOrNull()
+            .orEmpty()
+    }
+
+    // 内置家的行（给「自定义提供商」页的「内置家」分区用）：模型数来自拉取结果。
+    val gatewayBuiltinProviderRows = remember(gatewayBuiltinModels) {
+        dev.praxis.data.gateway.BuiltinProviders.ids().map { id ->
+            dev.praxis.feature.gateway.GatewayBuiltinProviderRowUi(
+                id = id,
+                label = dev.praxis.data.gateway.BuiltinProviders.label(id),
+                baseUrl = dev.praxis.data.gateway.BuiltinProviders.baseUrl(id),
+                modelCount = gatewayBuiltinModels[id]?.size ?: 0,
+            )
+        }
+    }
+
     // 路由回放（文档 §5.5）：进程内最近若干条决策。
     val routeReplayLog: dev.praxis.core.gateway.RouteReplayLog =
         org.koin.compose.koinInject()
@@ -1097,6 +1119,16 @@ fun PraxisApp(
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                             replayLog = routeReplayLog,
                             groups = { gatewayRouteGroups },
+                            builtinModels = {
+                                gatewayBuiltinModels.flatMap { (provider, models) ->
+                                    models.map { model ->
+                                        dev.praxis.core.gateway.NativeModel(
+                                            provider = provider,
+                                            id = model,
+                                        )
+                                    }
+                                }
+                            },
                             budget = dev.praxis.core.gateway.FailoverBudget(
                                 maxSwitches = gatewaySystem.maxSwitches,
                             ),
@@ -1333,6 +1365,16 @@ fun PraxisApp(
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                             replayLog = routeReplayLog,
                             groups = { gatewayRouteGroups },
+                            builtinModels = {
+                                gatewayBuiltinModels.flatMap { (provider, models) ->
+                                    models.map { model ->
+                                        dev.praxis.core.gateway.NativeModel(
+                                            provider = provider,
+                                            id = model,
+                                        )
+                                    }
+                                }
+                            },
                             budget = dev.praxis.core.gateway.FailoverBudget(
                                 maxSwitches = gatewaySystem.maxSwitches,
                             ),
@@ -1740,6 +1782,7 @@ fun PraxisApp(
                 gatewayReportTopModels = gatewayReportTopModels,
                 gatewayRequestRecords = gatewayRequestRecords,
                 gatewayProviderRows = gatewayProviderRows,
+                gatewayBuiltinProviderRows = gatewayBuiltinProviderRows,
                 imageGenRemoteModels = imageGenRemoteModels,
                 gatewayProviderChoices = gatewayProviderChoices,
                 gatewayAccountSaveError = gatewayAccountSaveError,
@@ -1821,9 +1864,20 @@ fun PraxisApp(
                     if (decision == dev.praxis.core.gateway.GatewayModelCatalogCache
                             .WriteDecision.Write
                     ) {
+                        val isBuiltin = dev.praxis.data.gateway.BuiltinProviders.ids()
+                            .contains(providerId)
                         coroutineScope.launch {
-                            gatewayAccountStore.updateProviderModels(providerId, models)
-                            gatewayRowsRefresh += 1
+                            if (isBuiltin) {
+                                // 内置家不是数据库里的行：清单存设置里。
+                                val merged = dev.praxis.core.gateway.BuiltinModelsCodec
+                                    .merge(gatewayBuiltinModels, providerId, models)
+                                settingsRepository.setGatewayBuiltinModelsJson(
+                                    dev.praxis.core.gateway.BuiltinModelsCodec.encode(merged),
+                                )
+                            } else {
+                                gatewayAccountStore.updateProviderModels(providerId, models)
+                                gatewayRowsRefresh += 1
+                            }
                         }
                     }
                 },

@@ -84,6 +84,18 @@ class GatewayProvider(
      */
     private val replayLog: dev.praxis.core.gateway.RouteReplayLog? = null,
     /**
+     * 内置家的模型清单（拉下来之后存在设置里，见 `BuiltinModelsCodec`）。
+     *
+     * ## 不并上这一份的后果（这就是「内置家一个都没做出来」的真正原因）
+     *
+     * `store.nativeModels()` 只扫 `gateway_provider`（自定义家）—— 内置家不在那张表里，
+     * 于是**贡献 0 个模型**：在内置家上建了账号，候选链也是空的，
+     * 选路只能回「没有可用候选」，一句话都发不出去。
+     */
+    private val builtinModels: () -> List<dev.praxis.core.gateway.NativeModel> = {
+        emptyList()
+    },
+    /**
      * 路由组（文档 §5.5）。**每次现取**：用户在路由页加了组，下一句就该生效。
      */
     private val groups: () -> List<dev.praxis.core.gateway.GatewayRouteGroup> = {
@@ -166,7 +178,8 @@ class GatewayProvider(
         val chain = CandidateChain.of(
             requestedModel = request.model,
             // 原生承载来自各家声明的模型清单（账号文件里的 models）。
-            nativeModels = store.nativeModels(),
+            // 自定义家（表里的）+ 内置家（拉下来的清单）—— 少一半就是「账号在、却选不出模型」。
+            nativeModels = store.nativeModels() + builtinModels(),
             mappings = rules.toRoutingMappings(),
             defaultProvider = null,
             groups = groups(),

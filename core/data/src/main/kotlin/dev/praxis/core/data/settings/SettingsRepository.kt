@@ -752,6 +752,19 @@ class SettingsRepository(
 
     suspend fun setGatewaySanitizeJson(text: String) = put(KEY_GATEWAY_SANITIZE, text)
 
+    /**
+     * 内置家的模型清单（拉取后存这里）。
+     *
+     * 为什么不塞进 `gateway_provider`：内置家是代码里的常量，不是数据库里的行；
+     * 塞进去会让「自定义提供商」页把它们列出来、还能删 —— 语义上错得离谱。
+     * 存这里之后，`nativeModels()` 之外再并上这一份，账号才选得出模型。
+     */
+    val gatewayBuiltinModelsJson: Flow<String?> =
+        dataStore.data.map { it[KEY_GATEWAY_BUILTIN_MODELS] }
+
+    suspend fun setGatewayBuiltinModelsJson(text: String) =
+        put(KEY_GATEWAY_BUILTIN_MODELS, text)
+
     suspend fun setGatewayRouteGroupsJson(text: String) =
         put(KEY_GATEWAY_ROUTE_GROUPS, text)
 
@@ -1474,6 +1487,9 @@ private val KEY_GATEWAY_RETENTION_DAYS = stringPreferencesKey("gateway_request_r
 
 /** 路由组，见 [SettingsRepository.gatewayRouteGroupsJson]。 */
 private val KEY_GATEWAY_ROUTE_GROUPS = stringPreferencesKey("gateway_route_groups")
+
+/** 内置家模型清单，见 [SettingsRepository.gatewayBuiltinModelsJson]。 */
+private val KEY_GATEWAY_BUILTIN_MODELS = stringPreferencesKey("gateway_builtin_models")
 
 /** 网关系统设置，见 [SettingsRepository.gatewaySystemSettingsJson]。 */
 private val KEY_GATEWAY_SYSTEM = stringPreferencesKey("gateway_system")

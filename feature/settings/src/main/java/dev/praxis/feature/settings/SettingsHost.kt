@@ -124,6 +124,9 @@ fun SettingsHost(
     gatewayRequestRecords: List<dev.praxis.core.gateway.GatewayRequestRecord> = emptyList(),
     /** 自定义提供商（文档 §5.3）。 */
     gatewayProviderRows: List<dev.praxis.feature.gateway.GatewayProviderRowUi> = emptyList(),
+    /** 内置家（代码里的常量表）：可拉模型清单，不可删。 */
+    gatewayBuiltinProviderRows:
+        List<dev.praxis.feature.gateway.GatewayBuiltinProviderRowUi> = emptyList(),
     onAddGatewayProvider: (dev.praxis.core.gateway.GatewayProviderDraft) -> Unit = {},
     /** 添加账号 ① 用：可选提供商（内置家 + 自定义家）。 */
     gatewayProviderChoices: List<dev.praxis.feature.gateway.GatewayProviderChoice> = emptyList(),
@@ -394,6 +397,7 @@ fun SettingsHost(
             gatewayReportTopModels = gatewayReportTopModels,
             gatewayRequestRecords = gatewayRequestRecords,
             gatewayProviderRows = gatewayProviderRows,
+            gatewayBuiltinProviderRows = gatewayBuiltinProviderRows,
             onAddGatewayProvider = onAddGatewayProvider,
             gatewayProviderChoices = gatewayProviderChoices,
             onSaveGatewayAccount = onSaveGatewayAccount,
@@ -597,6 +601,9 @@ private fun SettingsPageBody(
     gatewayRequestRecords: List<dev.praxis.core.gateway.GatewayRequestRecord> = emptyList(),
     /** 自定义提供商（文档 §5.3）。 */
     gatewayProviderRows: List<dev.praxis.feature.gateway.GatewayProviderRowUi> = emptyList(),
+    /** 内置家（代码里的常量表）：可拉模型清单，不可删。 */
+    gatewayBuiltinProviderRows:
+        List<dev.praxis.feature.gateway.GatewayBuiltinProviderRowUi> = emptyList(),
     onAddGatewayProvider: (dev.praxis.core.gateway.GatewayProviderDraft) -> Unit = {},
     /** 添加账号 ① 用：可选提供商（内置家 + 自定义家）。 */
     gatewayProviderChoices: List<dev.praxis.feature.gateway.GatewayProviderChoice> = emptyList(),
@@ -986,6 +993,7 @@ private fun SettingsPageBody(
         )
         PraxisRoute.SettingsGatewayProviders -> dev.praxis.feature.gateway.GatewayProvidersScreen(
             providers = gatewayProviderRows,
+            builtinProviders = gatewayBuiltinProviderRows,
             onAdd = onAddGatewayProvider,
             onRemove = onRemoveGatewayProvider,
             onFetchModels = onFetchGatewayModels,

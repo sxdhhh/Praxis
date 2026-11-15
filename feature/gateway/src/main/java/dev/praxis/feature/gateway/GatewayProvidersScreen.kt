@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Rule
 import androidx.compose.runtime.Composable
@@ -67,8 +68,25 @@ data class GatewayProviderModelsFetch(
 )
 
 @Composable
+/**
+ * 内置家的一行（OpenAI / DeepSeek / 智谱…）。
+ *
+ * 与 [GatewayProviderRowUi] 分开：内置家**不可删**、地址来自代码里的表，
+ * 唯一的可变部分是「模型清单」—— 而它需要先拉一次才有。
+ */
+data class GatewayBuiltinProviderRowUi(
+    val id: String,
+    val label: String,
+    val baseUrl: String?,
+    /** 已拉到的模型数；0 = 还没拉过（这时在内置家上建的账号选不出模型）。 */
+    val modelCount: Int = 0,
+)
+
+@Composable
 fun GatewayProvidersScreen(
     providers: List<GatewayProviderRowUi> = emptyList(),
+    /** 内置家（代码里的常量表）：可拉模型，不可删。 */
+    builtinProviders: List<GatewayBuiltinProviderRowUi> = emptyList(),
     onAdd: (dev.praxis.core.gateway.GatewayProviderDraft) -> Unit = {},
     onRemove: (String) -> Unit = {},
     /**
@@ -119,6 +137,74 @@ fun GatewayProvidersScreen(
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
+            }
+        }
+
+        // ── 内置家（代码里的常量表）──
+        // 它们没有「删除」（删不掉），唯一的可变部分是模型清单 ——
+        // 而**不拉清单，在内置家上建的账号一个模型都选不出来**（候选链为空）。
+        if (builtinProviders.isNotEmpty()) {
+            item(key = "__builtin_title__") {
+                SettingsSectionHeader(
+                    icon = Icons.Outlined.Public,
+                    title = "内置家",
+                    subtitle = "地址是内置的；模型清单要拉一次才有",
+                )
+            }
+            builtinProviders.forEach { provider ->
+                item(key = "builtin_" + provider.id) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(horizontal = 12.dp).padding(bottom = 8.dp),
+                    ) {
+                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                            MiuixNavigationItemWidget(
+                                title = provider.label + "（" + provider.id + "）",
+                                description = (provider.baseUrl ?: "地址待填") + " · " +
+                                    if (provider.modelCount == 0) {
+                                        "还没有模型清单（点下面拉一次）"
+                                    } else {
+                                        "已拉到 " + provider.modelCount + " 个模型"
+                                    },
+                                onClick = {},
+                            )
+                            if (onFetchModels != null) {
+                                val key = provider.id
+                                val result = fetchResult?.takeIf { it.first == key }?.second
+                                MiuixNavigationItemWidget(
+                                    title = if (fetching == key) {
+                                        "拉取中…"
+                                    } else {
+                                        "拉取模型清单"
+                                    },
+                                    description = when {
+                                        fetching == key -> "正在请求该家的 /models"
+                                        result?.error != null -> result.error
+                                        result != null -> "拉到 " +
+                                            result.modelIds.size + " 个；点这里写入"
+                                        else -> "复用该家账号的出口，与该家转发同一条路"
+                                    },
+                                    onClick = {
+                                        if (fetching != null) return@MiuixNavigationItemWidget
+                                        if (result != null && result.error == null) {
+                                            onApplyModels(provider.id, result.modelIds)
+                                            fetchResult = null
+                                        } else {
+                                            fetching = key
+                                            scope.launch {
+                                                val fetched = runCatching {
+                                                    onFetchModels.invoke(provider.id)
+                                                }.getOrNull()
+                                                fetchResult = fetched?.let { key to it }
+                                                fetching = null
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
