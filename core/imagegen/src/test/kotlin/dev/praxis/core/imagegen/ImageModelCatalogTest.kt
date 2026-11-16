@@ -20,6 +20,15 @@ class ImageModelCatalogTest {
     @get:Rule
     val tmp = TemporaryFolder()
 
+    /** 单 zip 包样例（与 :app 的 ModelDownloaderTest 同形状，凭证字段无）。 */
+    private fun zipModel() = ImageModel(
+        id = "anythingv5cpu",
+        name = "AnythingV5 (CPU)",
+        fileUri = "xororz/sd-mnn/resolve/main/AnythingV5.zip",
+        backendType = "sd15cpu",
+        approximateSize = "1MB",
+    )
+
     // ── 档位 ──
 
     @Test
@@ -146,5 +155,34 @@ class ImageModelCatalogTest {
         assertEquals("ZIMAGE", ImageModelCatalog.markerFileName("zimage"))
         assertEquals("QWEN_IMAGE_2_1", ImageModelCatalog.markerFileName("qwen21"))
         assertEquals("", ImageModelCatalog.markerFileName("unknown"))
+    }
+
+    // ── 半成品不得判「已安装」（G2）──────────────────────────────
+
+    @Test
+    fun `目录里只剩 part 时不算已安装`() {
+        // 旧版布局把 .part 写进模型目录；进程被杀后目录非空，
+        // 「目录非空即已装」的旧判据会把半成品标成装好，起引擎必然失败。
+        val models = tmp.newFolder("models")
+        val dir = java.io.File(models, zipModel().id).apply { mkdirs() }
+        java.io.File(dir, "AnythingV5.zip.part").writeBytes(ByteArray(10))
+        assertFalse(ImageModelCatalog.isInstalled(models, zipModel()))
+    }
+
+    @Test
+    fun `目录里只剩解压临时目录时不算已安装`() {
+        val models = tmp.newFolder("models")
+        val dir = java.io.File(models, zipModel().id).apply { mkdirs() }
+        java.io.File(dir, zipModel().id + "_extract").mkdirs()
+        assertFalse(ImageModelCatalog.isInstalled(models, zipModel()))
+    }
+
+    @Test
+    fun `真正的成品仍然判已安装`() {
+        // 排除半成品的规则不能误伤正常产物：目录里有真实模型文件时必须判装好。
+        val models = tmp.newFolder("models")
+        val dir = java.io.File(models, zipModel().id).apply { mkdirs() }
+        java.io.File(dir, "unet.mnn").writeBytes(ByteArray(10))
+        assertTrue(ImageModelCatalog.isInstalled(models, zipModel()))
     }
 }

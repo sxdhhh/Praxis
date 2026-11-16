@@ -81,22 +81,24 @@ class ImageDownloadPlanTest {
     }
 
     @Test
-    fun `part 路径与临时文件都在模型目录下`() {
-        val plan = ImageDownloadPlanner.plan(tmp.newFolder("models"), multiFileModel())
-        assertEquals(
-            listOf("unet.bin.part", "clip.bin.part"),
-            plan.partPaths.map { it.name },
-        )
-        // 多文件包没有「整包 zip」，所以临时名是空串（清理清单会跳过它）。
+    fun `临时物全部隔离到 incoming 目录，不进成品目录`() {
+        // G2 的根因：.part 与解压临时目录放成品目录里，而单 zip 的判据是「目录非空」，
+        // 中断即误报「已安装」。所以布局必须把两者隔开 —— 这条测试钉的就是布局。
+        val models = tmp.newFolder("models")
+        val plan = ImageDownloadPlanner.plan(models, multiFileModel())
+        assertTrue(plan.incomingDir.path.contains(".incoming" + File.separator + "z_image_turbo"))
+        plan.partPaths.forEach { part ->
+            assertEquals(plan.incomingDir, part.parentFile)
+            assertFalse("part 不能落在成品目录", part.path.startsWith(plan.targetDir.path))
+        }
+        assertEquals(plan.incomingDir, plan.extractTempDir.parentFile)
         assertEquals("", plan.zipTempName)
-        assertEquals("z_image_turbo_extract", plan.extractTempDir.name)
 
-        // 单 zip 包的临时名必须与下载时真正写出的 .part 同名，否则失败清理删不掉。
         val zipPlan = ImageDownloadPlanner.plan(tmp.newFolder("models2"), zipModel())
         assertEquals("AnythingV5.zip.part", zipPlan.zipTempName)
-        assertTrue(zipPlan.zipTempFile.name.endsWith(".part"))
+        assertEquals(zipPlan.incomingDir, zipPlan.zipTempFile.parentFile)
+        assertEquals(zipPlan.incomingDir, zipPlan.extractedZipFile!!.parentFile)
         assertTrue(DownloadCleanup.staleFiles(zipPlan).any { it.name == "AnythingV5.zip.part" })
-        // 压缩包本体也要在清单里：解压失败时它若留在目录里，「目录非空」会让 isInstalled 误报已安装。
         assertTrue(DownloadCleanup.staleFiles(zipPlan).any { it.name == "AnythingV5.zip" })
     }
 
@@ -146,6 +148,10 @@ class ImageDownloadPlanTest {
         val stale = DownloadCleanup.staleFiles(plan).map { it.name }
         assertTrue(stale.contains("unet.bin.part"))
         assertTrue(stale.contains("clip.bin.part"))
-        assertEquals(listOf("z_image_turbo_extract"), DownloadCleanup.staleDirs(plan).map { it.name })
+        // 解压临时目录与 .incoming/<id> 本体都要清：留着只会让下次清理多一遍遍历。
+        assertEquals(
+            listOf("z_image_turbo_extract", "z_image_turbo"),
+            DownloadCleanup.staleDirs(plan).map { it.name },
+        )
     }
 }

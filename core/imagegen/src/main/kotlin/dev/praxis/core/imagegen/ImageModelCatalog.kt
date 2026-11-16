@@ -216,8 +216,17 @@ object ImageModelCatalog {
             }
         }
 
-        // 单 zip：目录非空即视为装好（与上游同一口径）。
+        // 单 zip：目录非空即视为装好（与上游同一口径）——但**排除半成品**。
+        //
+        // 两种半成品都可能把「目录非空」变成误判：
+        //  - `*.part`：旧版布局把 .part 写进模型目录（现版已移到 .incoming/），
+        //    旧版本升级过来时目录里可能还留着它；
+        //  - `<id>_extract`：旧版布局的解压临时目录，同上。
+        // 中断后目录非空 → 「已安装」→ 起引擎必然失败，而且用户删不掉。
         val children = dir.listFiles()
-        return !children.isNullOrEmpty()
+        if (children.isNullOrEmpty()) return false
+        val hasPart = children.any { it.isFile && it.name.endsWith(ImageDownloadPlan.PART_SUFFIX) }
+        val hasLeftoverExtract = children.any { it.isDirectory && it.name.endsWith("_extract") }
+        return !hasPart && !hasLeftoverExtract
     }
 }

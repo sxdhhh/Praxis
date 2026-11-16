@@ -81,6 +81,10 @@ class ModelDownloader(
         if (!plan.targetDir.exists() && !plan.targetDir.mkdirs()) {
             return DownloadResult.Failed("无法创建模型目录：" + plan.targetDir.absolutePath)
         }
+        // 临时物（.part / 解压目录 / zip）全部在 .incoming/<id>/，与成品隔离（G2）。
+        if (!plan.incomingDir.exists() && !plan.incomingDir.mkdirs()) {
+            return DownloadResult.Failed("无法创建临时目录：" + plan.incomingDir.absolutePath)
+        }
         cleanStale(plan)
 
         when (val space = SpaceCheck.decide(plan.requiredBytes, plan.targetDir.usableSpace)) {
@@ -132,9 +136,10 @@ class ModelDownloader(
                 return terminal
             }
 
-            // ③ 单 zip：解压 + 搬家。
+            // ③ 单 zip：解压 + 搬家。压缩包在 .incoming 里，解压完就地删除。
             if (plan.isZip) {
-                val zip = File(plan.targetDir, plan.targets.first().localName)
+                val zip = plan.extractedZipFile
+                    ?: throw IOException("下载计划里没有 zip 目标（上游数据不完整）")
                 extractZip(zip, plan)
                 // 删不掉不算失败（模型已经能用），但要把名字带出去 —— 见 Completed 的说明。
                 val leftover = if (zip.delete()) null else zip.name
@@ -168,7 +173,7 @@ class ModelDownloader(
         totalBytes: Long?,
         onProgress: (DownloadProgress) -> Unit,
     ): DownloadResult? {
-        val part = File(plan.targetDir, target.localName + ImageDownloadPlan.PART_SUFFIX)
+        val part = File(plan.incomingDir, target.localName + ImageDownloadPlan.PART_SUFFIX)
         if (part.exists() && !part.delete()) {
             abort.set(true)
             return DownloadResult.Failed("无法删除残留文件：" + part.name)

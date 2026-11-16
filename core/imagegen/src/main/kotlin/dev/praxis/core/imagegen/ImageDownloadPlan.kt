@@ -56,20 +56,32 @@ data class ImageDownloadPlan(
     val markerFileName: String,
     /** 由 `approximateSize` 解析出的所需空间；null = 无法预估。 */
     val requiredBytes: Long?,
+    /**
+     * 临时物目录：`models/.incoming/<id>`。
+     *
+     * ## 为什么不能与成品同目录（这是 G2 的根因）
+     *
+     * `.part` 与解压临时目录如果放在 `models/<id>` 里，而单 zip 包的
+     * 「已安装」判据是**目录非空**——那么进程被杀、解压中断时，
+     * 半成品会让 [ImageModelCatalog.isInstalled] 误报「已安装」，
+     * 用户还删不掉（模型库没有删除入口）。临时物全部隔离到这里，
+     * 成品目录里只会出现「真的下完并改名过的文件」。
+     */
+    val incomingDir: File,
 ) {
     /** 每个目标的 `.part` 路径（中断残留、失败清理都用它）。 */
-    val partPaths: List<File> get() = targets.map { File(targetDir, it.localName + PART_SUFFIX) }
+    val partPaths: List<File> get() = targets.map { File(incomingDir, it.localName + PART_SUFFIX) }
 
-    val zipTempFile: File get() = File(targetDir, zipTempName)
+    val zipTempFile: File get() = File(incomingDir, zipTempName)
 
-    /** 单 zip 包解压前那个压缩包（多文件包为 null）。 */
+    /** 单 zip 包解压前那个压缩包（多文件包为 null）。下载完成后它就在这里。 */
     val extractedZipFile: File?
         get() = if (isZip) {
-            targets.firstOrNull()?.let { File(targetDir, it.localName) }
+            targets.firstOrNull()?.let { File(incomingDir, it.localName) }
         } else {
             null
         }
-    val extractTempDir: File get() = File(targetDir, extractTempName)
+    val extractTempDir: File get() = File(incomingDir, extractTempName)
 
     companion object {
         /** 未完成下载的临时后缀。去掉它才表示这个文件下好了。 */
@@ -104,6 +116,7 @@ object ImageDownloadPlanner {
         return ImageDownloadPlan(
             modelId = model.id,
             targetDir = dir,
+            incomingDir = File(modelsRoot, ".incoming/" + model.id),
             isZip = zip,
             targets = targets,
             // 必须与下载时真正写出的 .part 同名（<远端文件名>.part），
@@ -191,6 +204,12 @@ object DownloadCleanup {
                 plan.extractedZipFile,
             )
 
-    /** 需要整目录删除的临时解压目录。 */
-    fun staleDirs(plan: ImageDownloadPlan): List<File> = listOf(plan.extractTempDir)
+    /**
+     * 需要整目录删除的临时目录。
+     *
+     * 连 `.incoming/<id>` 本身一起删：它是这次下载的工作目录，
+     * 留着只会让下次清理时多一遍无意义的遍历。
+     */
+    fun staleDirs(plan: ImageDownloadPlan): List<File> =
+        listOf(plan.extractTempDir, plan.incomingDir)
 }
