@@ -49,3 +49,7 @@ replay_pid*.log
 docs/memories/
 docs/HANDOFF.md
 docs/SETTLEMENT.md
+
+# 网关账号导出（含真实令牌，绝不入库）
+agent2api-accounts*.json
+*-secrets.json
