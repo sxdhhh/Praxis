@@ -382,6 +382,13 @@ jobs:
             if [ $rc -ne 0 ]; then
               echo "::error::$CT 失败或超时（exit=$rc）"
               failed=$((failed + 1))
+              # 同上：把断言原文打出来（Gradle 默认只给用例名与 AssertionError）。
+              for xml in feature/chat/build/test-results/testDebugUnitTest/TEST-*"$CT"*.xml; do
+                [ -f "$xml" ] || continue
+                echo "----- $xml -----"
+                grep -o 'message="[^"]*"' "$xml" | head -5
+                sed -n '/<failure/,/<\/failure>/p' "$xml" | head -40
+              done
             fi
           done
           if [ $failed -ne 0 ]; then
@@ -410,6 +417,18 @@ jobs:
             if [ $rc -ne 0 ]; then
               echo "::error::$CT 失败或超时（exit=$rc）"
               failed=$((failed + 1))
+              # 把失败用例的断言原文打出来。
+              #
+              # 为什么必须有这一段：`:app` 在开发者的 Windows 上**无法配置**
+              # （AGP/SDK 限制），这类失败只能靠 CI 日志看。而 Gradle 默认只打印
+              # 用例名与一句 AssertionError —— 真正的 message 与 expected/actual
+              # 在 JUnit XML 里。不打出来，修红就只能靠猜（2026-11-16 踩过）。
+              for xml in app/build/test-results/testDebugUnitTest/TEST-*"$CT"*.xml; do
+                [ -f "$xml" ] || continue
+                echo "----- $xml -----"
+                grep -o 'message="[^"]*"' "$xml" | head -5
+                sed -n '/<failure/,/<\/failure>/p' "$xml" | head -40
+              done
             fi
           done
           if [ $failed -ne 0 ]; then
