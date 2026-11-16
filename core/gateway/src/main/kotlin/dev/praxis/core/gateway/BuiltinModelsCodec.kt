@@ -75,4 +75,99 @@ object BuiltinModelsCodec {
         if (cleaned.isEmpty()) return current
         return current + (providerId to cleaned)
     }
+
+
+    // ── 详细形态：名字 + 能力位（G3 / §5.4.1 第 6 条）──────────────
+
+    /**
+     * 一个内置家模型条目：id + 能力位。
+     *
+     * 能力位全部可空：null = 上游 /models 没声明（绝大多数 OpenAI 兼容端点只回 id），
+     * **不等于不支持**。这个语义与 AiModelOption 逐字一致。
+     */
+    data class BuiltinModelCaps(
+        val id: String,
+        val supportsImages: Boolean? = null,
+        val supportsReasoning: Boolean? = null,
+        val supportsToolCall: Boolean? = null,
+        val maxInputTokens: Int? = null,
+        val maxOutputTokens: Int? = null,
+    )
+
+    /**
+     * 编码详细形态：{ "openai": [ {"id":…, "supports_images":…}, … ] }。
+     * 字段名与 /models 响应逐字一致（snake_case），肉眼核对两边时不用翻译。
+     */
+    fun encodeDetailed(models: Map<String, List<BuiltinModelCaps>>): String = buildJsonObject {
+        models.toSortedMap().forEach { (provider, list) ->
+            put(
+                provider,
+                buildJsonArray {
+                    list.distinctBy { it.id }.sortedBy { it.id.lowercase() }.forEach { model ->
+                        add(buildJsonObject {
+                            put("id", model.id)
+                            model.supportsImages?.let { put("supports_images", it) }
+                            model.supportsReasoning?.let { put("supports_reasoning", it) }
+                            model.supportsToolCall?.let { put("supports_tool_call", it) }
+                            model.maxInputTokens?.let { put("max_input_tokens", it) }
+                            model.maxOutputTokens?.let { put("max_output_tokens", it) }
+                        })
+                    }
+                },
+            )
+        }
+    }.toString()
+
+    /**
+     * 解码详细形态。**同时认旧形状**（元素是纯字符串）—— 那些条目能力位为 null。
+     * 旧版本写下的清单不能因为升级就变成「读不出来」。
+     */
+    fun decodeDetailed(text: String?): Result<Map<String, List<BuiltinModelCaps>>>? {
+        if (text.isNullOrBlank()) return null
+        return runCatching {
+            Json.parseToJsonElement(text).jsonObject.mapValues { (_, value) ->
+                val array = value as? kotlinx.serialization.json.JsonArray
+                    ?: error("模型清单不是数组")
+                array.mapNotNull { element ->
+                    when (element) {
+                        is kotlinx.serialization.json.JsonPrimitive ->
+                            element.contentOrNull?.let { BuiltinModelCaps(id = it) }
+                        is kotlinx.serialization.json.JsonObject -> {
+                            val idEl = element["id"] as? kotlinx.serialization.json.JsonPrimitive
+                            val id = idEl?.contentOrNull ?: return@mapNotNull null
+                            fun bool(key: String): Boolean? =
+                                (element[key] as? kotlinx.serialization.json.JsonPrimitive)
+                                    ?.contentOrNull?.toBooleanStrictOrNull()
+                            fun num(key: String): Int? =
+                                (element[key] as? kotlinx.serialization.json.JsonPrimitive)
+                                    ?.contentOrNull?.toDoubleOrNull()?.toInt()
+                            BuiltinModelCaps(
+                                id = id,
+                                supportsImages = bool("supports_images"),
+                                supportsReasoning = bool("supports_reasoning"),
+                                supportsToolCall = bool("supports_tool_call"),
+                                maxInputTokens = num("max_input_tokens"),
+                                maxOutputTokens = num("max_output_tokens"),
+                            )
+                        }
+                        else -> null
+                    }
+                }
+            }
+        }
+    }
+
+    /** 详细形态的合并：与 [merge] 同一守门（空清单保留旧的）。 */
+    fun mergeDetailed(
+        current: Map<String, List<BuiltinModelCaps>>,
+        providerId: String,
+        fetched: List<BuiltinModelCaps>,
+    ): Map<String, List<BuiltinModelCaps>> {
+        val cleaned = fetched
+            .filter { it.id.isNotBlank() }
+            .distinctBy { it.id }
+            .sortedBy { it.id.lowercase() }
+        if (cleaned.isEmpty()) return current
+        return current + (providerId to cleaned)
+    }
 }

@@ -126,6 +126,11 @@ class GatewayProvider(
      * 空表等于没有粘性。
      */
     private val stickyStore: dev.praxis.core.gateway.StickyAccountStore? = null,
+    /**
+     * 内置家逐模型能力位（G3）：provider → (模型 id → 能力位)。
+     * 每次现取：用户刚拉完清单，下一次带图请求就该按新数据过滤。
+     */
+    private val builtinCaps: () -> Map<String, Map<String, dev.praxis.core.gateway.BuiltinModelsCodec.BuiltinModelCaps>> = { emptyMap() },
 ) : AiProvider {
 
     override val displayName: String = "网关"
@@ -214,6 +219,9 @@ class GatewayProvider(
             needsImages = request.messages.any { it.images.isNotEmpty() },
             budget = budget,
             policy = policy(),
+            modelImageCapable = { provider, wireModel ->
+                builtinCaps()[provider]?.get(wireModel)?.supportsImages
+            },
         )
 
         // 会话粘性（文档 §7.3）：同一对话尽量钉住上次成功的账号。

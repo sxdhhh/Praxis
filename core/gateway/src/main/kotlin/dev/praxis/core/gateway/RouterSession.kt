@@ -56,6 +56,11 @@ class RouterSession(
     private val needsImages: Boolean = false,
     private val budget: FailoverBudget = FailoverBudget(),
     private val providerUsages: List<ProviderUsage> = emptyList(),
+    /**
+     * 逐模型图片能力查表（G3）。null = 没装配（不过滤）。
+     * 由 :app 用「内置家能力位 + 模型条目」拼出来。
+     */
+    private val modelImageCapable: ((String, String) -> Boolean?)? = null,
     /** 选路策略（文档 §9.4）。默认值 = 移植前的行为（顺序 + 粘性）。 */
     private val policy: GatewayRoutingPolicy = GatewayRoutingPolicy(),
 ) {
@@ -134,6 +139,7 @@ class RouterSession(
             rotationSeed = rotationSeed,
             budget = tokenBudget,
             accountSpend = accountSpend,
+            modelImageCapable = modelImageCapable,
         )
         // 每取一次就推进轮询计数：这是「摊开请求」的定义，不是每轮会话一次。
         rotationSeed += 1

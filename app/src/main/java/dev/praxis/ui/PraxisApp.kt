@@ -323,7 +323,7 @@ fun PraxisApp(
         .collectAsState(initial = null)
     val gatewayBuiltinModels = remember(gatewayBuiltinModelsJson) {
         dev.praxis.core.gateway.BuiltinModelsCodec
-            .decode(gatewayBuiltinModelsJson)
+            .decodeDetailed(gatewayBuiltinModelsJson)
             ?.getOrNull()
             .orEmpty()
     }
@@ -343,10 +343,18 @@ fun PraxisApp(
             {
                 gatewayBuiltinModels.flatMap { (provider, models) ->
                     models.map { model ->
-                        dev.praxis.core.gateway.NativeModel(provider = provider, id = model)
+                        dev.praxis.core.gateway.NativeModel(provider = provider, id = model.id)
                     }
                 }
             }
+        }
+
+
+    // 逐模型能力位（G3）：provider -> (模型 id -> 能力位)。选路时给 planner 查表，
+    // 带图请求只拦「明确声明不支持」的模型 —— null/缺键一律放行。
+    val gatewayBuiltinCaps: Map<String, Map<String, dev.praxis.core.gateway.BuiltinModelsCodec.BuiltinModelCaps>> =
+        remember(gatewayBuiltinModels) {
+            gatewayBuiltinModels.mapValues { (_, list) -> list.associateBy { it.id } }
         }
 
     /**
@@ -843,6 +851,7 @@ fun PraxisApp(
         gatewayRouteGroups,
         gatewayRowsRefresh,
         gatewayBuiltinNativeModels,
+        gatewayBuiltinCaps,
     ) {
         dev.praxis.data.gateway.GatewayProvider(
             store = gatewayAccountStore,
@@ -858,6 +867,7 @@ fun PraxisApp(
             replayLog = routeReplayLog,
             groups = { gatewayRouteGroups },
             stickyStore = gatewayStickyStore,
+            builtinCaps = { gatewayBuiltinCaps },
             // 这一处此前**漏了** builtinModels：内置家的模型在「测试连接」时进不了候选链，
             // 报「没有对应任何上游」—— 而真实请求（另外两处）是通的。
             builtinModels = gatewayBuiltinNativeModels,
@@ -1172,6 +1182,7 @@ fun PraxisApp(
                             replayLog = routeReplayLog,
                             groups = { gatewayRouteGroups },
                             stickyStore = gatewayStickyStore,
+                            builtinCaps = { gatewayBuiltinCaps },
                             builtinModels = gatewayBuiltinNativeModels,
                             budget = dev.praxis.core.gateway.FailoverBudget(
                                 maxSwitches = gatewaySystem.maxSwitches,
@@ -1410,6 +1421,7 @@ fun PraxisApp(
                             replayLog = routeReplayLog,
                             groups = { gatewayRouteGroups },
                             stickyStore = gatewayStickyStore,
+                            builtinCaps = { gatewayBuiltinCaps },
                             builtinModels = gatewayBuiltinNativeModels,
                             budget = dev.praxis.core.gateway.FailoverBudget(
                                 maxSwitches = gatewaySystem.maxSwitches,
@@ -1881,6 +1893,7 @@ fun PraxisApp(
                             onSuccess = { options ->
                                 dev.praxis.feature.gateway.GatewayProviderModelsFetch(
                                     modelIds = options.map { it.id },
+                                    options = options,
                                 )
                             },
                             onFailure = { error ->
@@ -1896,7 +1909,7 @@ fun PraxisApp(
                     // 成功但拉到空清单时**不覆盖** —— 上游临时返回空数组的话，
                     // 直接写会把用户手填的模型抹掉。
                     val decision = dev.praxis.core.gateway.GatewayModelCatalogCache
-                        .decideWrite(success = true, fetched = models)
+                        .decideWrite(success = true, fetched = models.map { it.id })
                     if (decision == dev.praxis.core.gateway.GatewayModelCatalogCache
                             .WriteDecision.Write
                     ) {
@@ -1906,12 +1919,22 @@ fun PraxisApp(
                             if (isBuiltin) {
                                 // 内置家不是数据库里的行：清单存设置里。
                                 val merged = dev.praxis.core.gateway.BuiltinModelsCodec
-                                    .merge(gatewayBuiltinModels, providerId, models)
+                                    .mergeDetailed(gatewayBuiltinModels, providerId, models.map {
+                                    it ->
+                                    dev.praxis.core.gateway.BuiltinModelsCodec.BuiltinModelCaps(
+                                        id = it.id,
+                                        supportsImages = it.supportsImages,
+                                        supportsReasoning = it.supportsReasoning,
+                                        supportsToolCall = it.supportsToolCall,
+                                        maxInputTokens = it.maxInputTokens,
+                                        maxOutputTokens = it.maxOutputTokens,
+                                    )
+                                })
                                 settingsRepository.setGatewayBuiltinModelsJson(
-                                    dev.praxis.core.gateway.BuiltinModelsCodec.encode(merged),
+                                    dev.praxis.core.gateway.BuiltinModelsCodec.encodeDetailed(merged),
                                 )
                             } else {
-                                gatewayAccountStore.updateProviderModels(providerId, models)
+                                gatewayAccountStore.updateProviderModels(providerId, models.map { it.id })
                                 gatewayRowsRefresh += 1
                             }
                         }

@@ -63,6 +63,8 @@ data class GatewayProviderRowUi(
  * @param error 失败原因；null = 成功。失败是**预期路径**（没填 key、这家不提供 /models）。
  */
 data class GatewayProviderModelsFetch(
+    /** 拉到的模型**连同能力位**（G3）：null 能力位 = 上游没声明。 */
+    val options: List<dev.praxis.core.ai.AiModelOption> = emptyList(),
     val modelIds: List<String> = emptyList(),
     val error: String? = null,
 )
@@ -107,7 +109,7 @@ fun GatewayProvidersScreen(
      */
     onFetchModels: (suspend (providerId: String) -> GatewayProviderModelsFetch)? = null,
     /** 把拉到的清单写进这家（覆盖 modelsJson）。 */
-    onApplyModels: (providerId: String, models: List<String>) -> Unit = { _, _ -> },
+    onApplyModels: (providerId: String, models: List<dev.praxis.core.ai.AiModelOption>) -> Unit = { _, _ -> },
     /** 上次添加失败的原因（校验没过）；null = 没有错误。 */
     addError: String? = null,
     modifier: Modifier = Modifier,
@@ -202,7 +204,7 @@ fun GatewayProvidersScreen(
                                     onClick = {
                                         if (fetching != null) return@MiuixNavigationItemWidget
                                         if (result != null && result.error == null) {
-                                            onApplyModels(provider.id, result.modelIds)
+                                            onApplyModels(provider.id, result.options)
                                             fetchResult = null
                                         } else {
                                             fetching = key
@@ -266,7 +268,7 @@ fun GatewayProvidersScreen(
                                     if (fetching != null) return@MiuixNavigationItemWidget
                                     // 已有结果时这一下就是「写入」。
                                     if (result != null && result.error == null) {
-                                        onApplyModels(provider.id, result.modelIds)
+                                        onApplyModels(provider.id, result.options)
                                         fetchResult = null
                                     } else {
                                         fetching = provider.id

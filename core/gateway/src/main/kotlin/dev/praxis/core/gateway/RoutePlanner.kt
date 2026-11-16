@@ -53,6 +53,8 @@ enum class SkipReason {
     Disabled,
     NoCredentials,
     ImageNotSupported,
+    /** 明确声明不支持的是**这个模型**（能力位来自 /models 或模型条目），不是整个账号。 */
+    ImageModelNotCapable,
     CoolingDown,
     ConcurrencyFull,
     RateLimited,
@@ -138,6 +140,12 @@ object RoutePlanner {
         providerUsages: List<ProviderUsage> = emptyList(),
         /** token 预算（文档 §7.2 第 6 条）；默认不限。 */
         budget: GatewayTokenBudget = GatewayTokenBudget(),
+        /**
+         * 逐模型图片能力查表（G3）：(provider, wireModel) → 是否支持图片。
+         * null 返回值 / 表里没有 = **不知道**，放行 —— 把「不知道」当 false
+         * 会把没上报能力位的家全拦掉（#408 的教训）。
+         */
+        modelImageCapable: ((String, String) -> Boolean?)? = null,
         /** 各账号在窗口内的 token 用量（没有记录 = 0）。 */
         accountSpend: Map<String, Long> = emptyMap(),
         /** 选路策略（文档 §9.4）：顺序/轮询 + 粘性开关。 */
@@ -168,6 +176,7 @@ object RoutePlanner {
                         providerExhausted = providerExhausted,
                         budget = budget,
                         accountSpend = accountSpend,
+                        modelImageCapable = modelImageCapable,
                     )
                     if (reason == null) {
                         usable += PlannedAttempt(
@@ -229,12 +238,18 @@ object RoutePlanner {
         providerExhausted: Boolean,
         budget: GatewayTokenBudget,
         accountSpend: Map<String, Long>,
+        modelImageCapable: ((String, String) -> Boolean?)?,
     ): SkipReason? {
         if (!account.enabled) return SkipReason.Disabled
         if (!account.hasCredentials) return SkipReason.NoCredentials
 
         // 缺键（null）放行，只有明确 false 才跳过。
         if (needsImages && account.supportsImages == false) return SkipReason.ImageNotSupported
+
+        // 逐模型能力位（G3）：与账号级同一口径 —— 只有**明确 false** 才拦。
+        if (needsImages && modelImageCapable?.invoke(candidate.provider, candidate.wireModel) == false) {
+            return SkipReason.ImageModelNotCapable
+        }
 
         val key = CooldownKey(account.id, candidate.wireModel)
         val backoff = state.backoffUntil(account.id) != null

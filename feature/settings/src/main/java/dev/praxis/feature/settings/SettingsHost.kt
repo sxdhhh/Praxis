@@ -168,7 +168,7 @@ fun SettingsHost(
     onFetchGatewayModels:
         (suspend (providerId: String) ->
             dev.praxis.feature.gateway.GatewayProviderModelsFetch)? = null,
-    onApplyGatewayModels: (providerId: String, models: List<String>) -> Unit = { _, _ -> },
+    onApplyGatewayModels: (providerId: String, models: List<dev.praxis.core.ai.AiModelOption>) -> Unit = { _, _ -> },
     onGatewaySystemSettingsChange:
         (dev.praxis.core.gateway.GatewaySystemSettings) -> Unit = {},
     /** 出站脱敏（文档 §5.18）：开关 + 规则。 */
@@ -643,7 +643,7 @@ private fun SettingsPageBody(
     onFetchGatewayModels:
         (suspend (providerId: String) ->
             dev.praxis.feature.gateway.GatewayProviderModelsFetch)? = null,
-    onApplyGatewayModels: (providerId: String, models: List<String>) -> Unit = { _, _ -> },
+    onApplyGatewayModels: (providerId: String, models: List<dev.praxis.core.ai.AiModelOption>) -> Unit = { _, _ -> },
     onGatewaySystemSettingsChange:
         (dev.praxis.core.gateway.GatewaySystemSettings) -> Unit = {},
     /** 出站脱敏（文档 §5.18）：开关 + 规则。 */

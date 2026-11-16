@@ -60,6 +60,7 @@ object GatewayQueue {
         SkipReason.Disabled -> "账号已停用"
         SkipReason.NoCredentials -> "凭证解不开（可能换过密钥，需要重填）"
         SkipReason.ImageNotSupported -> "明确声明不支持图片，而这次带图"
+        SkipReason.ImageModelNotCapable -> "该模型明确声明不支持图片输入，而这次带图"
         SkipReason.CoolingDown -> "冷却中（退避 / 熔断 / 额度受限）"
         SkipReason.ConcurrencyFull -> "并发已满"
         SkipReason.RateLimited -> "限流已满（每账号或每家的配额）"
