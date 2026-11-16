@@ -37,6 +37,8 @@ data class GatewayAccountRow(
             enabled: Boolean,
             wireModels: List<String>,
             state: RouteState,
+            maxConcurrent: Int = 0,
+            requestLimitPerMinute: Int = 0,
         ): GatewayAccountRow = GatewayAccountRow(
             id = id,
             name = name,
@@ -48,6 +50,8 @@ data class GatewayAccountRow(
                 state = state,
             ),
             needsRelogin = state.needsReloginOf(id),
+            maxConcurrent = maxConcurrent,
+            requestLimitPerMinute = requestLimitPerMinute,
         )
     }
 }
