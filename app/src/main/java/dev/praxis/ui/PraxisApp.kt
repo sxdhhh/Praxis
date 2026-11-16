@@ -328,10 +328,6 @@ fun PraxisApp(
             .orEmpty()
     }
 
-    /**
-     * 内置家贡献的「原生承载」（provider → 模型名）。
-     *
-
     // 内置家清单的拉取时刻（G15）：「刚拉的」和「一年前的」必须区分得出来。
     val gatewayBuiltinFetchedAtJson by settingsRepository.gatewayBuiltinModelsFetchedAtJson
         .collectAsState(initial = null)
@@ -345,6 +341,10 @@ fun PraxisApp(
                 }
         }.getOrDefault(emptyMap())
     }
+    /**
+     * 内置家贡献的「原生承载」（provider → 模型名）。
+     *
+
      * **只此一份**：三处 [dev.praxis.data.gateway.GatewayProvider] 构造点、模型页候选、
      * 候选队列、模型测试都从这里取。
      *
