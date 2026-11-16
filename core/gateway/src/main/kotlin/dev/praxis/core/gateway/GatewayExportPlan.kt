@@ -60,6 +60,18 @@ object GatewayExportPlanner {
     /** 配置片段文件名。 */
     const val CONFIG_FILE_NAME: String = "gateway-config.json"
 
+    /**
+     * 整包文件名：网关「导出全部账号」的**真实形状**。
+     *
+     * 与 `accounts/<name>.json`（一账号一文件、带 format 键）并存，原因不同：
+     * - `accounts/<name>.json` 是文档 §8.5 的形状，便于人看与逐条核对；
+     * - 这一份是**网关认的形状**，用于「导出 → 回灌网关」这条路。
+     *
+     * 只写前者的话，导出在网关面板里是导不进去的 —— 那条「双向可逆」的验收
+     * 就一直没成立过。
+     */
+    const val PACK_FILE_NAME: String = "agent2api-accounts.json"
+
     /** 模型映射在 config 片段里的键名（与网关 `config.json` 一致）。 */
     const val MODEL_RULES_KEY: String = "modelRules"
 
@@ -83,6 +95,17 @@ object GatewayExportPlanner {
         modelRules: JsonElement? = null,
         includeSecrets: Boolean = false,
         date: String,
+        /**
+         * 是否额外产出网关能直接导入的整包（[PACK_FILE_NAME]）。
+         *
+         * 默认 false：老调用点与既有用例的文件清单不变。
+         * :app 导出时传 true —— 那才是「回灌网关」真正需要的那一份。
+         */
+        emitGatewayPack: Boolean = false,
+        /** 整包里带的导出时刻（毫秒），注入以便测试。 */
+        exportedAt: Long = 0,
+        /** 随包带出的自定义家（`custom-*` 账号的「家」）。 */
+        providers: List<GatewayCustomProvider> = emptyList(),
     ): GatewayExportPlan {
         val files = mutableListOf<GatewayExportFile>()
         val notes = mutableListOf<String>()
@@ -96,6 +119,13 @@ object GatewayExportPlanner {
         }
         if (accounts.isEmpty()) {
             notes += "账号池是空的，没有账号文件可导出"
+        }
+
+        if (emitGatewayPack) {
+            files += packFile(accounts, providers, includeSecrets, exportedAt)
+            if (!includeSecrets) {
+                notes += "整包（" + PACK_FILE_NAME + "）里的凭证已按「仅配置」粒度清空"
+            }
         }
 
         val config = buildConfig(routing, modelRules)
@@ -115,6 +145,34 @@ object GatewayExportPlanner {
         }
 
         return GatewayExportPlan(files = files, notes = notes)
+    }
+
+    /**
+     * 产出网关能直接导入的整包。
+     *
+     * 「仅配置」粒度下**清空**凭证而不是写 `***`：网关回灌时会把占位符
+     * 当成真 Key 存进去，然后每一条都 401 —— 那比不带凭证更糟。
+     */
+    fun packFile(
+        accounts: List<GatewayAccountFile>,
+        providers: List<GatewayCustomProvider> = emptyList(),
+        includeSecrets: Boolean = false,
+        exportedAt: Long = 0,
+    ): GatewayExportFile {
+        val safe = if (includeSecrets) {
+            accounts
+        } else {
+            accounts.map { it.copy(apiKey = null, accessToken = null, refreshToken = null) }
+        }
+        val pack = GatewayAccountsPackCodec.build(
+            accounts = safe,
+            providers = providers,
+            exportedAt = exportedAt,
+        )
+        return GatewayExportFile(
+            relativePath = PACK_FILE_NAME,
+            content = GatewayAccountsPackCodec.encode(pack),
+        )
     }
 
     /**

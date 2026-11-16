@@ -66,49 +66,6 @@ object GatewayImporter {
      * 字段名逐字对应真实导出（2026-11 实测的那份）：凭证是 accessToken/refreshToken
      * （OAuth 型）、地址在 `endpoint`、家是 `provider`。
      */
-    @kotlinx.serialization.Serializable
-    private data class BulkAccountFile(
-        val accounts: List<BulkAccountEntry> = emptyList(),
-        /**
-         * 顶层还带着自定义家（真实导出实测有这一项）。
-         *
-         * 必须解析：`custom-*` 账号的「家」就在这里，不导入它的话，
-         * 那些账号导进来也没有地址与模型清单（等于半个账号）。
-         */
-        val customProviders: List<BulkCustomProvider> = emptyList(),
-    )
-
-    /** 批量导出里的自定义家（字段名逐字对应真实导出）。 */
-    @kotlinx.serialization.Serializable
-    private data class BulkCustomProvider(
-        val id: String = "",
-        val name: String = "",
-        val baseUrl: String? = null,
-        /** 真实形状是对象数组：`[{enabled,id,reasoning}]`。 */
-        val models: List<BulkModel> = emptyList(),
-    )
-
-    @kotlinx.serialization.Serializable
-    private data class BulkModel(
-        val id: String = "",
-        /** 关掉的模型不导入（文档 §5.4 的「逐模型启停」）。 */
-        val enabled: Boolean = true,
-    )
-
-    @kotlinx.serialization.Serializable
-    private data class BulkAccountEntry(
-        val id: String = "",
-        val provider: String = "",
-        val name: String = "",
-        val nickname: String = "",
-        val apiKey: String? = null,
-        val accessToken: String? = null,
-        val refreshToken: String? = null,
-        /** 真实导出里地址叫 endpoint。 */
-        val endpoint: String? = null,
-        val baseUrl: String? = null,
-    )
-
     /**
      * 解析一份文本，得到其中的**全部**账号。
      *
@@ -124,10 +81,9 @@ object GatewayImporter {
         parse(text).getOrNull()?.let { single ->
             return@runCatching ParsedExport(listOf(single), single.customProviders)
         }
-        val bulk = runCatching {
-            json.decodeFromString(BulkAccountFile.serializer(), text)
-        }.getOrNull()
-        val entries = bulk?.accounts
+        // 整包形状与真实导出逐字对齐，见 GatewayAccountsPack 的说明。
+        val pack = GatewayAccountsPackCodec.decode(text).getOrNull()
+        val entries = pack?.accounts
         require(!entries.isNullOrEmpty()) {
             "既不是网关账号文件（缺 format），也不是批量导出（缺 accounts 数组）"
         }
@@ -142,14 +98,13 @@ object GatewayImporter {
                 provider = entry.provider,
                 name = entry.name.ifBlank { entry.nickname },
                 apiKey = entry.apiKey,
-                baseUrl = entry.endpoint ?: entry.baseUrl,
+                baseUrl = entry.resolvedBaseUrl,
                 accessToken = entry.accessToken,
                 refreshToken = entry.refreshToken,
             )
         }
         // 关掉的模型不导入 —— 那与网关的「逐模型启停」是同一个意思。
-        val providers = (bulk?.customProviders ?: emptyList()).mapNotNull { provider ->
-            if (provider.id.isBlank()) return@mapNotNull null
+        val providers = pack.customProviders.map { provider ->
             GatewayCustomProvider(
                 id = provider.id,
                 name = provider.name,
@@ -209,6 +164,9 @@ object GatewayImporter {
                 // 之后还会再撞上第二个 —— 报告的价值就在于「一次说清」。
                 val providerUnknown = !file.provider.startsWith("custom-") &&
                     file.provider !in knownProviders
+                // 认识、但只在网关里能用的家：原因必须与「不认识」分开写。
+                // 用户看到「不认识 trae」会去改 provider 名，而真因是它需要网关插件。
+                val pluginOnly = ProviderCatalog.of(file.provider)?.direct == false
                 val credentialReason = if (isOauth) {
                     "一期仅支持 API Key 型；OAuth 账号需要续期实现，暂不导入"
                 } else {
@@ -217,11 +175,13 @@ object GatewayImporter {
                 skipped += GatewayImportReport.Item(
                     id = file.id,
                     name = display,
-                    reason = if (providerUnknown) {
-                        credentialReason + "；另外 Praxis 也还不认识这家提供商：" +
+                    reason = when {
+                        pluginOnly -> "该家（" + file.provider + "）由网关插件实现，" +
+                            "登录与会话都在网关侧；这条是 OAuth / 会话型凭证，" +
+                            "Praxis 里用不上 —— 请改用「经网关」方式接入"
+                        providerUnknown -> credentialReason + "；另外 Praxis 也还不认识这家提供商：" +
                             file.provider
-                    } else {
-                        credentialReason
+                        else -> credentialReason
                     },
                 )
                 return@accountLoop
@@ -229,10 +189,16 @@ object GatewayImporter {
 
             val isCustom = file.provider.startsWith("custom-")
             if (!isCustom && file.provider !in knownProviders) {
+                val pluginOnly = ProviderCatalog.of(file.provider)?.direct == false
                 skipped += GatewayImportReport.Item(
                     id = file.id,
                     name = display,
-                    reason = "Praxis 不认识这家提供商：" + file.provider,
+                    reason = if (pluginOnly) {
+                        "该家（" + file.provider + "）由网关插件实现，Praxis 不能直接连 —— " +
+                            "请改用「经网关」方式接入"
+                    } else {
+                        "Praxis 不认识这家提供商：" + file.provider
+                    },
                 )
                 return@accountLoop
             }
