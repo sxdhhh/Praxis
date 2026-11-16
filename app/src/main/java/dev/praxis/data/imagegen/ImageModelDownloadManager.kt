@@ -1,6 +1,7 @@
 package dev.praxis.data.imagegen
 
 import dev.praxis.core.imagegen.DownloadProgress
+import dev.praxis.core.imagegen.DownloadResult
 import dev.praxis.core.imagegen.ImageDownloadPlanner
 import dev.praxis.core.imagegen.ImageDownloadState
 import dev.praxis.core.imagegen.ImageModel

@@ -1,6 +1,8 @@
 package dev.praxis.data.imagegen
 
 import dev.praxis.core.imagegen.DownloadCleanup
+import dev.praxis.core.imagegen.DownloadResult
+import dev.praxis.core.imagegen.DownloadTerminal
 import dev.praxis.core.imagegen.DownloadTarget
 import dev.praxis.core.imagegen.DownloadProgress
 import dev.praxis.core.imagegen.ParallelProgress
@@ -17,39 +19,6 @@ import java.util.zip.ZipInputStream
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-/** 一次下载的结果。四档对应四种不同的用户处置，不合并。 */
-sealed interface DownloadResult {
-
-    /**
-     * 装好了。
-     *
-     * [spaceWasUnknown] 为 true 表示下载前**无法预估**所需空间（`approximateSize` 解析不出来），
-     * 不是「预检通过」—— 这两种情况给用户的文案必须不同。
-     */
-    data class Completed(
-        val spaceWasUnknown: Boolean,
-        /**
-         * 解压后删不掉的压缩包文件名；null = 删干净了。
-         *
-         * 不算失败（模型已经能用），但必须带出去说一声 —— 它会一直占着空间，
-         * 下次空间预检也会把它算进去。静默忽略的话，用户看到的是一块不明去向的占用。
-         */
-        val leftoverZipName: String? = null,
-    ) : DownloadResult
-
-    /** 空间不足，一个字节都没写。 */
-    data class InsufficientSpace(val requiredBytes: Long, val freeBytes: Long) : DownloadResult
-
-    /** 传输/解压失败。残留已清理。 */
-    data class Failed(val detail: String) : DownloadResult
-
-    /**
-     * 用户取消。残留已清理。
-     *
-     * 与 [Failed] 分开：取消不是错误，界面不该弹红字，也不该进「失败率」这类统计。
-     */
-    data object Cancelled : DownloadResult
-}
 
 /**
  * 模型下载器（文档 §8.3/§8.4 的落地）。
@@ -151,7 +120,11 @@ class ModelDownloader(
                                 gate.release()
                             }
                         }
-                    }.awaitAll().firstOrNull { it != null }
+                    }.awaitAll().let { results ->
+                        // 不能取「第一个非 null」：并发下先返回的可能是被同伴中止的那个文件，
+                        // 它只会是 Cancelled，真失败的原因反而排在后面。规则在 DownloadTerminal。
+                        DownloadTerminal.pick(results, userCancelled = shouldStop())
+                    }
                 }
             }
             if (terminal != null) {

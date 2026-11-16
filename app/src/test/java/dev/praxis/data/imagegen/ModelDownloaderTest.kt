@@ -1,6 +1,7 @@
 package dev.praxis.data.imagegen
 
 import dev.praxis.core.imagegen.DownloadProgress
+import dev.praxis.core.imagegen.DownloadResult
 import dev.praxis.core.imagegen.ImageDownloadPlan
 import dev.praxis.core.imagegen.ImageDownloadPlanner
 import dev.praxis.core.imagegen.ImageModel
@@ -134,8 +135,26 @@ class ModelDownloaderTest {
 
         val result = downloader.download(plan) { }
 
-        assertTrue(result is DownloadResult.Failed)
+        // 断言带上「实际是什么」：CI 会把 message 打进 JUnit XML，红了不用再猜。
+        assertTrue("实际=" + result, result is DownloadResult.Failed)
         assertTrue("残留必须清掉，否则下次预检误判", plan.partPaths.none { it.exists() })
+        assertFalse(ImageModelCatalog.isInstalled(root, multiModel()))
+    }
+
+    @Test
+    fun `第一个文件就失败时同样是 Failed`() {
+        // 对称用例：上一个用例失败的是第二个文件，并发下先返回的可能是**被同伴中止**的那个。
+        // 两条一起才能钉住「终态按语义收敛，不按返回顺序」。
+        val root = tmp.newFolder("models")
+        val plan = ImageDownloadPlanner.plan(root, multiModel())
+        val downloader = ModelDownloader() { url ->
+            if (url.endsWith("unet.bin")) throw IOException("网络断了") else ByteArrayInputStream("c".toByteArray())
+        }
+
+        val result = downloader.download(plan) { }
+
+        assertTrue("实际=" + result, result is DownloadResult.Failed)
+        assertTrue("残留必须清掉", plan.partPaths.none { it.exists() })
         assertFalse(ImageModelCatalog.isInstalled(root, multiModel()))
     }
 
