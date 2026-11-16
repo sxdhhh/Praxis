@@ -1,6 +1,6 @@
 # 当前状态指针
 
-- 轮次：**round-19（G14 已 CI 绿；审计缺口仅剩 G20 低价值小项；等真机验收）**
+- 轮次：**round-20（G4 已 CI 绿；剩余：账号上限编辑 UI / G10 状态码 / 真机验收）**
 - CI 基线：commit `1e00132` 的 run `43875229354` **全绿**（build ✓ / verify ✓ / 9 个 core:plugin 债照旧）
 - 工作树未提交：`DownloadResult.kt`（新）、`DownloadTerminalTest.kt`（新）、`ModelDownloader.kt`、
   `ImageModelDownloadManager.kt`、`ModelDownloaderTest.kt`、`lookme/`（全部新增）
