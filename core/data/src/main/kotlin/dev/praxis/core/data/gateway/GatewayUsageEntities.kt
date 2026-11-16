@@ -171,16 +171,15 @@ data class GatewayUsageSummaryRow(
 
 /** 按账号的 token 合计（预算判定用）。 */
 data class GatewayAccountTokensRow(
+    val accountId: String,
+    val tokens: Long,
+)
 
 /** 按账号的窗口内请求数（每账号 RPM 判定用）。 */
 data class GatewayAccountRequestsRow(
     val accountId: String,
     val requests: Int,
 )
-    val accountId: String,
-    val tokens: Long,
-)
-
 /** 分组一行（按模型 / 按家）。 */
 data class GatewayUsageGroupRow(
     val name: String,
