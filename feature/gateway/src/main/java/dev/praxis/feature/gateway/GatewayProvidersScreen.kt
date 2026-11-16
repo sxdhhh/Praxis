@@ -80,6 +80,8 @@ data class GatewayBuiltinProviderRowUi(
     val label: String,
     val baseUrl: String?,
     /** 已拉到的模型数；0 = 还没拉过（这时在内置家上建的账号选不出模型）。 */
+    /** 这次清单是什么时候拉的；0 = 从没拉过（G15：新旧必须区分得出来）。 */
+    val fetchedAt: Long = 0,
     val modelCount: Int = 0,
     /**
      * 能不能由 Praxis 自己发请求。
@@ -173,6 +175,8 @@ fun GatewayProvidersScreen(
                                 title = provider.label + "（" + provider.id + "）",
                                 description = if (provider.direct) {
                                     (provider.baseUrl ?: "地址待填") + " · " +
+                                        (if (provider.fetchedAt > 0) "清单 " +
+                                            dev.praxis.core.gateway.GatewayModelCatalogCache.ageText(provider.fetchedAt) + " · " else "") +
                                         (if (provider.loginLabel.isEmpty()) "" else provider.loginLabel + " · ") +
                                         if (provider.modelCount == 0) {
                                             "还没有模型清单（点下面拉一次）"

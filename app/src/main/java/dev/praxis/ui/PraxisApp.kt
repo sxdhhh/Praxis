@@ -331,6 +331,20 @@ fun PraxisApp(
     /**
      * 内置家贡献的「原生承载」（provider → 模型名）。
      *
+
+    // 内置家清单的拉取时刻（G15）：「刚拉的」和「一年前的」必须区分得出来。
+    val gatewayBuiltinFetchedAtJson by settingsRepository.gatewayBuiltinModelsFetchedAtJson
+        .collectAsState(initial = null)
+    val gatewayBuiltinFetchedAt = remember(gatewayBuiltinFetchedAtJson) {
+        runCatching {
+            (kotlinx.serialization.json.Json
+                .parseToJsonElement(gatewayBuiltinFetchedAtJson ?: return@runCatching emptyMap())
+                as kotlinx.serialization.json.JsonObject)
+                .mapValues { (_, value) ->
+                    (value as kotlinx.serialization.json.JsonPrimitive).content.toLongOrNull() ?: 0L
+                }
+        }.getOrDefault(emptyMap())
+    }
      * **只此一份**：三处 [dev.praxis.data.gateway.GatewayProvider] 构造点、模型页候选、
      * 候选队列、模型测试都从这里取。
      *
@@ -810,6 +824,7 @@ fun PraxisApp(
                 label = entry.label,
                 baseUrl = dev.praxis.data.gateway.BuiltinProviders.baseUrl(entry.id),
                 modelCount = gatewayBuiltinModels[entry.id]?.size ?: 0,
+                fetchedAt = gatewayBuiltinFetchedAt[entry.id] ?: 0L,
                 direct = entry.direct,
                 loginLabel = dev.praxis.core.gateway.ProviderCatalog.loginLabel(entry.id),
             )
@@ -1934,6 +1949,13 @@ fun PraxisApp(
                                 })
                                 settingsRepository.setGatewayBuiltinModelsJson(
                                     dev.praxis.core.gateway.BuiltinModelsCodec.encodeDetailed(merged),
+                                )
+                                settingsRepository.setGatewayBuiltinModelsFetchedAtJson(
+                                    kotlinx.serialization.json.buildJsonObject {
+                                        // 合并写回：只更新这一家，别把别家的时刻抹掉。
+                                        gatewayBuiltinFetchedAt.forEach { (id, at) -> put(id, at) }
+                                        put(providerId, System.currentTimeMillis())
+                                    }.toString(),
                                 )
                             } else {
                                 gatewayAccountStore.updateProviderModelsWithCaps(

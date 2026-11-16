@@ -763,6 +763,17 @@ class SettingsRepository(
         dataStore.data.map { it[KEY_GATEWAY_BUILTIN_MODELS] }
 
     suspend fun setGatewayBuiltinModelsJson(text: String) =
+
+    /**
+     * 内置家清单的**拉取时刻**（provider → epoch 毫秒，JSON 对象）。
+     * 与清单同一个成因：它不是数据库的行，快照时间没地方挂，只能另开一键。
+     * 没有「没拉过」与「很久以前」的区分，用户没法判断清单是否可信（G15）。
+     */
+    val gatewayBuiltinModelsFetchedAtJson: Flow<String?> =
+        dataStore.data.map { it[KEY_GATEWAY_BUILTIN_MODELS_FETCHED_AT] }
+
+    suspend fun setGatewayBuiltinModelsFetchedAtJson(text: String) =
+        put(KEY_GATEWAY_BUILTIN_MODELS_FETCHED_AT, text)
         put(KEY_GATEWAY_BUILTIN_MODELS, text)
 
     suspend fun setGatewayRouteGroupsJson(text: String) =
@@ -1490,6 +1501,10 @@ private val KEY_GATEWAY_ROUTE_GROUPS = stringPreferencesKey("gateway_route_group
 
 /** 内置家模型清单，见 [SettingsRepository.gatewayBuiltinModelsJson]。 */
 private val KEY_GATEWAY_BUILTIN_MODELS = stringPreferencesKey("gateway_builtin_models")
+
+/** 内置家清单的拉取时刻，见 [SettingsRepository.gatewayBuiltinModelsFetchedAtJson]。 */
+private val KEY_GATEWAY_BUILTIN_MODELS_FETCHED_AT =
+    stringPreferencesKey("gateway_builtin_models_fetched_at")
 
 /** 网关系统设置，见 [SettingsRepository.gatewaySystemSettingsJson]。 */
 private val KEY_GATEWAY_SYSTEM = stringPreferencesKey("gateway_system")
