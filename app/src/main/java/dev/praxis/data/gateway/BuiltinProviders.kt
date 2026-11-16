@@ -157,6 +157,13 @@ object BuiltinProviders {
             "sensenova", "商汤日日新", ProviderProtocol.OpenAiChat,
             "https://api.sensenova.cn/compatible-mode/v1",
         ),
+        //
+        // 经网关：把一台部署好的 Agent2API 当成一家。地址填网关的 /v1（本机
+        // `http://<ip>:3065/v1` 或经 nginx 的 `/a2a/v1`），Key 用面板里建的**网关密钥**
+        // —— 模型清单来自 `/v1/models`，插件家（workbuddy / trae / raccoon…）的模型
+        // 全部经它可选。这是「插件家在 Praxis 里可用」的唯一现实路径：客户端伪装
+        // 与网页会话都在网关侧，Praxis 不重复实现。
+        Builtin("agent2api", "Agent2API 网关", ProviderProtocol.OpenAiChat, null),
     )
 
     /**

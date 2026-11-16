@@ -1,6 +1,6 @@
 # 当前状态指针
 
-- 轮次：**round-09（G4 已落地并 CI 绿；下一步「经网关」入口 → G6 粘性 → 能力位落库）**
+- 轮次：**round-10（经网关入口已落，416 例绿；推 CI 后做 G6 粘性）**
 - CI 基线：commit `1e00132` 的 run `43875229354` **全绿**（build ✓ / verify ✓ / 9 个 core:plugin 债照旧）
 - 工作树未提交：`DownloadResult.kt`（新）、`DownloadTerminalTest.kt`（新）、`ModelDownloader.kt`、
   `ImageModelDownloadManager.kt`、`ModelDownloaderTest.kt`、`lookme/`（全部新增）

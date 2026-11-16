@@ -19,13 +19,24 @@ class ProviderCatalogTest {
     @Test
     fun `三类家的数量与上游一致`() {
         val counts = ProviderCatalog.counts()
-        // 24 = 上游 preset 目录（preset-providers.js）；
+        // 25 = 上游 preset 24 家 + agent2api（经网关入口）；
         // 33 = agent2api-providers 插件包声明 34 个里去掉 `demo`（示例，hidden 且默认停用）；
         // 4  = agent2api-web-providers 网页插件包。
-        assertEquals(24, counts[ProviderKind.Api])
+        assertEquals(25, counts[ProviderKind.Api])
         assertEquals(33, counts[ProviderKind.AgentPlugin])
         assertEquals(4, counts[ProviderKind.WebPlugin])
-        assertEquals(61, ProviderCatalog.all().size)
+        assertEquals(62, ProviderCatalog.all().size)
+    }
+
+    @Test
+    fun `经网关入口在目录里且只要 Key`() {
+        // 「插件家在 Praxis 可用」的现实路径：一台 Agent2API 当成一家。
+        // 它不是从上游 preset 抄来的，是我们自己的接入形态 —— 但归类必须是 Api 直连 + ApiKey，
+        // 否则它会被当成插件家跳过，或被挂上假的网页登录。
+        val entry = ProviderCatalog.of("agent2api")!!
+        assertEquals(ProviderKind.Api, entry.kind)
+        assertEquals(ProviderLoginKind.ApiKey, entry.login)
+        assertEquals("Agent2API 网关", ProviderCatalog.labelOf("agent2api"))
     }
 
     @Test

@@ -121,6 +121,10 @@ object ProviderCatalog {
         ProviderEntry("sub2api", "Sub2API", 21, ProviderKind.Api, ProviderLoginKind.ApiKey, "自建面板，地址由用户填"),
         ProviderEntry("newapi", "NewAPI", 22, ProviderKind.Api, ProviderLoginKind.ApiKey, "自建面板，地址由用户填"),
         ProviderEntry("sensenova", "商汤日日新", 23, ProviderKind.Api, ProviderLoginKind.ApiKey),
+        ProviderEntry(
+            "agent2api", "Agent2API 网关", 24, ProviderKind.Api, ProviderLoginKind.ApiKey,
+            "地址由用户填（网关的 /v1）；Key 用面板里建的网关密钥",
+        ),
     )
 
     /**
