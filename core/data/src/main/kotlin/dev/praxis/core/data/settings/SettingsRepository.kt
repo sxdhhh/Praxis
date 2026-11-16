@@ -763,7 +763,6 @@ class SettingsRepository(
         dataStore.data.map { it[KEY_GATEWAY_BUILTIN_MODELS] }
 
     suspend fun setGatewayBuiltinModelsJson(text: String) =
-    suspend fun setGatewayBuiltinModelsJson(text: String) =
         put(KEY_GATEWAY_BUILTIN_MODELS, text)
 
     /**
