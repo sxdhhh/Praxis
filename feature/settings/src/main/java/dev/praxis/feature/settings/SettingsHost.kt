@@ -240,6 +240,7 @@ fun SettingsHost(
         dev.praxis.core.imagegen.ImageDownloadState.Idle,
     onDownloadImageGenModel: (dev.praxis.core.imagegen.ImageModel) -> Unit = {},
     onCancelImageGenDownload: () -> Unit = {},
+    onDeleteImageGenModel: (dev.praxis.core.imagegen.ImageModel) -> Unit = {},
     /** 删除结果一句话；null = 没有。 */
     imageGenDeleteMessage: String? = null,
     /** 终态已看过：回到 Idle（G12）。 */
