@@ -1,6 +1,7 @@
 package dev.praxis.core.data.gateway
 
 import dev.praxis.core.gateway.AccountView
+import dev.praxis.core.gateway.BuiltinModelsCodec
 import dev.praxis.core.gateway.NativeModel
 import dev.praxis.core.gateway.GatewayAccountRow
 import dev.praxis.core.gateway.GatewayProviderDraft
