@@ -2354,6 +2354,25 @@ fun PraxisApp(
                                     }
                                 }
                             }
+                            // 随包带出自定义家（custom-* 账号的「家」）：不带的话，
+                            // 回灌网关时那些账号会变成「有账号、没地址」，等于半个账号。
+                            val customProviders = gatewayAccountStore.providers().map { entity ->
+                                val models = runCatching {
+                                    (kotlinx.serialization.json.Json
+                                        .parseToJsonElement(entity.modelsJson)
+                                        as kotlinx.serialization.json.JsonArray)
+                                        .mapNotNull { element ->
+                                            (element as? kotlinx.serialization.json.JsonPrimitive)
+                                                ?.content
+                                        }
+                                }.getOrDefault(emptyList())
+                                dev.praxis.core.gateway.GatewayCustomProvider(
+                                    id = entity.id,
+                                    name = entity.name,
+                                    baseUrl = entity.baseUrl,
+                                    models = models,
+                                )
+                            }
                             val plan = dev.praxis.core.gateway.GatewayExportPlanner.build(
                                 accounts = accounts,
                                 // 路由/重试/超时/压缩/自动续写：Praxis 早就持久化了
@@ -2369,6 +2388,11 @@ fun PraxisApp(
                                 includeSecrets = includeSecrets,
                                 date = java.time.LocalDate.now()
                                     .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd")),
+                                // 整包：网关「导出全部账号」的真实形状，用于「导出 → 回灌网关」。
+                                // 此前只产出一账号一文件，网关不认那份形状，这条路一直不通。
+                                emitGatewayPack = true,
+                                exportedAt = System.currentTimeMillis(),
+                                providers = customProviders,
                             )
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 dev.praxis.core.gateway.GatewayExportWriter.write(
