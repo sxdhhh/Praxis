@@ -15,6 +15,22 @@ import kotlinx.serialization.json.jsonPrimitive
 data class AiModelOption(
     val id: String,
     val name: String = id,
+    /**
+     * 以下能力位全部来自上游 /models 的**对象字段**，不是猜的。
+     *
+     * null = 上游没声明（绝大多数 OpenAI 兼容端点只回 id），**不等于不支持**。
+     * 这个区别很重要：把 null 当 false 会让「带图请求」先跳过所有账号，
+     * 用户看到的是「没有可用账号」，而真实原因是我们的默认值。
+     *
+     * 认的键：supports_images / supports_image_generation / supports_reasoning /
+     * supports_tool_call / max_input_tokens / max_output_tokens。
+     */
+    val supportsImages: Boolean? = null,
+    val supportsReasoning: Boolean? = null,
+    val supportsToolCall: Boolean? = null,
+    /** 上下文上限（token）。OpenAI 生态没有标准键，见 parse 的取值顺序。 */
+    val maxInputTokens: Int? = null,
+    val maxOutputTokens: Int? = null,
 )
 
 /**
@@ -156,7 +172,19 @@ object ModelCatalog {
                 ?: model.string("displayName")
                 ?: model.string("label")
                 ?: id
-            AiModelOption(id = id, name = name)
+            AiModelOption(
+                id = id,
+                name = name,
+                supportsImages = model.boolean("supports_images")
+                    ?: model.boolean("supports_image_generation"),
+                supportsReasoning = model.boolean("supports_reasoning"),
+                supportsToolCall = model.boolean("supports_tool_call"),
+                // 上下文上限：只认同义的键；max_tokens 是输出上限，不能拿来当上下文。
+                maxInputTokens = model.int("max_input_tokens")
+                    ?: model.int("context_length")
+                    ?: model.int("context_window"),
+                maxOutputTokens = model.int("max_output_tokens"),
+            )
         }
 
         if (options.isEmpty()) {
@@ -183,6 +211,32 @@ object ModelCatalog {
     private fun JsonObject.string(key: String): String? =
         runCatching { this[key]?.jsonPrimitive?.content }.getOrNull()
             ?.takeIf { it.isNotBlank() && it != "null" }
+
+    /**
+     * 布尔位。
+     *
+     * 上游写法不统一：有 JSON 布尔 true，也有字符串 "true"。
+     * 只认布尔会丢掉一半家的能力位，那等于白解析。
+     */
+    private fun JsonObject.boolean(key: String): Boolean? =
+        runCatching { this[key]?.jsonPrimitive }.getOrNull()?.let { primitive ->
+            if (primitive.isString) {
+                when (primitive.content.lowercase()) {
+                    "true" -> true
+                    "false" -> false
+                    else -> null
+                }
+            } else {
+                primitive.content.toBooleanStrictOrNull()
+            }
+        }
+
+    /** 整数位：JSON 里可能是数字，也可能是字符串 "1000000"。非正数一律当没声明。 */
+    private fun JsonObject.int(key: String): Int? =
+        runCatching { this[key]?.jsonPrimitive?.content }.getOrNull()
+            ?.toDoubleOrNull()
+            ?.takeIf { it > 0 }
+            ?.let { it.toInt() }
 }
 
 /**

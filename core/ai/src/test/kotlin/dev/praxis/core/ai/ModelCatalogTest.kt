@@ -181,4 +181,72 @@ class ModelCatalogTest {
         assertTrue(ModelCatalog.Failure.Network(null).description.contains("网络"))
         assertTrue(ModelCatalog.Failure.EmptyResponse.description.isNotBlank())
     }
+    // ── 能力位（来自上游 /models 的对象字段）────────────────────────
+
+    @Test
+    fun `解析网关形状的能力位`() {
+        // 样例取自真实响应（Agent2API 网关 /v1/models）：字段名与类型逐字一致。
+        val body = """
+            {"object":"list","data":[
+              {"id":"raccoon-8c4485","name":"Raccoon-Work","owned_by":"raccoon",
+               "supports_images":true,"supports_reasoning":true,"supports_tool_call":false,
+               "max_input_tokens":1000000,"max_output_tokens":100000}
+            ]}
+        """.trimIndent()
+        val model = ModelCatalog.parse(body).getOrThrow().single()
+        assertEquals(true, model.supportsImages)
+        assertEquals(true, model.supportsReasoning)
+        assertEquals(false, model.supportsToolCall)
+        assertEquals(1000000, model.maxInputTokens)
+        assertEquals(100000, model.maxOutputTokens)
+    }
+
+    @Test
+    fun `没声明能力位就是 null 而不是 false`() {
+        // 把 null 当 false 会让带图请求跳过所有账号，用户看到「没有可用账号」，
+        // 而真实原因是我们的默认值 —— 这条必须钉住。
+        val body = """{"data":[{"id":"gpt-4o-mini"}]}"""
+        val model = ModelCatalog.parse(body).getOrThrow().single()
+        assertEquals(null, model.supportsImages)
+        assertEquals(null, model.supportsReasoning)
+        assertEquals(null, model.supportsToolCall)
+        assertEquals(null, model.maxInputTokens)
+    }
+
+    @Test
+    fun `字符串形式的布尔与数字也认`() {
+        // 中转站常把一切序列化成字符串；只认 JSON 原生类型会白白丢掉能力位。
+        val body = """
+            {"data":[{"id":"x","supports_images":"true","max_input_tokens":"128000"}]}
+        """.trimIndent()
+        val model = ModelCatalog.parse(body).getOrThrow().single()
+        assertEquals(true, model.supportsImages)
+        assertEquals(128000, model.maxInputTokens)
+    }
+
+    @Test
+    fun `出图能力位也能当图像输入位`() {
+        // supports_image_generation 是「能画图」，不等于「能读图」；
+        // 但在缺 supports_images 的家里，它是唯一可用的信号。
+        val body = """{"data":[{"id":"y","supports_image_generation":true}]}"""
+        assertEquals(true, ModelCatalog.parse(body).getOrThrow().single().supportsImages)
+    }
+
+    @Test
+    fun `上下文上限回退到常见键`() {
+        val a = ModelCatalog.parse("""{"data":[{"id":"a","context_length":32000}]}""")
+            .getOrThrow().single()
+        assertEquals(32000, a.maxInputTokens)
+        val b = ModelCatalog.parse("""{"data":[{"id":"b","context_window":64000}]}""")
+            .getOrThrow().single()
+        assertEquals(64000, b.maxInputTokens)
+    }
+
+    @Test
+    fun `非正数上限不算声明`() {
+        // 0 或负数当上限会让预算计算直接把请求拦掉。
+        val model = ModelCatalog.parse("""{"data":[{"id":"c","max_input_tokens":0}]}""")
+            .getOrThrow().single()
+        assertEquals(null, model.maxInputTokens)
+    }
 }
