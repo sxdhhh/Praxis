@@ -639,6 +639,8 @@ fun PraxisApp(
     val imageGenDownloadManager: dev.praxis.data.imagegen.ImageModelDownloadManager =
         org.koin.compose.koinInject()
     val imageGenDownloadState by imageGenDownloadManager.state.collectAsState()
+    // 删除结果一句话（G19）；终态确认交给 manager.acknowledge()。
+    var imageGenDeleteMessage by remember { mutableStateOf<String?>(null) }
 
     // 下载完成后重读一次文件系统：装好的模型立刻出现在列表里，不用重启 App（文档 §7.3）。
     var imageGenRefreshTick by remember { mutableStateOf(0) }
@@ -2175,6 +2177,19 @@ fun PraxisApp(
                     dev.praxis.data.imagegen.ImageModelDownloadService.start(appContext, model.id)
                 },
                 onCancelImageGenDownload = { imageGenDownloadManager.cancel() },
+                onDeleteImageGenModel = { model ->
+                    coroutineScope.launch {
+                        val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            imageGenDownloadManager.deleteModel(model.id)
+                        }
+                        imageGenDeleteMessage = result.fold(
+                            onSuccess = { "已删除：" + model.name + "（文件与下载残留一并清理）" },
+                            onFailure = { error -> "删除失败：" + (error.message ?: "未说明原因") },
+                        )
+                    }
+                },
+                imageGenDeleteMessage = imageGenDeleteMessage,
+                onAcknowledgeImageGenDownload = { imageGenDownloadManager.acknowledge() },
                 onClearGatewayRuntime = { ids ->
                     // 运行期状态是内存里的，清掉就是真的清掉；随后触发一次重算。
                     ids.forEach { gatewayRouteState.onSuccess(it) }

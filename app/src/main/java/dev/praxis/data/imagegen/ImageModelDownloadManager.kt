@@ -102,6 +102,43 @@ class ImageModelDownloadManager(
             }
             // 先把 job 置空再写终态：
             //
+    /**
+     * 删除一个本机模型：成品目录与 .incoming/<id> 一起清（G19）。
+     *
+     * ## 为什么失败要如实报、不静默删一半
+     *
+     * 引擎正在跑时文件可能被占用；删一半的目录比删不掉更糟 —— 它会变成一个
+     * 既不是「已装」也不是「没装」的悬空态。所以任一目标删不掉就整体报失败，
+     * 并把建议（先停止引擎）一并给出。
+     *
+     * 下载跑着时也拒绝：单飞语义下，一边下一边删同一个目录是自找的竞态。
+     */
+    fun deleteModel(modelId: String): Result<Unit> = runCatching {
+        check(!isBusy()) { "正在下载模型，等它结束（或取消）再删" }
+        val dir = File(modelsRoot, modelId)
+        val incoming = File(File(modelsRoot, ".incoming"), modelId)
+        if (!dir.exists() && !incoming.exists()) {
+            throw IllegalStateException("本机没有这个模型的文件可删")
+        }
+        var blocked: String? = null
+        for (target in listOf(dir, incoming)) {
+            if (target.exists() && !target.deleteRecursively()) {
+                blocked = target.name
+            }
+        }
+        if (blocked != null) {
+            throw IllegalStateException("有文件删不掉：" + blocked + " —— 可能正被引擎占用，先停止引擎再删")
+        }
+        // 终态若属于这个模型，回到 Idle：别让「下载完成：xxx」挂在已删除的模型上（G12）。
+        val current = _state.value
+        val currentModelId = when (current) {
+            is ImageDownloadState.Completed -> current.modelId
+            is ImageDownloadState.Failed -> current.modelId
+            is ImageDownloadState.Cancelled -> current.modelId
+            else -> null
+        }
+        if (currentModelId == modelId) _state.value = ImageDownloadState.Idle
+    }
             // `acknowledge()` 用「有没有在跑」判断能不能回到 Idle。如果先写终态、
             // 之后才让 job 结束，调用方（界面或测试）在这两步之间看到的是
             //「已经有结果了，但还被当成在跑」—— 于是 acknowledge 被拒，页面卡在结果上。

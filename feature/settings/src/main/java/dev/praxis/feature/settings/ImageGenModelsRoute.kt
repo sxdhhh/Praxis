@@ -10,11 +10,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.praxis.feature.settings.common.SettingsList
 import dev.praxis.core.imagegen.ImageDownloadState
 import dev.praxis.core.imagegen.ImageModel
+import dev.praxis.ui.widgets.MiuixAnimatedDialog
 import dev.praxis.ui.widgets.MiuixNavigationItemWidget
 import dev.praxis.ui.widgets.SettingsSectionHeader
 import top.yukonga.miuix.kmp.basic.Card
@@ -41,6 +46,12 @@ fun ImageGenModelsRoute(
     state: ImageDownloadState,
     onDownload: (ImageModel) -> Unit,
     onCancel: () -> Unit,
+    /** 删除一个已安装模型（连同文件与下载残留）。G19。 */
+    onDelete: (ImageModel) -> Unit = {},
+    /** 删除结果一句话；null = 没有要显示的。 */
+    onDeleteMessage: String? = null,
+    /** 终态已看过：回到 Idle（G12）。 */
+    onAcknowledge: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val runningId = (state as? ImageDownloadState.Running)?.modelId
@@ -58,7 +69,7 @@ fun ImageGenModelsRoute(
         }
 
         item(key = "__state__") {
-            StateCard(state = state, onCancel = onCancel)
+            StateCard(state = state, onCancel = onCancel, onDeleteMessage = onDeleteMessage, onAcknowledge = onAcknowledge)
         }
 
         items(models, key = { model -> model.id }) { model ->
@@ -108,6 +119,13 @@ fun ImageGenModelsRoute(
                         )
                     }
                 }
+                if (installed && !isThisOne) {
+                    MiuixNavigationItemWidget(
+                        title = "删除（连同文件）",
+                        description = "释放约 " + model.approximateSize + "；引擎运行中请先停止引擎",
+                        onClick = { pendingDelete = model },
+                    )
+                }
                 if (!installed && !isThisOne && !busyElsewhere) {
                     MiuixNavigationItemWidget(
                         title = "下载",
@@ -147,9 +165,45 @@ fun ImageGenModelsRoute(
     }
 }
 
+    // 删除确认（文档 §9.0：常驻挂载，visible 控制显隐 —— 退场动画才播得完）。
+    var pendingDelete by remember { mutableStateOf<ImageModel?>(null) }
+    MiuixAnimatedDialog(
+        visible = pendingDelete != null,
+        onDismissRequest = { pendingDelete = null },
+    ) {
+        Card {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "删除 " + (pendingDelete?.name ?: "") + "？",
+                    style = MiuixTheme.textStyles.body1,
+                )
+                Text(
+                    text = "会连同模型文件与下载残留一起删掉；引擎运行中先停止引擎。这个操作不能撤销。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                MiuixNavigationItemWidget(
+                    title = "确认删除",
+                    description = "释放约 " + (pendingDelete?.approximateSize ?: ""),
+                    onClick = {
+                        val target = pendingDelete
+                        pendingDelete = null
+                        if (target != null) onDelete(target)
+                    },
+                )
+                MiuixNavigationItemWidget(
+                    title = "先不删",
+                    description = "关闭这个弹窗，什么也不动",
+                    onClick = { pendingDelete = null },
+                )
+            }
+        }
+    }
+
 /** 全局下载状态的提示条：完成/失败/取消各一句，正在下载时不重复（行内已经有进度）。 */
 @Composable
-private fun StateCard(state: ImageDownloadState, onCancel: () -> Unit) {
+private fun StateCard(state: ImageDownloadState, onCancel: () -> Unit, onDeleteMessage: String?, onAcknowledge: () -> Unit) {
     val message = when (state) {
         ImageDownloadState.Idle -> null
         is ImageDownloadState.Running -> null
@@ -190,6 +244,32 @@ private fun StateCard(state: ImageDownloadState, onCancel: () -> Unit) {
             modifier = Modifier.padding(16.dp),
         )
     }
+    if (onDeleteMessage != null) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .padding(bottom = 12.dp),
+        ) {
+            Text(
+                text = onDeleteMessage,
+                style = MiuixTheme.textStyles.footnote1,
+                color = if (onDeleteMessage.startsWith("删除失败")) {
+                    MiuixTheme.colorScheme.error
+                } else {
+                    MiuixTheme.colorScheme.primary
+                },
+                modifier = Modifier.padding(16.dp),
+            )
+        }
+    }
+    // 终态（完成/失败/取消/删除提示）都被看过之后，给一个「知道了」把它清掉（G12）：
+    // 没有它，旧结果会一直挂在模型库顶部，直到下一次下载或进程重启。
+    MiuixNavigationItemWidget(
+        title = "知道了",
+        description = "收起这条结果",
+        onClick = onAcknowledge,
+    )
 }
 
 private fun progressLine(state: ImageDownloadState): String {
