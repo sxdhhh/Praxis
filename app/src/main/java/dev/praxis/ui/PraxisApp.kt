@@ -2101,8 +2101,10 @@ fun PraxisApp(
                                 .requiresQnn(model.backendType)
                             var libDir: String? = null
                             if (needsQnn) {
-                                engineLaunchMessage = "正在解压 QNN 运行时（首次会慢一点）…"
-                                val installed = qnnRuntimeInstaller.install()
+                                engineLaunchMessage = "正在解压 QNN 运行时（156 MB，首次会慢一点）…"
+                                val installed = qnnRuntimeInstaller.install { done, total ->
+                                    engineLaunchMessage = "正在解压 QNN 运行时 $done/$total …"
+                                }
                                 val dir = installed.getOrNull()
                                 if (dir == null) {
                                     engineLaunchMessage = "QNN 运行时装不上：" +

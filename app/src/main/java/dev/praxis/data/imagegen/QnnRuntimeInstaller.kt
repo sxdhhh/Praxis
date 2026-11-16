@@ -54,9 +54,12 @@ class QnnRuntimeInstaller(
     /**
      * 解压（幂等）。
      *
+     * @param onProgress 每解完一个文件回调一次（done, total）。156 MB / 20 个文件
+     *   要几十秒，一句不变的「正在解压」会让用户以为卡死 —— 进度必须有。
      * @return 可用作 `--lib_dir` 的目录；失败时 Result.failure 带可展示的原因。
      */
-    suspend fun install(): Result<File> = withContext(Dispatchers.IO) {
+    suspend fun install(onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): Result<File> =
+        withContext(Dispatchers.IO) {
         runCatching {
             if (isInstalled()) return@runCatching runtimeDir()
             val dir = runtimeDir()
@@ -66,6 +69,7 @@ class QnnRuntimeInstaller(
             val manager = assets()
             val entries = manager.list(assetDir)?.toList()
                 ?: error("APK 里没有 assets/" + assetDir + "（这个构建没带 QNN 运行时）")
+            val total = entries.size
             var written = 0
             entries.forEach { name ->
                 val target = File(dir, name)
@@ -73,11 +77,17 @@ class QnnRuntimeInstaller(
                     target.outputStream().use { output -> input.copyTo(output) }
                 }
                 written++
+                onProgress(written, total)
             }
             if (written == 0) error("assets/" + assetDir + " 是空的")
             if (!isInstalled()) {
                 val names = dir.list()?.toList() ?: emptyList()
                 error("QNN 运行时不全，缺：" + QnnRuntimePlan.missing(names).take(4).joinToString("、"))
+            }
+            // 旧 stamp 目录清理（G6 后半）：升级换戳后，旧目录（156 MB）留着就是纯占地方。
+            // 只在新解压**成功**后清 —— 失败时保留旧的，回滚还有得回。
+            targetRoot().listFiles()?.forEach { sibling ->
+                if (sibling.isDirectory && sibling.name != stamp) sibling.deleteRecursively()
             }
             dir
         }
