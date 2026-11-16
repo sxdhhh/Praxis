@@ -115,6 +115,7 @@ class ModelDownloader(
                                 downloadOne(
                                     target = target,
                                     plan = plan,
+                                    finalDir = if (plan.isZip) plan.incomingDir else plan.targetDir,
                                     baseUrl = baseUrl,
                                     shouldStop = shouldStop,
                                     abort = abort,
