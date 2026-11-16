@@ -176,7 +176,7 @@ fun GatewayProvidersScreen(
                                 description = if (provider.direct) {
                                     (provider.baseUrl ?: "地址待填") + " · " +
                                         (if (provider.fetchedAt > 0) "清单 " +
-                                            dev.praxis.core.gateway.GatewayModelCatalogCache.ageText(provider.fetchedAt) + " · " else "") +
+                                            dev.praxis.core.gateway.GatewayModelCatalogCache.ageText(provider.fetchedAt, System.currentTimeMillis()) + " · " else "") +
                                         (if (provider.loginLabel.isEmpty()) "" else provider.loginLabel + " · ") +
                                         if (provider.modelCount == 0) {
                                             "还没有模型清单（点下面拉一次）"

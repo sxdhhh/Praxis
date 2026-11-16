@@ -763,6 +763,8 @@ class SettingsRepository(
         dataStore.data.map { it[KEY_GATEWAY_BUILTIN_MODELS] }
 
     suspend fun setGatewayBuiltinModelsJson(text: String) =
+    suspend fun setGatewayBuiltinModelsJson(text: String) =
+        put(KEY_GATEWAY_BUILTIN_MODELS, text)
 
     /**
      * 内置家清单的**拉取时刻**（provider → epoch 毫秒，JSON 对象）。
@@ -774,7 +776,6 @@ class SettingsRepository(
 
     suspend fun setGatewayBuiltinModelsFetchedAtJson(text: String) =
         put(KEY_GATEWAY_BUILTIN_MODELS_FETCHED_AT, text)
-        put(KEY_GATEWAY_BUILTIN_MODELS, text)
 
     suspend fun setGatewayRouteGroupsJson(text: String) =
         put(KEY_GATEWAY_ROUTE_GROUPS, text)
