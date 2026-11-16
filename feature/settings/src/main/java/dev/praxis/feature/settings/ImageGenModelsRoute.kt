@@ -55,6 +55,8 @@ fun ImageGenModelsRoute(
     modifier: Modifier = Modifier,
 ) {
     val runningId = (state as? ImageDownloadState.Running)?.modelId
+    // 删除确认的目标（常驻挂载弹窗用）。
+    var pendingDelete by remember { mutableStateOf<ImageModel?>(null) }
 
     SettingsList(
         modifier = modifier,
@@ -163,10 +165,7 @@ fun ImageGenModelsRoute(
             }
         }
     }
-}
-
     // 删除确认（文档 §9.0：常驻挂载，visible 控制显隐 —— 退场动画才播得完）。
-    var pendingDelete by remember { mutableStateOf<ImageModel?>(null) }
     MiuixAnimatedDialog(
         visible = pendingDelete != null,
         onDismissRequest = { pendingDelete = null },
@@ -200,6 +199,8 @@ fun ImageGenModelsRoute(
             }
         }
     }
+}
+
 
 /** 全局下载状态的提示条：完成/失败/取消各一句，正在下载时不重复（行内已经有进度）。 */
 @Composable
