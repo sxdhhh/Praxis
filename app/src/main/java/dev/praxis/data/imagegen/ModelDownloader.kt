@@ -78,14 +78,16 @@ class ModelDownloader(
         onProgress: (DownloadProgress) -> Unit,
     ): DownloadResult {
         // ① 目录 + 预检。先清残留再判空间：否则上次失败的 .part 会让预检自相矛盾地报「不够」。
+        // 注意顺序：**先清理、后建目录** —— 清理清单里包含 .incoming/<id> 本体，
+        // 先建再清等于把刚建的目录删掉，随后每个文件都会写进不存在的目录（CI 实测翻过车）。
         if (!plan.targetDir.exists() && !plan.targetDir.mkdirs()) {
             return DownloadResult.Failed("无法创建模型目录：" + plan.targetDir.absolutePath)
         }
+        cleanStale(plan)
         // 临时物（.part / 解压目录 / zip）全部在 .incoming/<id>/，与成品隔离（G2）。
         if (!plan.incomingDir.exists() && !plan.incomingDir.mkdirs()) {
             return DownloadResult.Failed("无法创建临时目录：" + plan.incomingDir.absolutePath)
         }
-        cleanStale(plan)
 
         when (val space = SpaceCheck.decide(plan.requiredBytes, plan.targetDir.usableSpace)) {
             is SpaceDecision.Insufficient ->
@@ -148,6 +150,8 @@ class ModelDownloader(
                 // ④ 多文件：写标记。这一步之后 [ImageModelCatalog.isInstalled] 才会认。
                 File(plan.targetDir, plan.markerFileName).writeText("")
             }
+            // 成功也把 .incoming/<id> 带走：里面已无有效内容，留着只是占目录项。
+            cleanStale(plan)
             return DownloadResult.Completed(spaceWasUnknown)
         } catch (error: IOException) {
             cleanStale(plan)
@@ -174,6 +178,10 @@ class ModelDownloader(
         onProgress: (DownloadProgress) -> Unit,
     ): DownloadResult? {
         val part = File(plan.incomingDir, target.localName + ImageDownloadPlan.PART_SUFFIX)
+        if (!plan.incomingDir.isDirectory && !plan.incomingDir.mkdirs()) {
+            abort.set(true)
+            return DownloadResult.Failed("无法创建临时目录：" + plan.incomingDir.absolutePath)
+        }
         if (part.exists() && !part.delete()) {
             abort.set(true)
             return DownloadResult.Failed("无法删除残留文件：" + part.name)
