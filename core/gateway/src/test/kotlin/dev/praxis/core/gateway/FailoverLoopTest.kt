@@ -19,10 +19,9 @@ class FailoverLoopTest {
     private fun decide(
         kind: FailureKind,
         switches: Int = 0,
-        refreshed: Boolean = false,
     ): FailoverStep = FailoverLoop.onFailure(
         kind = kind,
-        state = FailoverState(switches = switches, refreshed = refreshed),
+        state = FailoverState(switches = switches),
         budget = budget,
     )
 
@@ -54,24 +53,10 @@ class FailoverLoopTest {
     }
 
     @Test
-    fun 凭证过期先续期一次() {
-        assertEquals(FailoverStep.RefreshCredentials, decide(FailureKind.CredentialExpired))
-    }
-
-    @Test
-    fun 续期过后仍失败就换号() {
-        assertEquals(
-            FailoverStep.SwitchAccount,
-            decide(FailureKind.CredentialExpired, refreshed = true),
-        )
-    }
-
-    @Test
-    fun 续期只记一次() {
-        val next = FailoverLoop.advance(FailoverState(), FailoverStep.RefreshCredentials)
-
-        assertTrue(next.refreshed)
-        assertEquals("续期不算换号", 0, next.switches)
+    fun 凭证过期直接换号并标需要重新登录() {
+        // Praxis 没有续期执行者：返回「去续期」只会没人做（审计 G5 的最糟状态）。
+        // 语义降级为换号；needsRelogin 由 RouterSession 标，见 RouterSessionTest。
+        assertEquals(FailoverStep.SwitchAccount, decide(FailureKind.CredentialExpired))
     }
 
     @Test
@@ -100,7 +85,7 @@ class FailoverLoopTest {
 
     @Test
     fun 放弃与结束都不改状态() {
-        val state = FailoverState(switches = 2, refreshed = true)
+        val state = FailoverState(switches = 2)
 
         assertEquals(state, FailoverLoop.advance(state, FailoverStep.Done))
         assertEquals(state, FailoverLoop.advance(state, FailoverStep.GiveUp("x")))

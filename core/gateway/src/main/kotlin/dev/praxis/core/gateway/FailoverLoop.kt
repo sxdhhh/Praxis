@@ -14,17 +14,12 @@ data class FailoverBudget(
 /** 循环状态。 */
 data class FailoverState(
     val switches: Int = 0,
-    /** 是否已经尝试过续期：凭证过期只续一次。 */
-    val refreshed: Boolean = false,
 )
 
 /** 循环的下一步。 */
 sealed interface FailoverStep {
     /** 换下一个候选账号。 */
     data object SwitchAccount : FailoverStep
-
-    /** 原地续期一次（仅凭证过期）。 */
-    data object RefreshCredentials : FailoverStep
 
     /** 结束，把错误报给用户。 */
     data class GiveUp(val reason: String) : FailoverStep
@@ -67,13 +62,13 @@ object FailoverLoop {
             reason = "响应体积超限，需要先处理请求本身",
         )
 
-        // 凭证过期：先原地续期一次，仍失败再换号（文档 7.4 第 2 行）。
-        FailoverAction.TryRefreshThenSwitch ->
-            if (!state.refreshed) {
-                FailoverStep.RefreshCredentials
-            } else {
-                switchOrGiveUp(state, budget)
-            }
+        // 凭证过期：**明确降级为直接换号**（G5 决策，2026-11-17）。
+        //
+        // 文档 7.4 第 2 行写的是「先续期一次，仍失败换号」，但 Praxis 没有 OAuth
+        // 续期执行者 —— 返回「去续期」这个步骤只会没人执行（审计 G5：返回了但没人做，
+        // 最糟）。降级语义：换号 + 在 RouterSession 里标 needsRelogin（给账号页提示
+        // 「这个账号要重新登录」）。哪天真要支持 OAuth，把这一档拆回两步即可。
+        FailoverAction.TryRefreshThenSwitch -> switchOrGiveUp(state, budget)
 
         FailoverAction.MarkQuotaAndSwitch,
         FailoverAction.SwitchProviderOnly,
@@ -81,10 +76,9 @@ object FailoverLoop {
         -> switchOrGiveUp(state, budget)
     }
 
-    /** 施加一步之后的循环状态。换号才会计数，续期只记一次。 */
+    /** 施加一步之后的循环状态。换号才会计数。 */
     fun advance(state: FailoverState, step: FailoverStep): FailoverState = when (step) {
         FailoverStep.SwitchAccount -> state.copy(switches = state.switches + 1)
-        FailoverStep.RefreshCredentials -> state.copy(refreshed = true)
         else -> state
     }
 

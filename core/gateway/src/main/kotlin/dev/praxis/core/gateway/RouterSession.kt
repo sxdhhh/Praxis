@@ -199,6 +199,12 @@ class RouterSession(
                 key = CooldownKey(attempt.accountId, attempt.wireModel),
                 untilMillis = quotaResetAtMillis,
             )
+            // 垫底（G13，文档 7.4 第 1 行「还有额度时另加垫底」）：该家还有**别的模型**时，
+            // 把这个账号沉到队尾 —— 换号之后其它对话仍能用它，只是排最后。
+            // 只有一个模型的家沉不沉没有区别（整家就这一条），不标。
+            if (candidates.any { it.provider == attempt.provider && it.wireModel != attempt.wireModel }) {
+                state.markSink(attempt.accountId)
+            }
         }
 
         val step = FailoverLoop.onFailure(kind = kind, state = failover, budget = budget)

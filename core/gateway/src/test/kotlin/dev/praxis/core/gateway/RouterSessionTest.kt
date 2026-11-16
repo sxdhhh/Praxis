@@ -62,22 +62,11 @@ class RouterSessionTest {
     }
 
     @Test
-    fun 凭证过期第一次是去续期而不是换号() {
+    fun 凭证过期直接换号并标需要重新登录() {
+        // Praxis 没有续期执行者：第一次失败就换号 + 标 needsRelogin（账号页据此提示）。
         val s = session({ accounts("a1", "a2") })
         val attempt = s.next()!!
 
-        val step = s.onFailure(attempt, FailureKind.CredentialExpired)
-
-        assertEquals(FailoverStep.RefreshCredentials, step)
-        assertTrue("第一次还不该标 needsRelogin", s.needsRelogin.isEmpty())
-    }
-
-    @Test
-    fun 续期之后仍失败才标需要重新登录() {
-        val s = session({ accounts("a1", "a2") })
-        val attempt = s.next()!!
-
-        s.onFailure(attempt, FailureKind.CredentialExpired)
         val step = s.onFailure(attempt, FailureKind.CredentialExpired)
 
         assertEquals(FailoverStep.SwitchAccount, step)
@@ -194,5 +183,37 @@ class RouterSessionTest {
         s.onSuccess(second)
 
         assertNull(state.backoffUntil(second.accountId))
+    }
+
+    // ── 垫底（G13，文档 7.4 第 1 行「还有额度时另加垫底」）──────────
+
+    @Test
+    fun `额度受限且该家还有别的模型时垫底`() {
+        val state = state()
+        val twoModels = listOf(
+            ModelCandidate(provider = "openai", wireModel = "gpt-x"),
+            ModelCandidate(provider = "openai", wireModel = "gpt-y"),
+        )
+        val s = RouterSession(
+            candidates = twoModels,
+            accounts = { accounts("a1", "a2") },
+            state = state,
+        )
+        val attempt = s.next()!!
+
+        s.onFailure(attempt, FailureKind.QuotaLimited, quotaResetAtMillis = now + minute)
+
+        assertTrue("该账号应被沉到队尾", state.sinkUntil("a1") != null)
+    }
+
+    @Test
+    fun `单模型的家不垫底（沉不沉没有区别）`() {
+        val state = state()
+        val s = session({ accounts("a1", "a2") }, state)
+        val attempt = s.next()!!
+
+        s.onFailure(attempt, FailureKind.QuotaLimited, quotaResetAtMillis = now + minute)
+
+        assertNull("整家只有一条模型，垫底没有意义", state.sinkUntil("a1"))
     }
 }
