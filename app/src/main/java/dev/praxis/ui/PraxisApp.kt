@@ -1936,7 +1936,10 @@ fun PraxisApp(
                                     dev.praxis.core.gateway.BuiltinModelsCodec.encodeDetailed(merged),
                                 )
                             } else {
-                                gatewayAccountStore.updateProviderModels(providerId, models.map { it.id })
+                                gatewayAccountStore.updateProviderModelsWithCaps(
+                                    providerId,
+                                    models.map { dev.praxis.core.gateway.BuiltinModelsCodec.from(it) },
+                                )
                                 gatewayRowsRefresh += 1
                             }
                         }

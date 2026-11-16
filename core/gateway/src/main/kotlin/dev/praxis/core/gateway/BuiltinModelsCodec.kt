@@ -170,4 +170,76 @@ object BuiltinModelsCodec {
         if (cleaned.isEmpty()) return current
         return current + (providerId to cleaned)
     }
+
+
+    // ── 自定义家 modelsJson 的两种形状（G3 收尾）──────────────────
+
+    /** 编码「带能力位的清单」为 JSON 数组（写进 providers 表的 modelsJson）。 */
+    fun encodeCapsList(models: List<BuiltinModelCaps>): String = buildJsonArray {
+        models.distinctBy { it.id }.sortedBy { it.id.lowercase() }.forEach { model ->
+            add(buildJsonObject {
+                put("id", model.id)
+                model.supportsImages?.let { put("supports_images", it) }
+                model.supportsReasoning?.let { put("supports_reasoning", it) }
+                model.supportsToolCall?.let { put("supports_tool_call", it) }
+                model.maxInputTokens?.let { put("max_input_tokens", it) }
+                model.maxOutputTokens?.let { put("max_output_tokens", it) }
+            })
+        }
+    }.toString()
+
+    /**
+     * 解析 providers 表的 modelsJson —— 两种历史形状都认：
+     * 旧 = 每行一个名字；新 = JSON 数组（带能力位）。判据看首字符，不是猜格式。
+     */
+    fun parseCapsList(modelsJson: String): List<BuiltinModelCaps> {
+        val text = modelsJson.trim()
+        if (text.isEmpty()) return emptyList()
+        if (!text.startsWith("[")) {
+            return text.split("\n")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .map { BuiltinModelCaps(id = it) }
+        }
+        return decodeDetailedArray(text)
+    }
+
+    private fun decodeDetailedArray(text: String): List<BuiltinModelCaps> =
+        (Json.parseToJsonElement(text) as kotlinx.serialization.json.JsonArray)
+            .mapNotNull { element ->
+                when (element) {
+                    is kotlinx.serialization.json.JsonPrimitive ->
+                        element.contentOrNull?.let { BuiltinModelCaps(id = it) }
+                    is kotlinx.serialization.json.JsonObject -> {
+                        val idEl = element["id"] as? kotlinx.serialization.json.JsonPrimitive
+                        val id = idEl?.contentOrNull ?: return@mapNotNull null
+                        fun bool(key: String): Boolean? =
+                            (element[key] as? kotlinx.serialization.json.JsonPrimitive)
+                                ?.contentOrNull?.toBooleanStrictOrNull()
+                        fun num(key: String): Int? =
+                            (element[key] as? kotlinx.serialization.json.JsonPrimitive)
+                                ?.contentOrNull?.toDoubleOrNull()?.toInt()
+                        BuiltinModelCaps(
+                            id = id,
+                            supportsImages = bool("supports_images"),
+                            supportsReasoning = bool("supports_reasoning"),
+                            supportsToolCall = bool("supports_tool_call"),
+                            maxInputTokens = num("max_input_tokens"),
+                            maxOutputTokens = num("max_output_tokens"),
+                        )
+                    }
+                    else -> null
+                }
+            }
+    /**
+     * 从拉取结果构造条目（core:gateway 依赖 core:ai 是既有方向 —— AiErrorMapping 同）。
+     */
+    fun from(option: dev.praxis.core.ai.AiModelOption): BuiltinModelCaps = BuiltinModelCaps(
+            id = option.id,
+            supportsImages = option.supportsImages,
+            supportsReasoning = option.supportsReasoning,
+            supportsToolCall = option.supportsToolCall,
+            maxInputTokens = option.maxInputTokens,
+            maxOutputTokens = option.maxOutputTokens,
+        )
 }

@@ -249,6 +249,34 @@ class GatewayAccountStore(
         return true
     }
 
+    /**
+     * 写入**带能力位**的清单（G3 收尾）：自定义家也参与带图过滤。
+     * 旧的两参版本保留 —— 手填清单的调用点还在用它。
+     */
+    suspend fun updateProviderModelsWithCaps(
+        id: String,
+        models: List<BuiltinModelsCodec.BuiltinModelCaps>,
+        fetchedAt: Long = System.currentTimeMillis(),
+    ): Boolean {
+        val existing = providers().firstOrNull { it.id == id } ?: return false
+        providerDao.upsert(
+            existing.copy(
+                modelsJson = BuiltinModelsCodec.encodeCapsList(models),
+                modelsFetchedAt = fetchedAt,
+            ),
+        )
+        return true
+    }
+
+    /**
+     * 各自定义家的逐模型能力位（选路查表用）。旧形状（行清单）的条目能力位为 null。
+     */
+    suspend fun customCaps(): Map<String, Map<String, BuiltinModelsCodec.BuiltinModelCaps>> =
+        providers().associate { provider ->
+            provider.id to BuiltinModelsCodec.parseCapsList(provider.modelsJson)
+                .associateBy { it.id }
+        }
+
     suspend fun removeProvider(id: String): Boolean {
         if (providerDao.byId(id) == null) return false
         providerDao.delete(id)
@@ -267,11 +295,9 @@ class GatewayAccountStore(
      * 空行与本该是数字的东西不会被当成模型名：清单里只保留非空行。
      */
     suspend fun nativeModels(): List<NativeModel> = providerDao.all().flatMap { provider ->
-        provider.modelsJson
-            .split('\n')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .map { NativeModel(provider = provider.id, id = it) }
+        // modelsJson 有两种历史形状（行清单 / JSON 数组）：统一走解析器，别在这里猜。
+        BuiltinModelsCodec.parseCapsList(provider.modelsJson)
+            .map { NativeModel(provider = provider.id, id = it.id) }
     }
 
     suspend fun routingViews(): List<AccountView> = accountDao.all().map { entity ->

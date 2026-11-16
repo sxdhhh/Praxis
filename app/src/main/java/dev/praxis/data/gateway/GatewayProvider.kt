@@ -210,6 +210,8 @@ class GatewayProvider(
         // 账号与家清单快照：运行期冷却走 RouteState，不依赖账号表的实时变化。
         val views = store.routingViews()
         val providers = store.providers()
+        // 自定义家的逐模型能力位（G3 收尾）：与内置家查表同一口径 —— 只有明确 false 才拦。
+        val providerCaps = store.customCaps()
 
         val session = RouterSession(
             candidates = chain.candidates,
@@ -221,6 +223,7 @@ class GatewayProvider(
             policy = policy(),
             modelImageCapable = { provider, wireModel ->
                 builtinCaps()[provider]?.get(wireModel)?.supportsImages
+                    ?: providerCaps[provider]?.get(wireModel)?.supportsImages
             },
         )
 
