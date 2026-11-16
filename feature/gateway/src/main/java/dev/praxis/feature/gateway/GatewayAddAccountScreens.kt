@@ -136,8 +136,12 @@ fun GatewayAddLoginScreen(
 ) {
     val topInset = dev.praxis.ui.design.component.LocalTopBarInset.current
     val scrollLimit = dev.praxis.ui.design.component.LocalScrollBottomLimit.current
-    val methods = remember(providerId, baseUrl) {
-        dev.praxis.core.gateway.GatewayLoginMethods.forProvider(providerLabel, baseUrl)
+    // 登录方式来自提供商目录（哪家真有网页登录是**事实**，不是「有地址就给」）。
+    val loginKind = remember(providerId) {
+        dev.praxis.core.gateway.ProviderCatalog.loginOf(providerId)
+    }
+    val methods = remember(providerId, baseUrl, loginKind) {
+        dev.praxis.core.gateway.GatewayLoginMethods.forProvider(providerLabel, baseUrl, loginKind)
     }
     var apiDialogVisible by remember { mutableStateOf(false) }
     var authDialogVisible by remember { mutableStateOf(false) }

@@ -318,6 +318,47 @@ fun PraxisApp(
     // 带启停与能力位，代表「用户明确管过」的那批。
     val gatewayModelStore: dev.praxis.data.gateway.GatewayModelStore =
         org.koin.compose.koinInject()
+    // 内置家的模型清单（拉取后存在设置里）：不并上这一份，内置家的账号就选不出模型。
+    val gatewayBuiltinModelsJson by settingsRepository.gatewayBuiltinModelsJson
+        .collectAsState(initial = null)
+    val gatewayBuiltinModels = remember(gatewayBuiltinModelsJson) {
+        dev.praxis.core.gateway.BuiltinModelsCodec
+            .decode(gatewayBuiltinModelsJson)
+            ?.getOrNull()
+            .orEmpty()
+    }
+
+    /**
+     * 内置家贡献的「原生承载」（provider → 模型名）。
+     *
+     * **只此一份**：三处 [dev.praxis.data.gateway.GatewayProvider] 构造点、模型页候选、
+     * 候选队列、模型测试都从这里取。
+     *
+     * 为什么要把这件事收成一处：此前四处里只有两处并了内置家，
+     * 表现是「内置家拉完清单仍然选不出模型」，而模型测试还会报
+     * 「模型 X 没有对应任何上游」—— 用户会以为清单或账号坏了。
+     */
+    val gatewayBuiltinNativeModels: () -> List<dev.praxis.core.gateway.NativeModel> =
+        remember(gatewayBuiltinModels) {
+            {
+                gatewayBuiltinModels.flatMap { (provider, models) ->
+                    models.map { model ->
+                        dev.praxis.core.gateway.NativeModel(provider = provider, id = model)
+                    }
+                }
+            }
+        }
+
+    /**
+     * 选路用的**合并**清单：自定义家（provider 表）+ 内置家。
+     *
+     * 做成 suspend lambda 而不是 remember 出来的 List：provider 表是 Room 里的真相，
+     * 账号/清单刚变时必须以库里为准 —— 快照会让「刚导入的账号」在候选队列里迟到一拍。
+     */
+    val gatewayNativeModelsForRouting: suspend () -> List<dev.praxis.core.gateway.NativeModel> =
+        remember(gatewayBuiltinNativeModels) {
+            suspend { gatewayAccountStore.nativeModels() + gatewayBuiltinNativeModels() }
+        }
 
     // 模型管理页的行（结构化条目）。写入后靠 gatewayRowsRefresh 重读，
     // 与账号池/候选队列同一个刷新信号 —— 三处显示的是同一份真相。
@@ -339,7 +380,7 @@ fun PraxisApp(
     LaunchedEffect(gatewayRowsRefresh, gatewayModelRulesJson) {
         val fromCatalog = dev.praxis.core.gateway.GatewayModelCatalog
             .visibleNames(
-                nativeModels = gatewayAccountStore.nativeModels(),
+                nativeModels = gatewayNativeModelsForRouting(),
                 mappings = gatewayModelRules.toRoutingMappings(),
             )
         // 两个来源都真实存在，合并而不是二选一：刚导入账号、还没逐条管过模型的用户
@@ -441,7 +482,7 @@ fun PraxisApp(
     LaunchedEffect(gatewayRowsRefresh, gatewayModelRulesJson, modelSettings.activeModel) {
         val candidates = dev.praxis.core.gateway.CandidateChain.of(
             requestedModel = modelSettings.activeModel,
-            nativeModels = gatewayAccountStore.nativeModels(),
+            nativeModels = gatewayNativeModelsForRouting(),
             mappings = gatewayModelRules.toRoutingMappings(),
             defaultProvider = null,
             // 路由组（文档 §5.5）：队列预测也要按组算，否则加了组这里看不到变化。
@@ -741,24 +782,21 @@ fun PraxisApp(
     }
 
 
-    // 内置家的模型清单（拉取后存在设置里）：不并上这一份，内置家的账号就选不出模型。
-    val gatewayBuiltinModelsJson by settingsRepository.gatewayBuiltinModelsJson
-        .collectAsState(initial = null)
-    val gatewayBuiltinModels = remember(gatewayBuiltinModelsJson) {
-        dev.praxis.core.gateway.BuiltinModelsCodec
-            .decode(gatewayBuiltinModelsJson)
-            ?.getOrNull()
-            .orEmpty()
-    }
 
     // 内置家的行（给「自定义提供商」页的「内置家」分区用）：模型数来自拉取结果。
+    // 内置家/插件家的行：**遍历全量目录**（61 家 = 24 直连 + 33 Agent 插件 + 4 网页插件）。
+    //
+    // 插件家也列出来，但 direct=false：登录与客户端伪装在网关的插件进程里，
+    // Praxis 没有那份实现 —— 界面写「经网关使用」，不给点不通的按钮。
     val gatewayBuiltinProviderRows = remember(gatewayBuiltinModels) {
-        dev.praxis.data.gateway.BuiltinProviders.ids().map { id ->
+        dev.praxis.core.gateway.ProviderCatalog.all().map { entry ->
             dev.praxis.feature.gateway.GatewayBuiltinProviderRowUi(
-                id = id,
-                label = dev.praxis.data.gateway.BuiltinProviders.label(id),
-                baseUrl = dev.praxis.data.gateway.BuiltinProviders.baseUrl(id),
-                modelCount = gatewayBuiltinModels[id]?.size ?: 0,
+                id = entry.id,
+                label = entry.label,
+                baseUrl = dev.praxis.data.gateway.BuiltinProviders.baseUrl(entry.id),
+                modelCount = gatewayBuiltinModels[entry.id]?.size ?: 0,
+                direct = entry.direct,
+                loginLabel = dev.praxis.core.gateway.ProviderCatalog.loginLabel(entry.id),
             )
         }
     }
@@ -795,6 +833,7 @@ fun PraxisApp(
         gatewayHttpClient,
         gatewayRouteGroups,
         gatewayRowsRefresh,
+        gatewayBuiltinNativeModels,
     ) {
         dev.praxis.data.gateway.GatewayProvider(
             store = gatewayAccountStore,
@@ -809,6 +848,9 @@ fun PraxisApp(
             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
             replayLog = routeReplayLog,
             groups = { gatewayRouteGroups },
+            // 这一处此前**漏了** builtinModels：内置家的模型在「测试连接」时进不了候选链，
+            // 报「没有对应任何上游」—— 而真实请求（另外两处）是通的。
+            builtinModels = gatewayBuiltinNativeModels,
             budget = dev.praxis.core.gateway.FailoverBudget(
                 maxSwitches = gatewaySystem.maxSwitches,
             ),
@@ -1119,16 +1161,7 @@ fun PraxisApp(
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                             replayLog = routeReplayLog,
                             groups = { gatewayRouteGroups },
-                            builtinModels = {
-                                gatewayBuiltinModels.flatMap { (provider, models) ->
-                                    models.map { model ->
-                                        dev.praxis.core.gateway.NativeModel(
-                                            provider = provider,
-                                            id = model,
-                                        )
-                                    }
-                                }
-                            },
+                            builtinModels = gatewayBuiltinNativeModels,
                             budget = dev.praxis.core.gateway.FailoverBudget(
                                 maxSwitches = gatewaySystem.maxSwitches,
                             ),
@@ -1365,16 +1398,7 @@ fun PraxisApp(
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                             replayLog = routeReplayLog,
                             groups = { gatewayRouteGroups },
-                            builtinModels = {
-                                gatewayBuiltinModels.flatMap { (provider, models) ->
-                                    models.map { model ->
-                                        dev.praxis.core.gateway.NativeModel(
-                                            provider = provider,
-                                            id = model,
-                                        )
-                                    }
-                                }
-                            },
+                            builtinModels = gatewayBuiltinNativeModels,
                             budget = dev.praxis.core.gateway.FailoverBudget(
                                 maxSwitches = gatewaySystem.maxSwitches,
                             ),

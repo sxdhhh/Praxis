@@ -8,26 +8,61 @@ import org.junit.Test
 class GatewayLoginMethodsTest {
 
     @Test
-    fun `直填 Key 永远在第一位`() {
-        // 它是唯一一定成功的方式：不依赖页面能否打开。
-        val methods = GatewayLoginMethods.forProvider("OpenAI", "https://api.openai.com")
-        assertEquals(GatewayLoginType.Api, methods.first().type)
+    fun `只有 API Key 的家不给网页登录`() {
+        // 这就是那条「扯」的修复：api.openai.com 没有网页登录这回事，
+        // 旧实现只要有地址就挂一条「打开登录页」，点开是官网首页。
+        listOf("https://api.openai.com", "https://api.deepseek.com", "https://api.z.ai/api/anthropic")
+            .forEach { url ->
+                val methods = GatewayLoginMethods.forProvider("某 API 家", url)
+                assertEquals("不该有第二种入口：" + url, 1, methods.size)
+                assertEquals(GatewayLoginType.Api, methods.first().type)
+            }
+    }
+
+    @Test
+    fun `确认有网页登录的家才给两个入口`() {
+        val methods = GatewayLoginMethods.forProvider(
+            "Loomy",
+            "https://loomy.example.com",
+            ProviderLoginKind.WebLogin,
+        )
         assertEquals(2, methods.size)
+        assertEquals(GatewayLoginType.Api, methods.first().type)
+        assertEquals(GatewayLoginType.OAuth, methods[1].type)
     }
 
     @Test
-    fun `没有地址时不提供打开登录页`() {
-        // 没地址的按钮会打开空白页 —— 那就是假入口。
-        assertEquals(1, GatewayLoginMethods.forProvider("自定义家", null).size)
-        assertEquals(1, GatewayLoginMethods.forProvider("自定义家", "   ").size)
-        assertEquals(1, GatewayLoginMethods.forProvider("自定义家", "不是地址").size)
+    fun `网页登录的家在没有地址时也只给粘贴入口`() {
+        // 没有地址的按钮会打开空白页 —— 那就是假入口。
+        listOf(null, "   ", "不是地址").forEach { url ->
+            val methods = GatewayLoginMethods.forProvider("某家", url, ProviderLoginKind.WebLogin)
+            assertEquals("url=" + url, 1, methods.size)
+            assertEquals(GatewayLoginType.Api, methods.first().type)
+        }
     }
 
     @Test
-    fun `有 http 地址时给出登录页方式并带上地址`() {
-        val methods = GatewayLoginMethods.forProvider("Anthropic", "https://api.anthropic.com")
+    fun `每种登录方式的文案跟着凭据来源变`() {
+        // 文案指错地方，用户就会去错的地方找 Key。
+        fun label(kind: ProviderLoginKind) =
+            GatewayLoginMethods.forProvider("某家", null, kind).first().label
+        assertTrue(label(ProviderLoginKind.ApiKey).contains("API Key"))
+        assertTrue(label(ProviderLoginKind.TokenImport).contains("令牌"))
+        assertTrue(label(ProviderLoginKind.CookieImport).contains("Cookie"))
+        assertTrue(label(ProviderLoginKind.DeviceCode).contains("设备授权"))
+        // Unknown 按最保守的一条走：跟 ApiKey 同一句话。
+        assertEquals(label(ProviderLoginKind.ApiKey), label(ProviderLoginKind.Unknown))
+    }
+
+    @Test
+    fun `登录页方式要带上确认过的地址`() {
+        val methods = GatewayLoginMethods.forProvider(
+            "Kiro",
+            "https://kiro.example.com",
+            ProviderLoginKind.WebLogin,
+        )
         val oauth = methods.single { it.type == GatewayLoginType.OAuth }
-        assertEquals("https://api.anthropic.com", oauth.landingUrl)
+        assertEquals("https://kiro.example.com", oauth.landingUrl)
         assertTrue(oauth.instructions!!.contains("不代管"))
     }
 

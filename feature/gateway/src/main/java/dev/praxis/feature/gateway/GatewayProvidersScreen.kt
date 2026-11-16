@@ -79,6 +79,16 @@ data class GatewayBuiltinProviderRowUi(
     val baseUrl: String?,
     /** 已拉到的模型数；0 = 还没拉过（这时在内置家上建的账号选不出模型）。 */
     val modelCount: Int = 0,
+    /**
+     * 能不能由 Praxis 自己发请求。
+     *
+     * false = 插件家（Agent / 网页）：登录与客户端伪装都在网关的插件进程里，
+     * Praxis 没有那份实现。它们**能列出来**，但不能在这里拉清单、也不能建本地账号 ——
+     * 界面上如实写「经网关使用」，而不是给一个点不通的按钮。
+     */
+    val direct: Boolean = true,
+    /** 该家实际的登录方式（人话）：直填 API Key / 网页登录 / 设备授权 / 粘贴令牌 / Cookie。 */
+    val loginLabel: String = "",
 )
 
 @Composable
@@ -159,15 +169,21 @@ fun GatewayProvidersScreen(
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
                             MiuixNavigationItemWidget(
                                 title = provider.label + "（" + provider.id + "）",
-                                description = (provider.baseUrl ?: "地址待填") + " · " +
-                                    if (provider.modelCount == 0) {
-                                        "还没有模型清单（点下面拉一次）"
-                                    } else {
-                                        "已拉到 " + provider.modelCount + " 个模型"
-                                    },
+                                description = if (provider.direct) {
+                                    (provider.baseUrl ?: "地址待填") + " · " +
+                                        (if (provider.loginLabel.isEmpty()) "" else provider.loginLabel + " · ") +
+                                        if (provider.modelCount == 0) {
+                                            "还没有模型清单（点下面拉一次）"
+                                        } else {
+                                            "已拉到 " + provider.modelCount + " 个模型"
+                                        }
+                                } else {
+                                    "经网关使用 · " + provider.loginLabel +
+                                        " · 登录与模型目录在网关里，Praxis 不重复实现"
+                                },
                                 onClick = {},
                             )
-                            if (onFetchModels != null) {
+                            if (onFetchModels != null && provider.direct) {
                                 val key = provider.id
                                 val result = fetchResult?.takeIf { it.first == key }?.second
                                 MiuixNavigationItemWidget(

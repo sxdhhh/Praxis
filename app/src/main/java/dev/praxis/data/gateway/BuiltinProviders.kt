@@ -1,5 +1,7 @@
 package dev.praxis.data.gateway
 
+import dev.praxis.core.gateway.ProviderCatalog
+import dev.praxis.core.gateway.ProviderLoginKind
 import dev.praxis.core.gateway.ProviderProtocol
 
 /** 一家的特判（上游 preset-providers.js 的 `quirks` + 账号默认值）。 */
@@ -157,12 +159,26 @@ object BuiltinProviders {
         ),
     )
 
-    /** 全部内置家 id（顺序即上游目录顺序）。 */
+    /**
+     * **只有 Praxis 能直接连的那些**（24 家 API 家）。
+     *
+     * 插件家（Agent / 网页，共 37 家）不在这里：它们的登录与客户端伪装在网关的
+     * 插件进程里，Praxis 拿不到那份实现。要列全用 [ProviderCatalog]。
+     */
     fun ids(): List<String> = TABLE.map { it.id }
 
-    fun label(id: String): String = entry(id)?.label ?: id
+    /** 全部已知家（含插件家），给「提供商目录」页用。 */
+    fun catalogIds(): List<String> = ProviderCatalog.all().map { it.id }
+
+    fun label(id: String): String = entry(id)?.label ?: ProviderCatalog.labelOf(id)
 
     fun baseUrl(id: String): String? = entry(id)?.baseUrl
+
+    /** Praxis 能不能自己连这家（否则只能经网关）。 */
+    fun direct(id: String): Boolean = ProviderCatalog.of(id)?.direct ?: true
+
+    /** 该家实际的登录方式。 */
+    fun loginKind(id: String): ProviderLoginKind = ProviderCatalog.loginOf(id)
 
     /** 协议：**表里有就按表**，没有才按 id 猜（自定义家）。 */
     fun protocol(id: String): ProviderProtocol = entry(id)?.protocol
