@@ -691,6 +691,8 @@ fun PraxisApp(
         dev.praxis.core.imagegen.ImageGenTargetCodec.decode(imageGenTargetJson)
     }
     val imageGenCurrentTarget = imageGenTargetDecoded?.getOrNull()
+    // 配置坏了 ≠ 没选过（G14）：两个态必须分开显示，否则用户以为是自己没配。
+    val imageGenTargetBroken = imageGenTargetDecoded?.isFailure == true
 
     // 形态 C：随包引擎的起停（文档 §1.1 的 C + §3.1 的起法）。
     //
@@ -2165,6 +2167,7 @@ fun PraxisApp(
                     engineLaunchMessage = "已停止"
                 },
                 imageGenCurrentTarget = imageGenCurrentTarget,
+                targetBroken = imageGenTargetBroken,
                 onSelectImageGenTarget = { target ->
                     coroutineScope.launch {
                         settingsRepository.setImageGenTargetJson(

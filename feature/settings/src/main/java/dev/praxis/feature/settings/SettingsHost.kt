@@ -219,6 +219,8 @@ fun SettingsHost(
     onStopEngine: () -> Unit = {},
     /** 当前选中的生图目标（imagegen_target 解码后的值）。 */
     imageGenCurrentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
+    /** imagegen_target 解析失败（G14）。 */
+    targetBroken: Boolean = false,
     onSelectImageGenTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
     imageGenModelsRootPath: String = "",
     /** 下载设置（下载源 + 仅 Wi-Fi，文档 §7.2）。 */
@@ -449,6 +451,7 @@ fun SettingsHost(
             onStartEngine = onStartEngine,
             onStopEngine = onStopEngine,
             imageGenCurrentTarget = imageGenCurrentTarget,
+        targetBroken = targetBroken,
             onSelectImageGenTarget = onSelectImageGenTarget,
             imageGenModelsRootPath = imageGenModelsRootPath,
             imageDownloadSettings = imageDownloadSettings,
@@ -696,6 +699,8 @@ private fun SettingsPageBody(
     onStopEngine: () -> Unit = {},
     /** 当前选中的生图目标（imagegen_target 解码后的值）。 */
     imageGenCurrentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
+    /** imagegen_target 解析失败（G14）。 */
+    targetBroken: Boolean = false,
     onSelectImageGenTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
     imageGenModelsRootPath: String = "",
     /** 下载设置（下载源 + 仅 Wi-Fi，文档 §7.2）。 */
@@ -954,6 +959,7 @@ private fun SettingsPageBody(
             installedModels = imageGenInstalledModels,
             remoteModels = imageGenRemoteModels,
             currentTarget = imageGenCurrentTarget,
+            targetBroken = targetBroken,
             onSelectTarget = onSelectImageGenTarget,
             modelsRootPath = imageGenModelsRootPath,
             downloadSettings = imageDownloadSettings,

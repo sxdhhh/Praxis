@@ -91,6 +91,8 @@ fun ImageGenRoute(
     installedModels: List<dev.praxis.core.imagegen.ImageModel>,
     /** 当前选中的生图目标；null = 还没选。 */
     currentTarget: dev.praxis.core.imagegen.ImageGenTarget? = null,
+    /** imagegen_target 解析失败（内容被改坏）：必须让用户看见，而不是当成「还没选」（G14）。 */
+    targetBroken: Boolean = false,
     /** 选完写回 imagegen_target。 */
     onSelectTarget: (dev.praxis.core.imagegen.ImageGenTarget) -> Unit = {},
     /** 模型目录的绝对路径（只读展示，方便用户自己放文件）。 */
@@ -279,7 +281,12 @@ fun ImageGenRoute(
                     style = MiuixTheme.textStyles.body2,
                 )
                 Text(
-                    text = targetLine(currentTarget, installedModels),
+                    text = if (targetBroken) {
+                        "生图目标配置读不出来（可能被手动改坏）。请在下方「重新选择」里重选一次；" +
+                            "下次下载完成时会自动接管。"
+                    } else {
+                        targetLine(currentTarget, installedModels)
+                    },
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 6.dp),
