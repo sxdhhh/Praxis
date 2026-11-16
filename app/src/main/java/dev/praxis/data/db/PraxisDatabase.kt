@@ -46,7 +46,7 @@ import dev.praxis.core.data.gateway.GatewayProviderEntity
         GatewayRequestEntity::class,
         GatewayDailyEntity::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = true,
 )
 abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.CharacterDatabase {
@@ -468,6 +468,21 @@ abstract class PraxisDatabase : RoomDatabase(), dev.praxis.core.data.character.C
          * 文档 §5.4.1 第 17 条要的「快照 + 缓存」：modelsJson 是快照，
          * 这一列是它的时间戳。默认 0 = 从没成功过（一律算不新鲜）。
          */
+        /**
+         * 16 -> 17：gateway_account 加「每分钟请求上限」。
+         *
+         * G4 的数据源：planner 的每账号 RPM 过滤读这一列，0 = 不限（默认，
+         * 与旧行为一致 —— 没配过上限的账号不会被误拦）。ALTER + DEFAULT 0
+         * 是 SQLite 安全的加列方式，不需要重写表。
+         */
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `gateway_account` ADD COLUMN `requestLimitPerMinute` INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
         val MIGRATION_15_16 = object : Migration(15, 16) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(

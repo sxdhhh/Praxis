@@ -18,6 +18,10 @@ data class GatewayAccountRow(
     val status: GatewayAccountStatus,
     /** 凭证过期待重新登录（G5 降级后的可见信号）。成功一次即清。 */
     val needsRelogin: Boolean = false,
+    /** 并发上限；0 = 不限（G4 的编辑入口数据面）。 */
+    val maxConcurrent: Int = 0,
+    /** 每分钟请求上限；0 = 不限。 */
+    val requestLimitPerMinute: Int = 0,
 ) {
     companion object {
 

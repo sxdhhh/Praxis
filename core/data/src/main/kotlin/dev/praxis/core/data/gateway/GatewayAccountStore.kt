@@ -278,6 +278,25 @@ class GatewayAccountStore(
                 .associateBy { it.id }
         }
 
+    /**
+     * 更新账号的并发 / 每分钟上限（G4 的编辑入口数据面）。
+     * 0 = 不限。**不碰凭证**：改上限不该触发重新加密。
+     */
+    suspend fun updateAccountLimits(
+        id: String,
+        maxConcurrent: Int,
+        requestLimitPerMinute: Int,
+    ): Boolean {
+        val existing = accountDao.byId(id) ?: return false
+        accountDao.upsert(
+            existing.copy(
+                maxConcurrent = maxConcurrent.coerceAtLeast(0),
+                requestLimitPerMinute = requestLimitPerMinute.coerceAtLeast(0),
+            ),
+        )
+        return true
+    }
+
     suspend fun removeProvider(id: String): Boolean {
         if (providerDao.byId(id) == null) return false
         providerDao.delete(id)
@@ -324,6 +343,8 @@ class GatewayAccountStore(
             enabled = entity.enabled,
             wireModels = wireModelsOf(entity.id),
             state = state,
+            maxConcurrent = entity.maxConcurrent,
+            requestLimitPerMinute = entity.requestLimitPerMinute,
         )
     }
 }

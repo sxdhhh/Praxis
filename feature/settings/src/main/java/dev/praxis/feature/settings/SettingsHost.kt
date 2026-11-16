@@ -76,6 +76,8 @@ fun SettingsHost(
      * 没有默认值：这是会真的改状态的操作，不该有一个「忘了传就静默无效」的默认实现。
      */
     onClearGatewayRuntime: (List<String>) -> Unit,
+    /** 更新账号上限（G4 编辑入口）。 */
+    onUpdateAccountLimits: (id: String, maxConcurrent: Int, requestLimitPerMinute: Int) -> Unit = { _, _, _ -> },
     /** 路由页：当前对外模型名。 */
     gatewayQueueModelName: String = "",
     /** 路由页：候选队列。 */
@@ -379,6 +381,7 @@ fun SettingsHost(
             navigator = navigator,
             gatewayAccountRows = gatewayAccountRows,
             onClearGatewayRuntime = onClearGatewayRuntime,
+            onUpdateAccountLimits = onUpdateAccountLimits,
             gatewayImportReport = gatewayImportReport,
             gatewayImportResult = gatewayImportResult,
             gatewayImportError = gatewayImportError,
@@ -580,6 +583,8 @@ private fun SettingsPageBody(
     gatewayAccountRows: List<dev.praxis.core.gateway.GatewayAccountRow> = emptyList(),
     /** 批量清空运行期状态（见 [SettingsHost] 上的同名参数）。 */
     onClearGatewayRuntime: (List<String>) -> Unit = {},
+    /** 更新账号上限（G4 编辑入口）。 */
+    onUpdateAccountLimits: (id: String, maxConcurrent: Int, requestLimitPerMinute: Int) -> Unit = { _, _, _ -> },
     gatewayQueueModelName: String = "",
     gatewayQueueEntries: List<dev.praxis.core.gateway.GatewayQueueEntry> = emptyList(),
     gatewayAccountNames: Map<String, String> = emptyMap(),
@@ -1075,6 +1080,7 @@ private fun SettingsPageBody(
             rows = gatewayAccountRows,
             onMove = { _, _ -> },
             onOpenAccount = { },
+            onUpdateAccountLimits = onUpdateAccountLimits,
             onClearRuntime = onClearGatewayRuntime,
             modifier = modifier,
         )

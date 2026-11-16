@@ -36,6 +36,7 @@ import dev.praxis.ui.widgets.MiuixSelectableRow
 import dev.praxis.ui.widgets.SettingsSectionHeader
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.Card
+import dev.praxis.ui.widgets.MiuixIntNumberPickerWidget
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -67,6 +68,8 @@ fun GatewayAccountsScreen(
      * （测试 / 导出 / 删除）要等 P1 的请求通道与导入导出界面，暂不放假按钮。
      */
     onClearRuntime: (List<String>) -> Unit,
+    /** 更新账号的并发 / 每分钟上限（G4 编辑入口）。 */
+    onUpdateAccountLimits: (id: String, maxConcurrent: Int, requestLimitPerMinute: Int) -> Unit = { _, _, _ -> },
     /**
      * 手动添加一个账号（文档 §9.3）。
      *
@@ -89,6 +92,7 @@ fun GatewayAccountsScreen(
     // 就地取导航：这一页要把「添加账号」推进三级流程的第一步。
     val navigator = dev.praxis.ui.navigation.LocalNavigator.current
     var addVisible by remember { mutableStateOf(false) }
+    var limitsTarget by remember { mutableStateOf<GatewayAccountRow?>(null) }
     // 顶栏是浮层：内容要能滚到它下面（否则渐进模糊采不到内容，退化成一块实色）。
     val topInset = dev.praxis.ui.design.component.LocalTopBarInset.current
     // 底栏同理：滚动终点必须抬高，否则最后一项被压住看不见。
@@ -214,7 +218,7 @@ fun GatewayAccountsScreen(
                     itemName = { it.name },
                     itemDescription = { describe(it, nowMillis) },
                     onMove = onMove,
-                    onItemClick = { onOpenAccount(it.id) },
+                    onItemClick = { row -> limitsTarget = row },
                     modifier = Modifier.padding(horizontal = 12.dp),
                 ) { row ->
                     StatusBadge(row.status)
@@ -224,7 +228,68 @@ fun GatewayAccountsScreen(
                                     textColor = MiuixTheme.colorScheme.error,
                                 )
                             }
+                            if (row.maxConcurrent > 0 || row.requestLimitPerMinute > 0) {
+                                MiuixBadge(
+                                    text = "上限 " + row.maxConcurrent + " / " + row.requestLimitPerMinute + " 分",
+                                    textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                            limitsTarget?.let { target ->
+                                if (target.id == row.id) {
+                                    MiuixBadge(
+                                        text = "编辑中…",
+                                        textColor = MiuixTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
                 }
+            }
+        }
+    }
+
+    // 上限编辑（G4 编辑入口）：常驻挂载，visible 控制显隐。
+    MiuixAnimatedDialog(visible = limitsTarget != null, onDismissRequest = { limitsTarget = null }) {
+        val target = limitsTarget ?: return@MiuixAnimatedDialog
+        var maxC by remember(target.id) { mutableStateOf(if (target.maxConcurrent > 0) target.maxConcurrent else 0) }
+        var rpm by remember(target.id) { mutableStateOf(if (target.requestLimitPerMinute > 0) target.requestLimitPerMinute else 0) }
+        Card {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(text = "账号上限 · " + target.name, style = MiuixTheme.textStyles.body1)
+                Text(
+                    text = "0 = 不限。上限是**保护**不是惩罚：撞到就跳过并给原因，不是禁用账号。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                MiuixIntNumberPickerWidget(
+                    title = "并发上限",
+                    description = "同时进行中的请求数",
+                    value = maxC,
+                    startInt = 0,
+                    endInt = 10,
+                    onValueChange = { maxC = it },
+                )
+                MiuixIntNumberPickerWidget(
+                    title = "每分钟请求上限",
+                    description = "窗口内最多发起几次（含测试连接）",
+                    value = rpm,
+                    startInt = 0,
+                    endInt = 120,
+                    onValueChange = { rpm = it },
+                )
+                MiuixNavigationItemWidget(
+                    title = "保存",
+                    description = "写入后立刻参与选路",
+                    onClick = {
+                        onUpdateAccountLimits(target.id, maxC, rpm)
+                        limitsTarget = null
+                    },
+                )
+                MiuixNavigationItemWidget(
+                    title = "取消",
+                    description = "什么也不改",
+                    onClick = { limitsTarget = null },
+                )
             }
         }
     }

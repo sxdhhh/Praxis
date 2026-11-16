@@ -28,6 +28,8 @@ data class GatewayAccountEntity(
     val priority: Int,
     /** 0 = 不限。 */
     val maxConcurrent: Int,
+    /** 每分钟请求上限；0 = 不限（G4）。 */
+    val requestLimitPerMinute: Int = 0,
     /** 加密 JSON：{ apiKey } 或 { accessToken, refreshToken }。 */
     val credentialsCipher: String,
     /** 凭证到期时刻；null = 不知道。 */

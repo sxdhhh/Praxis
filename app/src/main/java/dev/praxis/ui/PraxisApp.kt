@@ -2230,6 +2230,12 @@ fun PraxisApp(
                     ids.forEach { gatewayRouteState.onSuccess(it) }
                     gatewayRowsRefresh += 1
                 },
+                onUpdateAccountLimits = { id, maxC, rpm ->
+                    coroutineScope.launch {
+                        gatewayAccountStore.updateAccountLimits(id, maxC, rpm)
+                        gatewayRowsRefresh += 1
+                    }
+                },
                 gatewayModelOptions = gatewayModelOptions,
                 gatewayQueueModelName = modelSettings.activeModel,
                 gatewayQueueEntries = gatewayQueueEntries,

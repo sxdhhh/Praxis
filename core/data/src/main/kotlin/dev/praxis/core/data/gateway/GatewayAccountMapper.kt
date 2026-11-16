@@ -20,7 +20,6 @@ fun GatewayAccountEntity.toAccountView(
     supportsImages: Boolean? = null,
     runningConcurrent: Int = 0,
     requestsThisMinute: Int = 0,
-    requestLimitPerMinute: Int = 0,
 ): AccountView = AccountView(
     id = id,
     providerId = providerId,
