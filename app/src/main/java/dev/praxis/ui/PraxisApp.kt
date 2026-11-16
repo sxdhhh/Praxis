@@ -676,6 +676,11 @@ fun PraxisApp(
         org.koin.compose.koinInject()
     var engineRunning by remember { mutableStateOf(false) }
     var engineLaunchMessage by remember { mutableStateOf<String?>(null) }
+    // 引擎自己退出（崩溃 / 被系统杀）时把「运行中」翻回来 —— 没有它，
+    // 按钮停在「停止引擎」，用户没法重启，界面对现实撒谎。
+    androidx.compose.runtime.LaunchedEffect(engineProcess) {
+        engineProcess.onExit = { engineRunning = false }
+    }
     // 引擎装没装：nativeLibraryDir 里有没有那个 .so（自用构建才有）。
     val engineBundledInstalled = remember { engineProcess.isInstalled() }
     // QNN 运行时（NPU 路线）：解出来才给引擎当 --lib_dir。

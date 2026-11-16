@@ -4,6 +4,7 @@ import dev.praxis.core.imagegen.EngineLaunchError
 import dev.praxis.core.imagegen.EngineLaunchRules
 import dev.praxis.core.imagegen.EngineLaunchSpec
 import java.io.File
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
@@ -40,6 +41,14 @@ class EngineProcess(
 
     private var process: Process? = null
     private val stopping = AtomicBoolean(false)
+
+    /**
+     * 引擎退出时的回调（UI 用来把「运行中」翻回「已停止」）。
+     *
+     * 此前 UI 只在**点击时**同步运行状态：引擎自己崩了的话，按钮永远停在
+     * 「停止引擎」，用户没法重启（界面上以为还在跑）。这个回调让它能跟上现实。
+     */
+    var onExit: (() -> Unit)? = null
 
     /** 日志尾部：启动失败时最有用的东西（引擎把 usage/错误都打在 stdout）。 */
     private val logLines = ArrayDeque<String>()
@@ -87,6 +96,14 @@ class EngineProcess(
                 .redirectErrorStream(true)
                 .start()
             process = started
+            // 存活看护：进程退出时清引用并通知 UI。没有它，「崩了但按钮说还在跑」。
+            thread(isDaemon = true, name = "praxis-engine-watch") {
+                runCatching { started.waitFor() }
+                process = null
+                if (!stopping.get()) {
+                    onExit?.let { runCatching { it() } }
+                }
+            }
             // 收日志尾部（有界）：不读会阻塞子进程；全读会吃内存。
             thread(isDaemon = true, name = "praxis-engine-log") {
                 runCatching {
@@ -111,11 +128,29 @@ class EngineProcess(
         }
     }
 
-    /** 停引擎（用户点「停止」或切换模型时用）。 */
+    /**
+     * 停引擎（用户点「停止」或切换模型时用）。
+     *
+     * ## 为什么宽限放在子线程而不是调用线程
+     *
+     * 文档 §8.6 要求给引擎 2 秒收尾（可能有正在写的图片文件）；但调用方在
+     * 组合作用域里，阻塞 2 秒就是 ANR。所以这里立即返回，宽限与强杀
+     * 交给守护线程 —— UI 的「已停止」立刻生效，端口由引擎自己释放。
+     */
     fun stop() {
         stopping.set(true)
-        runCatching { process?.destroy() }
+        val current = process
         process = null
+        runCatching { current?.destroy() }
+        if (current != null) {
+            thread(isDaemon = true, name = "praxis-engine-stop") {
+                val exited = runCatching { current.waitFor(2, TimeUnit.SECONDS) }.getOrDefault(false)
+                if (!exited) {
+                    runCatching { current.destroyForcibly() }
+                    runCatching { current.waitFor() }
+                }
+            }
+        }
     }
 
     /** 最近日志（最多 [LOG_TAIL_LINES] 行）。 */
