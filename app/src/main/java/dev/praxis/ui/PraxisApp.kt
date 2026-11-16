@@ -1953,8 +1953,10 @@ fun PraxisApp(
                                 settingsRepository.setGatewayBuiltinModelsFetchedAtJson(
                                     kotlinx.serialization.json.buildJsonObject {
                                         // 合并写回：只更新这一家，别把别家的时刻抹掉。
-                                        gatewayBuiltinFetchedAt.forEach { (id, at) -> put(id, at) }
-                                        put(providerId, System.currentTimeMillis())
+                                        gatewayBuiltinFetchedAt.forEach { (id, at) ->
+                                            put(id, kotlinx.serialization.json.JsonPrimitive(at))
+                                        }
+                                        put(providerId, kotlinx.serialization.json.JsonPrimitive(System.currentTimeMillis()))
                                     }.toString(),
                                 )
                             } else {
