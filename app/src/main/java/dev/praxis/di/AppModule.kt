@@ -592,9 +592,35 @@ val appModule = module {
                                 ?.getOrNull()
                                 ?: dev.praxis.core.imagegen.ImageGenDefaults()
                         },
-                        // 档位校验暂时只做全局范围（256~1024）：目录里每个模型只记了一个
-                        // 默认尺寸，拿它当「唯一可用档位」会把 512x768 这类合法请求拦掉。
-                        availableSizes = { emptyList() },
+                        // 档位校验：
+                        // - CPU / 远端：只做全局范围（256~1024）。目录里每个模型只记了一个
+                        //   默认尺寸，拿它当「唯一可用档位」会把 512x768 这类合法请求拦掉。
+                        // - sd15npu：**锁死 512x512**。原因（G4）：引擎的 --patch 在生产路径
+                        //   从不传入（资产里也没有 .patch 文件），非 512 画布会被引擎**静默
+                        //   回落 512**——用户拿到尺寸不对的图且没有任何报错。与其假装支持，
+                        //   不如在这里如实给 invalid_size 与可用档位说明。
+                        availableSizes = {
+                            val modelId = (
+                                dev.praxis.core.imagegen.ImageGenTargetCodec
+                                    .decode(settings.imageGenTargetJson.first())
+                                    ?.getOrNull() as? dev.praxis.core.imagegen.ImageGenTarget.Local
+                            )?.modelId
+                            if (modelId == null) {
+                                emptyList()
+                            } else {
+                                val model = dev.praxis.core.imagegen.ImageModelCatalog
+                                    .builtin(soc)
+                                    .filter {
+                                        dev.praxis.core.imagegen.ImageModelCatalog.isInstalled(modelsRoot, it)
+                                    }
+                                    .firstOrNull { it.id == modelId }
+                                if (model?.backendType == "sd15npu") {
+                                    listOf(512 to 512)
+                                } else {
+                                    emptyList()
+                                }
+                            }
+                        },
                         saveImage = { bytes ->
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 if (!imageDir.exists()) imageDir.mkdirs()
