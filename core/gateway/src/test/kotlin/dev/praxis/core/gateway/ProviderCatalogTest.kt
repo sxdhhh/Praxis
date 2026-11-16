@@ -58,12 +58,39 @@ class ProviderCatalogTest {
 
     @Test
     fun `有证据的登录方式被记住`() {
-        // 这四条都有上游出处（插件文档 / 插件仓库 README），改错会让用户去错的地方找凭据。
+        // 全部来自取证矩阵（lookme/index/read/07-provider-login-matrix.md，
+        // 基准 ProvidersPlugin/Agent2Providers main@3055f41）：协议申报 + login_start 实现双证据。
         assertEquals(ProviderLoginKind.ApiKey, ProviderCatalog.loginOf("commandcode"))
+        assertEquals(ProviderLoginKind.ApiKey, ProviderCatalog.loginOf("modelscope"))
         assertEquals(ProviderLoginKind.DeviceCode, ProviderCatalog.loginOf("qwenwork"))
+        assertEquals(ProviderLoginKind.DeviceCode, ProviderCatalog.loginOf("cline-free"))
         assertEquals(ProviderLoginKind.CookieImport, ProviderCatalog.loginOf("doubaowork"))
         assertEquals(ProviderLoginKind.TokenImport, ProviderCatalog.loginOf("raccoon"))
         assertEquals(ProviderLoginKind.CookieImport, ProviderCatalog.loginOf("deepseek-web"))
+        assertEquals(ProviderLoginKind.WebLogin, ProviderCatalog.loginOf("kiro"))
+        assertEquals(ProviderLoginKind.WebLogin, ProviderCatalog.loginOf("zcode"))
+        assertEquals(ProviderLoginKind.WebLogin, ProviderCatalog.loginOf("antigravity"))
+    }
+
+    @Test
+    fun `短信登录与网页登录分开`() {
+        // loomy 与 autoclaw 国内版走的是上游短信接口，不是网页；
+        // 混成「网页登录」会让界面打开一个没有意义的页面。
+        assertEquals(ProviderLoginKind.SmsCode, ProviderCatalog.loginOf("loomy"))
+        assertEquals(ProviderLoginKind.SmsCode, ProviderCatalog.loginOf("autoclaw"))
+        assertEquals("手机号验证码", ProviderCatalog.loginLabel("autoclaw"))
+        // 而国际版确实走网页（两跳 OAuth）。
+        assertEquals(ProviderLoginKind.WebLogin, ProviderCatalog.loginOf("autoclaw-intl"))
+    }
+
+    @Test
+    fun `只剩未公开源码的网页家有未知`() {
+        // 有源码的 34 家已全部取证；只剩网页插件包那三家（源码不在公开仓库）保持 Unknown。
+        val unknown = ProviderCatalog.all()
+            .filter { it.login == ProviderLoginKind.Unknown }
+            .map { it.id }
+            .sorted()
+        assertEquals(listOf("chatglm", "tabbit", "tabbit-intl"), unknown)
     }
 
     @Test
@@ -72,7 +99,10 @@ class ProviderCatalogTest {
         assertEquals("网页登录", ProviderCatalog.loginLabel("kiro"))
         assertEquals("官方设备授权", ProviderCatalog.loginLabel("qwenwork"))
         assertEquals("网页 Cookie / userToken", ProviderCatalog.loginLabel("deepseek-web"))
-        assertEquals("上游未声明登录方式", ProviderCatalog.loginLabel("qoder"))
+        // 取证之后 qoder 不再是未知：它是 PKCE 设备授权。
+        assertEquals("官方设备授权", ProviderCatalog.loginLabel("qoder"))
+        // 真正未知的只剩源码未公开的网页家。
+        assertEquals("上游未声明登录方式", ProviderCatalog.loginLabel("tabbit"))
     }
 
     @Test

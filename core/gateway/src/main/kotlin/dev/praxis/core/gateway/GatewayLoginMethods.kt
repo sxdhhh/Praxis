@@ -84,6 +84,13 @@ object GatewayLoginMethods {
                 landingUrl = null,
             )
 
+            ProviderLoginKind.SmsCode -> GatewayLoginMethod(
+                type = GatewayLoginType.Api,
+                label = "粘贴短信登录后的令牌",
+                instructions = "该家用手机号验证码登录官方客户端或网页，登录后把拿到的令牌粘到这里。",
+                landingUrl = null,
+            )
+
             ProviderLoginKind.CookieImport -> GatewayLoginMethod(
                 type = GatewayLoginType.Api,
                 label = "粘贴网页 Cookie / userToken",

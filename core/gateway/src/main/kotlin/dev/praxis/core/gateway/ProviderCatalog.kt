@@ -42,6 +42,15 @@ enum class ProviderLoginKind {
     /** 需要网页会话 Cookie。 */
     CookieImport,
 
+    /**
+     * 手机号验证码。
+     *
+     * 与 [WebLogin] 分开：它没有网页可打开，走的是上游短信接口
+     * （上游申报的就是 `LoginMethod::Sms`）。混成「网页登录」会让界面
+     * 打开一个没有意义的页面。
+     */
+    SmsCode,
+
     /** 上游/插件文档没写明 —— 不猜。 */
     Unknown,
 }
@@ -114,51 +123,56 @@ object ProviderCatalog {
         ProviderEntry("sensenova", "商汤日日新", 23, ProviderKind.Api, ProviderLoginKind.ApiKey),
     )
 
-    /** Agent 插件家：登录与客户端伪装都在网关的插件进程里。 */
+    /**
+     * Agent 插件家：登录与客户端伪装都在网关的插件进程里。
+     *
+     * 登录方式逐家来自取证矩阵（lookme/index/read/07-provider-login-matrix.md，
+     * 基准 ProvidersPlugin/Agent2Providers main@3055f41）：协议申报的 `LoginMethod`
+     * 与 `login_start` 实现双证据，没有证据的写 Unknown。
+     */
     private val AGENT: List<ProviderEntry> = listOf(
-        ProviderEntry("commandcode", "Command Code", 1, ProviderKind.AgentPlugin, ProviderLoginKind.ApiKey, "插件文档：使用静态 API Key"),
-        ProviderEntry("modelscope", "ModelScope 国内版", 2, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("modelscope-intl", "ModelScope 国际版", 3, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("orcaterm", "OrcaTerm", 4, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("loomy", "Loomy", 5, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "插件文档：凭证失效需重新登录"),
-        ProviderEntry("lobsterai", "LobsterAI", 6, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("raccoon", "小浣熊", 7, ProviderKind.AgentPlugin, ProviderLoginKind.TokenImport, "插件文档：本机导入客户端登录态"),
-        ProviderEntry("atomcode", "AtomCode", 8, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("autoclaw", "AutoClaw 国内版", 10, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("autoclaw-intl", "AutoClaw 国际版", 11, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("officeace", "OfficeAce 果办", 12, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("zcode", "ZCode 国内版", 13, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("zcode-intl", "ZCode 国际版", 14, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("workbuddy", "WorkBuddy 国内版", 15, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("workbuddy-intl", "WorkBuddy 国际版", 16, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("cline-free", "Cline 免费池", 17, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("cline-pass", "Cline 订阅池", 18, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("kuku", "KukuAI 库库", 19, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("monkeycode", "MonkeyCode 国内版", 20, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("monkeycode-intl", "MonkeyCode 国际版", 21, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("qoder", "Qoder 中国版", 22, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("qoder-intl", "Qoder 国际版", 23, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("qwenwork", "千问办公 国内版", 24, ProviderKind.AgentPlugin, ProviderLoginKind.DeviceCode, "插件文档：官方设备授权页轮询收账号"),
-        ProviderEntry("qwenwork-intl", "千问办公 国际版", 25, ProviderKind.AgentPlugin, ProviderLoginKind.DeviceCode, "与国内版同一套设备授权页"),
-        ProviderEntry("trae", "Trae", 26, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("catpaw", "CatPaw", 27, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("accio", "Accio 国际版", 28, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("accio-cn", "Accio 国内版", 29, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("codearts", "CodeArts", 30, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("antigravity", "Antigravity", 31, ProviderKind.AgentPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("doubaowork", "豆包工作", 32, ProviderKind.AgentPlugin, ProviderLoginKind.CookieImport, "插件文档：官方页面登录或完整 Cookie"),
-        ProviderEntry("kiro", "Kiro", 33, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "插件仓库 README：浏览器登录，回调落本机 loopback"),
-        ProviderEntry("astudio", "AStudio", 34, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "插件仓库 README：内嵌本机登录页（手机号/密码）"),
+        ProviderEntry("commandcode", "Command Code", 1, ProviderKind.AgentPlugin, ProviderLoginKind.ApiKey, "静态 API Key；另有设备指纹预请求"),
+        ProviderEntry("modelscope", "ModelScope 国内版", 2, ProviderKind.AgentPlugin, ProviderLoginKind.ApiKey, "ms- 令牌，同一串兼作 Cookie 值"),
+        ProviderEntry("modelscope-intl", "ModelScope 国际版", 3, ProviderKind.AgentPlugin, ProviderLoginKind.ApiKey, "同上，两站账号体系独立"),
+        ProviderEntry("orcaterm", "OrcaTerm", 4, ProviderKind.AgentPlugin, ProviderLoginKind.ApiKey, "可粘 JWT / data.bin；另支持微信扫码与桌面端导入"),
+        ProviderEntry("loomy", "Loomy", 5, ProviderKind.AgentPlugin, ProviderLoginKind.SmsCode, "上游申报 LoginMethod::Sms（手机号验证码）"),
+        ProviderEntry("lobsterai", "LobsterAI", 6, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "网页登录，回调落 127.0.0.1"),
+        ProviderEntry("raccoon", "小浣熊", 7, ProviderKind.AgentPlugin, ProviderLoginKind.TokenImport, "可粘贴 auth.json / accessToken，或实时读桌面端"),
+        ProviderEntry("atomcode", "AtomCode", 8, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "网页登录；授权在上游终结，无本机回调"),
+        ProviderEntry("autoclaw", "AutoClaw 国内版", 10, ProviderKind.AgentPlugin, ProviderLoginKind.SmsCode, "国内版唯一入口是手机号验证码"),
+        ProviderEntry("autoclaw-intl", "AutoClaw 国际版", 11, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "两跳 OAuth，本机回调"),
+        ProviderEntry("officeace", "OfficeAce 果办", 12, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "华为云 OAuth；云端回调页不回跳本机"),
+        ProviderEntry("zcode", "ZCode 国内版", 13, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "CLI 轮询授权，上游明确拒绝本机回调"),
+        ProviderEntry("zcode-intl", "ZCode 国际版", 14, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "同一套 CLI 轮询"),
+        ProviderEntry("workbuddy", "WorkBuddy 国内版", 15, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "打开 authUrl 后轮询取 token，无本机回调"),
+        ProviderEntry("workbuddy-intl", "WorkBuddy 国际版", 16, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "同上，platform 段不同"),
+        ProviderEntry("cline-free", "Cline 免费池", 17, ProviderKind.AgentPlugin, ProviderLoginKind.DeviceCode, "WorkOS 设备码（RFC 8628）"),
+        ProviderEntry("cline-pass", "Cline 订阅池", 18, ProviderKind.AgentPlugin, ProviderLoginKind.DeviceCode, "同一实现按池参数化"),
+        ProviderEntry("kuku", "KukuAI 库库", 19, ProviderKind.AgentPlugin, ProviderLoginKind.CookieImport, "网页登录后取 BDUSS，或直接粘 Cookie"),
+        ProviderEntry("monkeycode", "MonkeyCode 国内版", 20, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "内嵌窗口登录 + 验证码，宿主回收 session"),
+        ProviderEntry("monkeycode-intl", "MonkeyCode 国际版", 21, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "同上，Region 参数化"),
+        ProviderEntry("qoder", "Qoder 中国版", 22, ProviderKind.AgentPlugin, ProviderLoginKind.DeviceCode, "PKCE 设备授权；另可粘 PAT"),
+        ProviderEntry("qoder-intl", "Qoder 国际版", 23, ProviderKind.AgentPlugin, ProviderLoginKind.DeviceCode, "同上"),
+        ProviderEntry("qwenwork", "千问办公 国内版", 24, ProviderKind.AgentPlugin, ProviderLoginKind.DeviceCode, "官方设备授权页，轮询收账号；无 PAT"),
+        ProviderEntry("qwenwork-intl", "千问办公 国际版", 25, ProviderKind.AgentPlugin, ProviderLoginKind.DeviceCode, "与国内版同一套设备授权"),
+        ProviderEntry("trae", "Trae", 26, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "网页登录，302 回 127.0.0.1"),
+        ProviderEntry("catpaw", "CatPaw", 27, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "passport 登录后把 token POST 到本机；另可粘 accessToken"),
+        ProviderEntry("accio", "Accio 国际版", 28, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "loopback + PKCE(S256)"),
+        ProviderEntry("accio-cn", "Accio 国内版", 29, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "同上，区域 CN"),
+        ProviderEntry("codearts", "CodeArts", 30, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "loopback + PKCE + DPoP；另可粘 AK/SK"),
+        ProviderEntry("antigravity", "Antigravity", 31, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "Google OAuth，一轮一个随机端口"),
+        ProviderEntry("doubaowork", "豆包工作", 32, ProviderKind.AgentPlugin, ProviderLoginKind.CookieImport, "官方页面登录后保存完整 Cookie"),
+        ProviderEntry("kiro", "Kiro", 33, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "门户 OAuth，监听 Kiro IDE 那组端口；另可导入登录态"),
+        ProviderEntry("astudio", "AStudio", 34, ProviderKind.AgentPlugin, ProviderLoginKind.WebLogin, "本机内嵌登录页（手机号/密码 + 滑块）"),
     )
 
     /** 网页插件家：上游是网页会话，凭据是 Cookie / userToken。 */
     private val WEB: List<ProviderEntry> = listOf(
-        ProviderEntry("chatglm", "智谱清言", 0, ProviderKind.WebPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("deepseek-web", "DeepSeek 网页", 1, ProviderKind.WebPlugin, ProviderLoginKind.CookieImport, "插件文档：userToken 与 Cookie"),
-        ProviderEntry("tabbit", "Tabbit 国内版", 2, ProviderKind.WebPlugin, ProviderLoginKind.Unknown),
-        ProviderEntry("tabbit-intl", "Tabbit 国际版", 3, ProviderKind.WebPlugin, ProviderLoginKind.Unknown),
+        ProviderEntry("chatglm", "智谱清言", 0, ProviderKind.WebPlugin, ProviderLoginKind.Unknown, "实现在网页插件包内，源码未公开，未确认"),
+        ProviderEntry("deepseek-web", "DeepSeek 网页", 1, ProviderKind.WebPlugin, ProviderLoginKind.CookieImport, "插件文档：使用本人 userToken 与 Cookie"),
+        ProviderEntry("tabbit", "Tabbit 国内版", 2, ProviderKind.WebPlugin, ProviderLoginKind.Unknown, "源码未公开，未确认"),
+        ProviderEntry("tabbit-intl", "Tabbit 国际版", 3, ProviderKind.WebPlugin, ProviderLoginKind.Unknown, "源码未公开，未确认"),
     )
-
     /** 全部条目：API 家在前，插件家在后（与界面分组一致）。 */
     fun all(): List<ProviderEntry> = API + AGENT + WEB
 
@@ -190,6 +204,7 @@ object ProviderCatalog {
         ProviderLoginKind.DeviceCode -> "官方设备授权"
         ProviderLoginKind.TokenImport -> "粘贴 / 导入令牌"
         ProviderLoginKind.CookieImport -> "网页 Cookie / userToken"
+        ProviderLoginKind.SmsCode -> "手机号验证码"
         ProviderLoginKind.Unknown -> "上游未声明登录方式"
     }
 
