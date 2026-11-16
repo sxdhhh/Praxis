@@ -1,6 +1,6 @@
 # 当前状态指针
 
-- 轮次：**round-17（能力位覆盖全部家已 CI 绿；主账本剩真机验收）**
+- 轮次：**round-18（G15 快照时间已 CI 绿；代码侧收尾完成，等真机验收）**
 - CI 基线：commit `1e00132` 的 run `43875229354` **全绿**（build ✓ / verify ✓ / 9 个 core:plugin 债照旧）
 - 工作树未提交：`DownloadResult.kt`（新）、`DownloadTerminalTest.kt`（新）、`ModelDownloader.kt`、
   `ImageModelDownloadManager.kt`、`ModelDownloaderTest.kt`、`lookme/`（全部新增）
