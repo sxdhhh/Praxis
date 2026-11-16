@@ -1,6 +1,6 @@
 # 当前状态指针
 
-- 轮次：**round-15（G19/G12 已 CI 绿；剩余：G6 解压进度 / 能力位落自定义家 / 真机验收）**
+- 轮次：**round-16（imagegen 缺口清单基本清零；等真机验收 / 或按需继续）**
 - CI 基线：commit `1e00132` 的 run `43875229354` **全绿**（build ✓ / verify ✓ / 9 个 core:plugin 债照旧）
 - 工作树未提交：`DownloadResult.kt`（新）、`DownloadTerminalTest.kt`（新）、`ModelDownloader.kt`、
   `ImageModelDownloadManager.kt`、`ModelDownloaderTest.kt`、`lookme/`（全部新增）
