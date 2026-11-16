@@ -102,18 +102,6 @@ class ImageModelDownloadManager(
             }
             // 先把 job 置空再写终态：
             //
-    /**
-     * 删除一个本机模型：成品目录与 .incoming/<id> 一起清（G19）。
-     *
-     * ## 为什么失败要如实报、不静默删一半
-     *
-     * 引擎正在跑时文件可能被占用；删一半的目录比删不掉更糟 —— 它会变成一个
-     * 既不是「已装」也不是「没装」的悬空态。所以任一目标删不掉就整体报失败，
-     * 并把建议（先停止引擎）一并给出。
-     *
-     * 下载跑着时也拒绝：单飞语义下，一边下一边删同一个目录是自找的竞态。
-     */
-    fun deleteModel(modelId: String): Result<Unit> = runCatching {
         check(!isBusy()) { "正在下载模型，等它结束（或取消）再删" }
         val dir = File(modelsRoot, modelId)
         val incoming = File(File(modelsRoot, ".incoming"), modelId)
@@ -173,6 +161,19 @@ class ImageModelDownloadManager(
         if (!isBusy()) return
         cancelRequested = true
     }
+
+    /**
+     * 删除一个本机模型：成品目录与 .incoming/<id> 一起清（G19）。
+     *
+     * ## 为什么失败要如实报、不静默删一半
+     *
+     * 引擎正在跑时文件可能被占用；删一半的目录比删不掉更糟 —— 它会变成一个
+     * 既不是「已装」也不是「没装」的悬空态。所以任一目标删不掉就整体报失败，
+     * 并把建议（先停止引擎）一并给出。
+     *
+     * 下载跑着时也拒绝：单飞语义下，一边下一边删同一个目录是自找的竞态。
+     */
+    fun deleteModel(modelId: String): Result<Unit> = runCatching {
 
     /**
      * 回到 Idle（界面消费完终态后调用，避免旧结果一直被当成当前状态）。
