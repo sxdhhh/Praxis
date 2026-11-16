@@ -1,6 +1,6 @@
 # 当前状态指针
 
-- 轮次：**round-06（12 角色团队并行体检中；整包兼容已落，待 :app 接线与推送）**
+- 轮次：**round-07（已推 4 提交等 CI run 43901055219；角色体检 solo 进行中）**
 - CI 基线：commit `1e00132` 的 run `43875229354` **全绿**（build ✓ / verify ✓ / 9 个 core:plugin 债照旧）
 - 工作树未提交：`DownloadResult.kt`（新）、`DownloadTerminalTest.kt`（新）、`ModelDownloader.kt`、
   `ImageModelDownloadManager.kt`、`ModelDownloaderTest.kt`、`lookme/`（全部新增）
