@@ -218,6 +218,12 @@ fun GatewayAccountsScreen(
                     modifier = Modifier.padding(horizontal = 12.dp),
                 ) { row ->
                     StatusBadge(row.status)
+                            if (row.needsRelogin) {
+                                MiuixBadge(
+                                    text = "凭证过期 · 需重新登录",
+                                    textColor = MiuixTheme.colorScheme.error,
+                                )
+                            }
                 }
             }
         }

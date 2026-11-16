@@ -16,6 +16,8 @@ data class GatewayAccountRow(
     /** 家名（已翻译成展示名）。 */
     val providerLabel: String,
     val status: GatewayAccountStatus,
+    /** 凭证过期待重新登录（G5 降级后的可见信号）。成功一次即清。 */
+    val needsRelogin: Boolean = false,
 ) {
     companion object {
 
@@ -41,6 +43,7 @@ data class GatewayAccountRow(
                 wireModels = wireModels,
                 state = state,
             ),
+            needsRelogin = state.needsReloginOf(id),
         )
     }
 }

@@ -64,13 +64,16 @@ class RouterSessionTest {
     @Test
     fun 凭证过期直接换号并标需要重新登录() {
         // Praxis 没有续期执行者：第一次失败就换号 + 标 needsRelogin（账号页据此提示）。
-        val s = session({ accounts("a1", "a2") })
+        val state = state()
+        val s = session({ accounts("a1", "a2") }, state)
         val attempt = s.next()!!
 
         val step = s.onFailure(attempt, FailureKind.CredentialExpired)
 
         assertEquals(FailoverStep.SwitchAccount, step)
         assertEquals(setOf("a1"), s.needsRelogin)
+        // 同一份标记要能被账号页读到（needsRelogin 不再是死信号）。
+        assertTrue(state.needsReloginOf("a1"))
     }
 
     @Test

@@ -213,6 +213,7 @@ class RouterSession(
         // 文档 7.4 第 2 行：尝试续期一次，仍失败标 needsRelogin + 换号。
         if (kind == FailureKind.CredentialExpired && step == FailoverStep.SwitchAccount) {
             reloginAccounts += attempt.accountId
+            state.markNeedsRelogin(attempt.accountId)
         }
 
         failover = FailoverLoop.advance(failover, step)

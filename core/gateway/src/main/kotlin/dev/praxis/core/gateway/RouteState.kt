@@ -48,6 +48,8 @@ class RouteState(
 
     private val backoffs = mutableMapOf<String, BackoffEntry>()
     private val sinks = mutableMapOf<String, Long>()
+    /** 凭证过期待重新登录的账号（G5 降级后的可见信号）。 */
+    private val needsRelogin = mutableSetOf<String>()
     private val limits = mutableMapOf<CooldownKey, Long>()
     private val breakerFailures = mutableMapOf<String, Int>()
     private val breakerOpenUntil = mutableMapOf<String, Long>()
@@ -70,6 +72,8 @@ class RouteState(
     }
 
     /** 垫底到期时刻；未标记或已过期返回 null。 */
+    /** 该账号是否被标过「凭证过期，需要重新登录」。成功（换上新 Key）后自动清。 */
+    fun needsReloginOf(id: String): Boolean = id in needsRelogin
     fun sinkUntil(id: String): Long? = sinks[id]?.takeIf { it > clock() }
 
     /**
@@ -82,6 +86,11 @@ class RouteState(
         val until = clock() + SINK_TTL_MS
         sinks[id] = until
         return until
+    }
+
+    /** 标「凭证过期待重新登录」。由 RouterSession 在凭证过期换号时调用。 */
+    fun markNeedsRelogin(id: String) {
+        needsRelogin.add(id)
     }
 
     /** 该账号该上游模型的限额到期时刻；无或已过期返回 null。 */
@@ -133,6 +142,10 @@ class RouteState(
         sinks.remove(id)
         breakerFailures.remove(id)
         breakerOpenUntil.remove(id)
+        // 凭证过期的标记在成功（换上新 Key）那一刻就该消失 —— 它不是惩罚，是提示。
+        needsRelogin.remove(id)
+        // 凭证过期的标记在成功（换上了新 Key）那一刻就该消失 —— 它不是惩罚，是提示。
+        needsRelogin.remove(id)
     }
 
     /**

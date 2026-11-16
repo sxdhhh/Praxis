@@ -173,4 +173,13 @@ class RouteStateTest {
         s.onFailure("a", FailureKind.UpstreamError)
         assertTrue(s.backoffUntil("a") != null)
     }
+
+    @Test
+    fun `凭证过期标记在成功后清除`() {
+        val state = RouteState(clock = { 1_000_000L }, breaker = BreakerConfig(false, 3, 60_000L, 1))
+        state.markNeedsRelogin("a1")
+        assertTrue(state.needsReloginOf("a1"))
+        state.onSuccess("a1")
+        assertTrue("成功 = 换上了新 Key，提示该消失", !state.needsReloginOf("a1"))
+    }
 }
