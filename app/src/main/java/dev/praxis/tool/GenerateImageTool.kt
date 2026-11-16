@@ -73,7 +73,7 @@ class GenerateImageTool(
     /** 远端要用的 API Key（跟随当前服务商配置）。 */
     private val apiKey: suspend () -> String? = { null },
     /** 该模型的可用分辨率档位；空 = 自由画布（不做档位校验）。 */
-    private val availableSizes: () -> List<Pair<Int, Int>> = { emptyList() },
+    private val availableSizes: suspend () -> List<Pair<Int, Int>> = { emptyList() },
     /**
      * 进度上报（文档 §6.1）。默认不报：单测与无 UI 场景不需要它。
      *

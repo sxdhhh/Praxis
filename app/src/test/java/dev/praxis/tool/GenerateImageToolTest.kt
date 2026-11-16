@@ -62,7 +62,7 @@ class GenerateImageToolTest {
         probe: suspend () -> EngineAvailability = available,
         target: suspend () -> dev.praxis.core.imagegen.ImageGenTarget? =
             { dev.praxis.core.imagegen.ImageGenTarget.Local("anythingv5") },
-        sizes: () -> List<Pair<Int, Int>> = { emptyList() },
+        sizes: suspend () -> List<Pair<Int, Int>> = { emptyList() },
         saved: MutableList<ByteArray> = mutableListOf(),
     ) = GenerateImageTool(
         runner = runner,
