@@ -240,11 +240,6 @@ fun SettingsHost(
         dev.praxis.core.imagegen.ImageDownloadState.Idle,
     onDownloadImageGenModel: (dev.praxis.core.imagegen.ImageModel) -> Unit = {},
     onCancelImageGenDownload: () -> Unit = {},
-    onDeleteImageGenModel: (dev.praxis.core.imagegen.ImageModel) -> Unit = {},
-    imageGenDeleteMessage: String? = null,
-    onAcknowledgeImageGenDownload: () -> Unit = {},
-    /** 删除一个已安装模型（G19）。 */
-    onDeleteImageGenModel: (dev.praxis.core.imagegen.ImageModel) -> Unit = {},
     /** 删除结果一句话；null = 没有。 */
     imageGenDeleteMessage: String? = null,
     /** 终态已看过：回到 Idle（G12）。 */
@@ -721,6 +716,12 @@ private fun SettingsPageBody(
         dev.praxis.core.imagegen.ImageDownloadState.Idle,
     onDownloadImageGenModel: (dev.praxis.core.imagegen.ImageModel) -> Unit = {},
     onCancelImageGenDownload: () -> Unit = {},
+    /** 删除一个已安装模型（G19）。 */
+    onDeleteImageGenModel: (dev.praxis.core.imagegen.ImageModel) -> Unit = {},
+    /** 删除结果一句话；null = 没有。 */
+    imageGenDeleteMessage: String? = null,
+    /** 终态已看过：回到 Idle（G12）。 */
+    onAcknowledgeImageGenDownload: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     when (route) {
