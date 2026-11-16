@@ -77,6 +77,8 @@ class RouterSession(
     private var tokenBudget: GatewayTokenBudget = GatewayTokenBudget()
     /** 各账号在窗口内的用量；空 = 都没有记录。 */
     private var accountSpend: Map<String, Long> = emptyMap()
+    /** 各账号窗口内请求数（每账号 RPM 过滤，G4）。每次请求前推入。 */
+    private var rpmByAccount: Map<String, Int> = emptyMap()
 
     private var stickyAccountId: String? = null
     private var failover = FailoverState()
@@ -122,6 +124,11 @@ class RouterSession(
         this.accountSpend = accountSpend
     }
 
+    /** 推入窗口内各账号请求数（与 token 预算同处取，G4）。 */
+    fun setRpm(byAccount: Map<String, Int>) {
+        this.rpmByAccount = byAccount
+    }
+
     /**
      * 下一个要尝试的组合；null 表示没有可试的了（看 [outcome]）。
      */
@@ -130,7 +137,10 @@ class RouterSession(
 
         val plan = RoutePlanner.plan(
             candidates = candidates,
-            accounts = accounts(),
+            accounts = accounts().map { view ->
+                val rpm = rpmByAccount[view.id] ?: 0
+                if (rpm == 0) view else view.copy(requestsThisMinute = rpm)
+            },
             state = state,
             needsImages = needsImages,
             stickyAccountId = stickyAccountId,

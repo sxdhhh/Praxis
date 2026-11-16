@@ -85,6 +85,10 @@ class GatewayUsageStore(
     suspend fun tokensByAccountSince(sinceMillis: Long): Map<String, Long> =
         dao.tokensByAccountSince(sinceMillis).associate { row -> row.accountId to row.tokens }
 
+    /** 窗口内各账号的**请求数**（每账号 RPM 过滤，G4）。测试连接也计入（保护性计数）。 */
+    suspend fun requestCountsByAccountSince(sinceMillis: Long): Map<String, Int> =
+        dao.requestCountsByAccountSince(sinceMillis).associate { row -> row.accountId to row.requests }
+
     /**
      * 最近的请求记录（日志页的「请求记录」视图）。
      *

@@ -53,6 +53,8 @@ class RouteState(
     private val limits = mutableMapOf<CooldownKey, Long>()
     private val breakerFailures = mutableMapOf<String, Int>()
     private val breakerOpenUntil = mutableMapOf<String, Long>()
+    /** 每账号的**进行中**请求数（并发过滤的数据源；G4 接线）。 */
+    private val inFlight = mutableMapOf<String, Int>()
 
     /** 退避到期时刻；未在退避或已过期返回 null。 */
     fun backoffUntil(id: String): Long? = backoffs[id]?.untilMillis?.takeIf { it > clock() }
@@ -130,6 +132,22 @@ class RouteState(
 
     /** 熔断是否打开。未启用时恒为 false。 */
     fun breakerOpen(id: String): Boolean = breakerUntil(id) != null
+
+    // ── 进行中请求计数（G4：并发过滤的数据源）──────────────────
+
+    /** 标记一个请求开始占住该账号（GatewayProvider 在发流前调用）。 */
+    fun beginAttempt(id: String) {
+        inFlight[id] = (inFlight[id] ?: 0) + 1
+    }
+
+    /** 请求结束（成功或失败都算结束；finally 里调用，保证不漏）。 */
+    fun endAttempt(id: String) {
+        val next = (inFlight[id] ?: 0) - 1
+        if (next <= 0) inFlight.remove(id) else inFlight[id] = next
+    }
+
+    /** 该账号此刻的进行中请求数。 */
+    fun runningCount(id: String): Int = inFlight[id] ?: 0
 
     /**
      * 一次成功。

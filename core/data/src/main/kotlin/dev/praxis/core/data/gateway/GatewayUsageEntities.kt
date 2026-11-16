@@ -141,6 +141,18 @@ interface GatewayUsageDao {
     suspend fun tokensByAccountSince(sinceMillis: Long): List<GatewayAccountTokensRow>
 
     /**
+     * 按账号聚合窗口内的**请求数**（每账号 RPM 过滤的数据源，G4）。
+     * **包含 isTest**：测试连接也是真实打向上游的一次 —— RPM 是保护性计数，
+     * 排除它等于给「白嫖绕过」留后门。
+     */
+    @Query(
+        "SELECT accountId AS accountId, COUNT(*) AS requests " +
+            "FROM gateway_request WHERE ts >= :sinceMillis AND accountId IS NOT NULL " +
+            "GROUP BY accountId",
+    )
+    suspend fun requestCountsByAccountSince(sinceMillis: Long): List<GatewayAccountRequestsRow>
+
+    /**
      * 最近 [limit] 条请求（日志页的「请求记录」视图，文档 §5.8）。
      *
      * **包含** `isTest`：这是排障视图，用户点了「测试连接」之后就该能看到那条请求。
@@ -159,6 +171,12 @@ data class GatewayUsageSummaryRow(
 
 /** 按账号的 token 合计（预算判定用）。 */
 data class GatewayAccountTokensRow(
+
+/** 按账号的窗口内请求数（每账号 RPM 判定用）。 */
+data class GatewayAccountRequestsRow(
+    val accountId: String,
+    val requests: Int,
+)
     val accountId: String,
     val tokens: Long,
 )

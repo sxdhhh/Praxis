@@ -131,6 +131,11 @@ class GatewayProvider(
      * 每次现取：用户刚拉完清单，下一次带图请求就该按新数据过滤。
      */
     private val builtinCaps: () -> Map<String, Map<String, dev.praxis.core.gateway.BuiltinModelsCodec.BuiltinModelCaps>> = { emptyMap() },
+    /**
+     * 窗口内各账号请求数（每账号 RPM 过滤的数据源，G4）。默认空 = 不限；
+     * 装配点传 GatewayUsageStore 的查询。
+     */
+    private val usageRpm: () -> suspend (Long) -> Map<String, Int> = { { _ -> emptyMap() } },
 ) : AiProvider {
 
     override val displayName: String = "网关"
@@ -209,13 +214,14 @@ class GatewayProvider(
 
         // 账号与家清单快照：运行期冷却走 RouteState，不依赖账号表的实时变化。
         val views = store.routingViews()
+        // 并发过滤的数据源（G4）：进行中请求数是运行态，快照进 views。
         val providers = store.providers()
         // 自定义家的逐模型能力位（G3 收尾）：与内置家查表同一口径 —— 只有明确 false 才拦。
         val providerCaps = store.customCaps()
 
         val session = RouterSession(
             candidates = chain.candidates,
-            accounts = { views },
+            accounts = { views.map { it.copy(runningConcurrent = state.runningCount(it.id)) } },
             state = state,
             // 带图请求要先按能力位过滤（文档 13 的验收项，也是 #408 一次白撞 9 次的原因）。
             needsImages = request.messages.any { it.images.isNotEmpty() },
@@ -251,6 +257,11 @@ class GatewayProvider(
             val windowStart = tokenBudget.windowStartMillis(System.currentTimeMillis())
             session.setBudget(tokenBudget, accountSpend(windowStart))
         }
+        // 每账号 RPM（G4）：窗口 = 最近 60 秒。与 token 预算同处取，
+        // 缓存会让「刚打满」的账号晚一步被跳过。
+        val rpmByAccount = runCatching { usageRpm()(System.currentTimeMillis() - 60_000L) }
+            .getOrDefault(emptyMap())
+        if (rpmByAccount.isNotEmpty()) session.setRpm(rpmByAccount)
 
         val startedAt = System.currentTimeMillis()
         var attempts = 0
@@ -348,6 +359,7 @@ class GatewayProvider(
                     )
             }
 
+            state.beginAttempt(attempt.accountId)
             try {
                 provider.stream(request.copy(model = attempt.wireModel)).collect { event ->
                     emitted = true
@@ -355,6 +367,8 @@ class GatewayProvider(
                     if (event is AiStreamEvent.Usage) lastUsage = event
                     emit(event)
                 }
+                // 并发计数（G4）：成功路径归还。
+                state.endAttempt(attempt.accountId)
                 session.onSuccess(attempt)
                 // 粘性写回：这次在哪个账号上成功，下次同一对话还先试它。
                 val stickyAfter = session.stickyAfterSuccess
@@ -373,6 +387,8 @@ class GatewayProvider(
                 )
                 return@flow
             } catch (e: AiException) {
+                // 并发计数（G4）：失败路径也归还（含取消）。
+                state.endAttempt(attempt.accountId)
                 if (e.error.kind == AiErrorKind.CANCELLED) throw e
 
                 session.onFailure(

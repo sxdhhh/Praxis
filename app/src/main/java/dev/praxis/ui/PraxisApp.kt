@@ -886,6 +886,10 @@ fun PraxisApp(
             replayLog = routeReplayLog,
             groups = { gatewayRouteGroups },
             stickyStore = gatewayStickyStore,
+                usageRpm = {
+                    val store = gatewayUsageStore
+                    return@ { since -> store.requestCountsByAccountSince(since) }
+                },
             builtinCaps = { gatewayBuiltinCaps },
             // 这一处此前**漏了** builtinModels：内置家的模型在「测试连接」时进不了候选链，
             // 报「没有对应任何上游」—— 而真实请求（另外两处）是通的。

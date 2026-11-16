@@ -182,4 +182,24 @@ class RouteStateTest {
         state.onSuccess("a1")
         assertTrue("成功 = 换上了新 Key，提示该消失", !state.needsReloginOf("a1"))
     }
+    // ── 进行中请求计数（G4：并发过滤的数据源）──────────────────
+
+    @Test
+    fun `并发计数成对增减`() {
+        val state = RouteState(clock = { 1_000_000L }, breaker = BreakerConfig(false, 3, 60_000L, 1))
+        state.beginAttempt("a1")
+        state.beginAttempt("a1")
+        assertEquals(2, state.runningCount("a1"))
+        state.endAttempt("a1")
+        assertEquals(1, state.runningCount("a1"))
+        state.endAttempt("a1")
+        assertEquals("归零后从表里移除，不积垃圾", 0, state.runningCount("a1"))
+    }
+
+    @Test
+    fun `多退不减不会变负`() {
+        val state = RouteState(clock = { 1_000_000L }, breaker = BreakerConfig(false, 3, 60_000L, 1))
+        state.endAttempt("ghost")
+        assertEquals("幽灵 end 不产生负数", 0, state.runningCount("ghost"))
+    }
 }
