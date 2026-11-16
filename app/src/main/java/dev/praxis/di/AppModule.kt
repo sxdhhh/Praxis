@@ -116,6 +116,10 @@ val appModule = module {
         )
     }
 
+    // 会话粘性表（文档 §7.3）：内存态单例 —— 三个 GatewayProvider 构造点共用一份。
+    // 没有这份「跨请求」的表，粘性开关就是真开假效果（G6）。
+    single { dev.praxis.core.gateway.StickyAccountStore() }
+
     // QNN 运行时解压（NPU 路线；文档 §1.4）。
     single {
         dev.praxis.data.imagegen.QnnRuntimeInstaller(

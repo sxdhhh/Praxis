@@ -809,6 +809,10 @@ fun PraxisApp(
     // 路由回放（文档 §5.5）：进程内最近若干条决策。
     val routeReplayLog: dev.praxis.core.gateway.RouteReplayLog =
         org.koin.compose.koinInject()
+    // 会话粘性表：**单例**（AppModule 注册）。粘性的意义就在跨请求 ——
+    // 三个 GatewayProvider 构造点必须共用同一份，每次新建等于没有粘性。
+    val gatewayStickyStore: dev.praxis.core.gateway.StickyAccountStore =
+        org.koin.compose.koinInject()
     // 每次进路由页时重读一次（它是内存里的列表，没有 Flow 可观察）。
     var routeReplayTick by remember { mutableStateOf(0) }
     val routeReplayEntries = remember(routeReplayTick, gatewayRowsRefresh) {
@@ -853,6 +857,7 @@ fun PraxisApp(
             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
             replayLog = routeReplayLog,
             groups = { gatewayRouteGroups },
+            stickyStore = gatewayStickyStore,
             // 这一处此前**漏了** builtinModels：内置家的模型在「测试连接」时进不了候选链，
             // 报「没有对应任何上游」—— 而真实请求（另外两处）是通的。
             builtinModels = gatewayBuiltinNativeModels,
@@ -1166,6 +1171,7 @@ fun PraxisApp(
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                             replayLog = routeReplayLog,
                             groups = { gatewayRouteGroups },
+                            stickyStore = gatewayStickyStore,
                             builtinModels = gatewayBuiltinNativeModels,
                             budget = dev.praxis.core.gateway.FailoverBudget(
                                 maxSwitches = gatewaySystem.maxSwitches,
@@ -1403,6 +1409,7 @@ fun PraxisApp(
                             accountSpend = { since -> gatewayUsageStore.tokensByAccountSince(since) },
                             replayLog = routeReplayLog,
                             groups = { gatewayRouteGroups },
+                            stickyStore = gatewayStickyStore,
                             builtinModels = gatewayBuiltinNativeModels,
                             budget = dev.praxis.core.gateway.FailoverBudget(
                                 maxSwitches = gatewaySystem.maxSwitches,

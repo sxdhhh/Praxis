@@ -119,6 +119,13 @@ class GatewayProvider(
      * 拉清单与转发都走它 —— 否则会出「清单能拉、请求 403」。
      */
     private val clientFor: (String) -> OkHttpClient = { client },
+    /**
+     * 会话粘性表（文档 §7.3）。null = 不粘（单测与不关心粘性的调用点）。
+     *
+     * **装配点必须传同一个实例**：粘性的意义就在「跨请求」—— 每次构造新的
+     * 空表等于没有粘性。
+     */
+    private val stickyStore: dev.praxis.core.gateway.StickyAccountStore? = null,
 ) : AiProvider {
 
     override val displayName: String = "网关"
@@ -208,6 +215,22 @@ class GatewayProvider(
             budget = budget,
             policy = policy(),
         )
+
+        // 会话粘性（文档 §7.3）：同一对话尽量钉住上次成功的账号。
+        //
+        // 键：显式头优先，否则首条内容哈希。ChatRequest 没有 headers 字段，
+        // 所以这里只会走内容键 —— 对话的首条消息不变，键就稳定。
+        val stickyKey = if (policy().stickyEnabled) {
+            dev.praxis.core.gateway.ConversationKey.of(
+                headers = emptyMap(),
+                contentSeed = request.messages.firstOrNull()?.text,
+            )
+        } else {
+            null
+        }
+        if (stickyKey != null) {
+            stickyStore?.get(stickyKey)?.let { session.setStickyAccount(it) }
+        }
 
         // token 预算：每次请求前取一次窗口内的用量推给会话。
         //
@@ -322,6 +345,11 @@ class GatewayProvider(
                     emit(event)
                 }
                 session.onSuccess(attempt)
+                // 粘性写回：这次在哪个账号上成功，下次同一对话还先试它。
+                val stickyAfter = session.stickyAfterSuccess
+                if (stickyKey != null && stickyAfter != null) {
+                    stickyStore?.put(stickyKey, stickyAfter)
+                }
                 record(success = true, status = dev.praxis.core.gateway.GatewayUsageRules.STATUS_OK, error = null, isTest = isTest)
                 replayLog?.record(
                     dev.praxis.core.gateway.RouteReplayEntry(
