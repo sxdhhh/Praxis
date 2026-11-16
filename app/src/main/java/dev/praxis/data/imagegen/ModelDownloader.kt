@@ -170,6 +170,13 @@ class ModelDownloader(
     private fun downloadOne(
         target: DownloadTarget,
         plan: ImageDownloadPlan,
+        /**
+         * 下载成功后 `.part` 改名去的目录。
+         *
+         * 多文件包 = 成品目录（每个文件都是最终产物）；单 zip 包 = `.incoming`
+         * （压缩包只是中间物，解压完就删，留在成品目录会让「目录非空」判据误报已装）。
+         */
+        finalDir: File,
         baseUrl: String,
         shouldStop: () -> Boolean,
         abort: java.util.concurrent.atomic.AtomicBoolean,
@@ -212,7 +219,7 @@ class ModelDownloader(
                 error.message ?: ("下载失败：" + target.localName),
             )
         }
-        val finalFile = File(plan.targetDir, target.localName)
+        val finalFile = File(finalDir, target.localName)
         if (!part.renameTo(finalFile)) {
             abort.set(true)
             return DownloadResult.Failed("无法重命名：" + part.name)
