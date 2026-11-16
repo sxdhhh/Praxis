@@ -611,7 +611,10 @@ val appModule = module {
                                 val model = dev.praxis.core.imagegen.ImageModelCatalog
                                     .builtin(soc)
                                     .filter {
-                                        dev.praxis.core.imagegen.ImageModelCatalog.isInstalled(modelsRoot, it)
+                                        dev.praxis.core.imagegen.ImageModelCatalog.isInstalled(
+                                            java.io.File(androidContext().filesDir, "models"),
+                                            it,
+                                        )
                                     }
                                     .firstOrNull { it.id == modelId }
                                 if (model?.backendType == "sd15npu") {
