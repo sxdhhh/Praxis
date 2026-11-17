@@ -121,7 +121,7 @@ fun SettingsHost(
     /** 上次备份的结果文案。 */
     backupMessage: String? = null,
     /** Agent2API 网关连接设置（G-内置）。 */
-connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
+    connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
         dev.praxis.core.gateway.adapters.GatewayConnectionSettings(),
     /** 连接设置变更。 */
     onConnectionSettingsChange: (dev.praxis.core.gateway.adapters.GatewayConnectionSettings) -> Unit = {},
@@ -162,11 +162,11 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
     /** 维护页：导入到网关 + 保活。 */
     keepaliveJson: String = "",
     gatewayImportMessage: String? = null,
-    gatewayImportBusy: Boolean = false,
+    gatewayMaintenanceImportBusy: Boolean = false,
     keepaliveSaveMessage: String? = null,
     onImportAccountsToGateway: (String) -> Unit = {},
     onRefreshKeepalive: () -> Unit = {},
-    onSaveKeepalive: (String) -> Unit = {}
+    onSaveKeepalive: (String) -> Unit = {},
     /** 网关日志（:app 从 GatewayProcess 拉过来）。 */
     gatewayLogLines: List<String> = emptyList(),
     /** 网关状态一句话。 */
@@ -437,6 +437,35 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
             gatewayAccountRows = gatewayAccountRows,
             onClearGatewayRuntime = onClearGatewayRuntime,
             onUpdateAccountLimits = onUpdateAccountLimits,
+            // ── 登录助手（33 家）──
+            loginProviderId = loginProviderId,
+            loginProviderLabel = loginProviderLabel,
+            loginMethods = loginMethods,
+            loginInstructions = loginInstructions,
+            loginPhase = loginPhase,
+            loginMethodsLoading = loginMethodsLoading,
+            loginMethodsError = loginMethodsError,
+            onPickLoginMethod = onPickLoginMethod,
+            onCallbackCaptured = onCallbackCaptured,
+            onSubmitLoginCallback = onSubmitLoginCallback,
+            onCancelLogin = onCancelLogin,
+            onOpenLoginAssistant = onOpenLoginAssistant,
+            // ── 签到 / 积分 ──
+            checkinMessage = checkinMessage,
+            checkinTakenToday = checkinTakenToday,
+            creditsMessage = creditsMessage,
+            checkinBusy = checkinBusy,
+            onClaimCheckin = onClaimCheckin,
+            onRunAutoCheckin = onRunAutoCheckin,
+            onRefreshCredits = onRefreshCredits,
+            // ── 维护（导入 + 保活）──
+            keepaliveJson = keepaliveJson,
+            gatewayImportMessage = gatewayImportMessage,
+            gatewayMaintenanceImportBusy = gatewayMaintenanceImportBusy,
+            keepaliveSaveMessage = keepaliveSaveMessage,
+            onImportAccountsToGateway = onImportAccountsToGateway,
+            onRefreshKeepalive = onRefreshKeepalive,
+            onSaveKeepalive = onSaveKeepalive,
             gatewayImportReport = gatewayImportReport,
             gatewayImportResult = gatewayImportResult,
             gatewayImportError = gatewayImportError,
@@ -673,7 +702,7 @@ private fun SettingsPageBody(
     /** 上次备份的结果文案。 */
     backupMessage: String? = null,
     /** Agent2API 网关连接设置（G-内置）。 */
-connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
+    connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
         dev.praxis.core.gateway.adapters.GatewayConnectionSettings(),
     /** 连接设置变更。 */
     onConnectionSettingsChange: (dev.praxis.core.gateway.adapters.GatewayConnectionSettings) -> Unit = {},
@@ -714,11 +743,11 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
     /** 维护页：导入到网关 + 保活。 */
     keepaliveJson: String = "",
     gatewayImportMessage: String? = null,
-    gatewayImportBusy: Boolean = false,
+    gatewayMaintenanceImportBusy: Boolean = false,
     keepaliveSaveMessage: String? = null,
     onImportAccountsToGateway: (String) -> Unit = {},
     onRefreshKeepalive: () -> Unit = {},
-    onSaveKeepalive: (String) -> Unit = {}
+    onSaveKeepalive: (String) -> Unit = {},
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
@@ -1155,7 +1184,7 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
         PraxisRoute.SettingsGatewayMaintenance -> dev.praxis.feature.gateway.GatewayMaintenanceScreen(
             keepaliveJson = keepaliveJson,
             importResult = gatewayImportMessage,
-            importBusy = gatewayImportBusy,
+            importBusy = gatewayMaintenanceImportBusy,
             keepaliveResult = keepaliveSaveMessage,
             onImportAccounts = onImportAccountsToGateway,
             onRefreshKeepalive = onRefreshKeepalive,
