@@ -1,0 +1,213 @@
+package dev.praxis.core.gateway.adapters
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.Request
+
+/**
+ * Praxis ↔ Agent2API 网关的通信层。
+ *
+ * ## 为什么需要这个类
+ *
+ * 33 家 Agent 插件提供商的登录/签到/积分/保活/拉模型全部由网关实现（Rust 进程）。
+ * Praxis 不重复这些逻辑 —— 它通过 HTTP 调用网关的 REST API。
+ *
+ * ## 支持的操作
+ *
+ * | 操作 | 网关端点 | 说明 |
+ * |---|---|---|
+ * | 拉模型清单 | GET /v1/models | 含能力位 |
+ * | 发消息 | POST /v1/chat/completions | OpenAI 兼容 SSE |
+ * | 登录（获取方式列表） | GET /api/providers/{id}/login-methods | 每家不同 |
+ * | 登录（启动流程） | POST /api/providers/{id}/login/start | 返回 URL 或状态 |
+ * | 登录（轮询结果） | GET /api/providers/{id}/login/poll/{sessionId} | 设备码/轮询型 |
+ * | 签到 | POST /api/providers/{id}/checkin | 每家不同 |
+ * | 余额/积分 | GET /api/providers/{id}/credits | 每家不同 |
+ * | 账号列表 | GET /api/accounts | 所有已登录账号 |
+ *
+ * ## 认证
+ *
+ * 网关 Key（面板里建的）放在 `Authorization: Bearer <key>` 头里。
+ * 没配 Key 时网关处于 fail-closed 状态，所有 /v1/* 请求返回 403。
+ */
+class GatewayConnection(
+    /** 网关地址（如 http://127.0.0.1:3065 或 https://xxx/a2a/v1）。 */
+    val baseUrl: String,
+    /** 网关 Key（面板里建的；空 = fail-closed，所有请求被拒）。 */
+    val apiKey: String = "",
+) {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    private fun authHeaders(): Map<String, String> =
+        if (apiKey.isNotBlank()) mapOf("Authorization" to "Bearer $apiKey") else emptyMap()
+
+    private fun url(path: String): String = baseUrl.trimEnd('/') + path
+
+    /**
+     * 拉取全部模型（含能力位）。
+     * @return (模型列表, 所属提供商 id)；提供商 id 从模型的 owned_by 字段取。
+     */
+    suspend fun fetchModels(): Result<List<GatewayModelEntry>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val response = ProviderHttpClient.get(url("/v1/models"), authHeaders())
+            response.use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code + ": " + resp.body?.string()?.take(200))
+                val body = resp.body?.string() ?: error("空响应")
+                val root = json.parseToJsonElement(body).jsonObject
+                val data = root["data"] as? JsonArray ?: error("响应没有 data 数组")
+                data.mapNotNull { element ->
+                    val obj = element as? JsonObject ?: return@mapNotNull null
+                    val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    GatewayModelEntry(
+                        id = id,
+                        name = obj["name"]?.jsonPrimitive?.contentOrNull ?: id,
+                        provider = obj["owned_by"]?.jsonPrimitive?.contentOrNull ?: "",
+                        supportsImages = obj["supports_images"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull(),
+                        supportsReasoning = obj["supports_reasoning"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull(),
+                        supportsToolCall = obj["supports_tool_call"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull(),
+                        maxInputTokens = obj["max_input_tokens"]?.jsonPrimitive?.contentOrNull?.toIntOrNull(),
+                        maxOutputTokens = obj["max_output_tokens"]?.jsonPrimitive?.contentOrNull?.toIntOrNull(),
+                    )
+                }
+            }
+        }
+    }
+
+    /** 获取指定提供商的登录方式列表。 */
+    suspend fun loginMethods(providerId: String): Result<List<GatewayLoginMethodInfo>> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val response = ProviderHttpClient.get(
+                    url("/api/providers/$providerId/login-methods"), authHeaders())
+                response.use { resp ->
+                    if (!resp.isSuccessful) error("HTTP " + resp.code)
+                    val body = resp.body?.string() ?: error("空响应")
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val methods = root["methods"] as? JsonArray ?: error("没有 methods 数组")
+                    methods.mapNotNull { element ->
+                        val obj = element as? JsonObject ?: return@mapNotNull null
+                        GatewayLoginMethodInfo(
+                            type = obj["type"]?.jsonPrimitive?.contentOrNull ?: "unknown",
+                            label = obj["label"]?.jsonPrimitive?.contentOrNull ?: "",
+                            url = obj["url"]?.jsonPrimitive?.contentOrNull,
+                        )
+                    }
+                }
+            }
+        }
+
+    /** 启动登录流程（返回 sessionId 或 URL）。 */
+    suspend fun startLogin(providerId: String, method: String): Result<GatewayLoginSession> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val body = json.encodeToString(
+                    kotlinx.serialization.json.JsonObject.serializer(),
+                    kotlinx.serialization.json.buildJsonObject {
+                        put("method", kotlinx.serialization.json.JsonPrimitive(method))
+                    }
+                )
+                val response = ProviderHttpClient.postJson(
+                    url("/api/providers/$providerId/login/start"), body, authHeaders())
+                response.use { resp ->
+                    if (!resp.isSuccessful) error("HTTP " + resp.code + ": " + resp.body?.string()?.take(200))
+                    val root = json.parseToJsonElement(resp.body?.string() ?: error("空响应")).jsonObject
+                    GatewayLoginSession(
+                        sessionId = root["sessionId"]?.jsonPrimitive?.contentOrNull ?: "",
+                        url = root["url"]?.jsonPrimitive?.contentOrNull,
+                        pollIntervalMs = root["pollIntervalMs"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 3000L,
+                    )
+                }
+            }
+        }
+
+    /** 轮询登录结果。 */
+    suspend fun pollLogin(providerId: String, sessionId: String): Result<GatewayLoginResult> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val response = ProviderHttpClient.get(
+                    url("/api/providers/$providerId/login/poll/$sessionId"), authHeaders())
+                response.use { resp ->
+                    if (!resp.isSuccessful) error("HTTP " + resp.code)
+                    val root = json.parseToJsonElement(resp.body?.string() ?: error("空响应")).jsonObject
+                    GatewayLoginResult(
+                        status = root["status"]?.jsonPrimitive?.contentOrNull ?: "pending",
+                        accountId = root["accountId"]?.jsonPrimitive?.contentOrNull,
+                        token = root["token"]?.jsonPrimitive?.contentOrNull,
+                        error = root["error"]?.jsonPrimitive?.contentOrNull,
+                    )
+                }
+            }
+        }
+
+    /** 触发签到。 */
+    suspend fun checkIn(accountId: String): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val response = ProviderHttpClient.postJson(
+                url("/api/accounts/$accountId/checkin"), "{}", authHeaders())
+            response.use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code)
+                resp.body?.string() ?: "签到完成"
+            }
+        }
+    }
+
+    /** 查余额/积分。 */
+    suspend fun credits(accountId: String): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val response = ProviderHttpClient.get(
+                url("/api/accounts/$accountId/credits"), authHeaders())
+            response.use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code)
+                resp.body?.string() ?: "未知"
+            }
+        }
+    }
+
+    /** 健康检查。 */
+    suspend fun health(): Result<Boolean> = withContext(Dispatchers.IO) {
+        runCatching {
+            val response = ProviderHttpClient.get(url("/health"))
+            response.use { resp -> resp.isSuccessful }
+        }
+    }
+}
+
+/** 网关返回的模型条目（含能力位与所属提供商）。 */
+data class GatewayModelEntry(
+    val id: String,
+    val name: String,
+    val provider: String,
+    val supportsImages: Boolean? = null,
+    val supportsReasoning: Boolean? = null,
+    val supportsToolCall: Boolean? = null,
+    val maxInputTokens: Int? = null,
+    val maxOutputTokens: Int? = null,
+)
+
+/** 网关返回的登录方式。 */
+data class GatewayLoginMethodInfo(
+    val type: String,
+    val label: String,
+    val url: String?,
+)
+
+/** 登录会话（设备码/轮询型的中间态）。 */
+data class GatewayLoginSession(
+    val sessionId: String,
+    val url: String?,
+    val pollIntervalMs: Long,
+)
+
+/** 登录轮询结果。 */
+data class GatewayLoginResult(
+    val status: String,  // pending / completed / failed
+    val accountId: String?,
+    val token: String?,
+    val error: String?,
+)
