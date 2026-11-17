@@ -1,12 +1,12 @@
 package dev.praxis.feature.gateway
 
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,11 +57,14 @@ fun GatewayLoginScreen(
     var browserUrl by remember(providerId) { mutableStateOf<String?>(null) }
     if (phase is LoginPhase.Succeeded || phase is LoginPhase.Failed) browserUrl = null
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState()),
+    val topInset = dev.praxis.ui.design.component.LocalTopBarInset.current
+    val scrollLimit = dev.praxis.ui.design.component.LocalScrollBottomLimit.current
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = topInset, bottom = 24.dp + scrollLimit),
     ) {
+        item(key = "__login_body__") {
+        Column(modifier = Modifier.fillMaxWidth()) {
         SettingsSectionHeader(
             icon = androidx.compose.material.icons.Icons.Outlined.Login,
             title = "登录 " + providerLabel,
