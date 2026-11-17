@@ -655,6 +655,15 @@ fun PraxisApp(
     val gatewayProcess: dev.praxis.data.gateway.GatewayProcess =
         org.koin.compose.koinInject()
     val gatewayState by gatewayProcess.state.collectAsState()
+    val gatewayEnvPort: dev.praxis.data.linux.ProotEnvPort =
+        org.koin.compose.koinInject()
+    val gatewayInstaller = remember {
+        dev.praxis.data.gateway.GatewayContainerInstaller()
+            .withCacheDir(java.io.File(context.cacheDir, "gateway"))
+    }
+    val gatewayRootfsEnv = remember {
+        gatewayEnvPort.defaultEnvironment(dev.praxis.core.linux.LinuxDistro.Ubuntu)
+    }
     val gatewayLogs = remember { mutableStateOf<List<String>>(emptyList()) }
     val gatewayConnJson by settingsRepository.gatewayConnectionJson
         .collectAsState(initial = null)
@@ -706,34 +715,46 @@ fun PraxisApp(
     val imageGenTargetBroken = imageGenTargetDecoded?.isFailure == true
 
     // 网关自启动（G-内置）：App 打开时自动连接外部网关。
-    LaunchedEffect(gatewayProcess) {
-        val result = gatewayProcess.connectExternal()
-        result.fold(
-            onSuccess = { url ->
-                gatewayProcess.addLog("[gateway] 已连接：" + url)
-                // 自动拉取网关模型清单（G-内置：33 家 Agent 插件提供商 + 任意 API 家）
-                runCatching {
-                    val conn = gatewayProcess.connection()
-                    val models = conn.fetchModels().getOrNull()
-                    if (models != null && models.isNotEmpty()) {
-                        // 按 provider 分组写入 DataStore（内置家清单）
-                        val grouped = models.groupBy { it.provider }
-                        val caps = grouped.mapValues { (_, list) ->
-                            list.map { dev.praxis.core.gateway.BuiltinModelsCodec.from(it) }
+    // 网关自启动（内置优先）：
+    //  1. 用户配了外部地址 → 连外部；
+    //  2. 没配外部、容器里已装网关 → 自动启内置（127.0.0.1 就是手机自己）；
+    //  3. 两者都没有 → 日志窗口提示怎么装。
+    LaunchedEffect(gatewayConnSettings) {
+        if (gatewayConnSettings.isConfigured) {
+        LaunchedEffect(gatewayProcess) {
+            val result = gatewayProcess.connectExternal()
+            result.fold(
+                onSuccess = { url ->
+                    gatewayProcess.addLog("[gateway] 已连接：" + url)
+                    // 自动拉取网关模型清单（G-内置：33 家 Agent 插件提供商 + 任意 API 家）
+                    runCatching {
+                        val conn = gatewayProcess.connection()
+                        val models = conn.fetchModels().getOrNull()
+                        if (models != null && models.isNotEmpty()) {
+                            // 按 provider 分组写入 DataStore（内置家清单）
+                            val grouped = models.groupBy { it.provider }
+                            val caps = grouped.mapValues { (_, list) ->
+                                list.map { dev.praxis.core.gateway.BuiltinModelsCodec.from(it) }
+                            }
+                            settingsRepository.setGatewayBuiltinModelsJson(
+                                dev.praxis.core.gateway.BuiltinModelsCodec.encodeDetailed(caps)
+                            )
+                            gatewayProcess.addLog("[gateway] 拉到 " + models.size + " 个模型（" + grouped.size + " 家）")
+                        } else {
+                            gatewayProcess.addLog("[gateway] 拉模型失败或为空")
                         }
-                        settingsRepository.setGatewayBuiltinModelsJson(
-                            dev.praxis.core.gateway.BuiltinModelsCodec.encodeDetailed(caps)
-                        )
-                        gatewayProcess.addLog("[gateway] 拉到 " + models.size + " 个模型（" + grouped.size + " 家）")
-                    } else {
-                        gatewayProcess.addLog("[gateway] 拉模型失败或为空")
                     }
-                }
-            },
-            onFailure = { error ->
-                gatewayProcess.addLog("[gateway] 自动连接失败：" + (error.message ?: "未知"))
-            },
-        )
+                },
+                onFailure = { error ->
+                    gatewayProcess.addLog("[gateway] 自动连接失败：" + (error.message ?: "未知"))
+                },
+            )
+        }
+        } else if (gatewayInstaller.isInstalled(gatewayRootfsEnv)) {
+            gatewayProcess.startInContainer(gatewayEnvPort, gatewayRootfsEnv)
+        } else {
+            gatewayProcess.addLog("[gateway] 还没有网关可用：配外部地址，或点下方「安装内置网关」")
+        }
     }
     // 定期刷新日志到 UI（日志窗口的数据源）。
     LaunchedEffect(gatewayProcess) {
@@ -2160,6 +2181,26 @@ fun PraxisApp(
                         settingsRepository.setGatewayConnectionJson(
                             dev.praxis.core.gateway.adapters.GatewayConnectionCodec.encode(updated),
                         )
+                    }
+                },
+                builtinInstalled = gatewayInstaller.isInstalled(gatewayRootfsEnv),
+                onInstallBuiltin = {
+                    coroutineScope.launch {
+                        val result = gatewayInstaller.install(
+                            gatewayEnvPort, gatewayRootfsEnv,
+                        ) { line -> gatewayProcess.addLog(line) }
+                        result.fold(
+                            onSuccess = { gatewayProcess.startInContainer(gatewayEnvPort, gatewayRootfsEnv) },
+                            onFailure = { /* 错误已在日志里 */ },
+                        )
+                    }
+                },
+                onStartBuiltin = {
+                    gatewayProcess.startInContainer(gatewayEnvPort, gatewayRootfsEnv)
+                },
+                onStopBuiltin = {
+                    coroutineScope.launch {
+                        gatewayProcess.stopInContainer(gatewayEnvPort, gatewayRootfsEnv)
                     }
                 },
                     is dev.praxis.data.gateway.GatewayState.Running -> "已连接 " + gs.baseUrl

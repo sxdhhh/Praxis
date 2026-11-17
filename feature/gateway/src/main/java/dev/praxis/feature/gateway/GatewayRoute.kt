@@ -66,6 +66,14 @@ fun GatewayRoute(
         dev.praxis.core.gateway.adapters.GatewayConnectionSettings(),
     /** 连接设置变更回调。 */
     onConnectionSettingsChange: (dev.praxis.core.gateway.adapters.GatewayConnectionSettings) -> Unit = {},
+    /** 内置网关是否已装进容器。 */
+    builtinInstalled: Boolean = false,
+    /** 安装内置网关（下载 → 容器内解包）。 */
+    onInstallBuiltin: () -> Unit = {},
+    /** 启动内置网关。 */
+    onStartBuiltin: () -> Unit = {},
+    /** 停止内置网关。 */
+    onStopBuiltin: () -> Unit = {},
     /** 网关日志行列表（:app 从 GatewayProcess 拉过来）。 */
     gatewayLogs: List<String> = emptyList(),
     /** 网关状态描述（如 "运行中 3065" / "已停止"）。 */
@@ -289,6 +297,19 @@ fun GatewayRoute(
                                         apiKey = keyText.value,
                                     ),
                                 )
+                    MiuixNavigationItemWidget(
+                        title = if (builtinInstalled) "启动内置网关" else "安装内置网关（约 13 MB，装进手机容器）",
+                        description = if (builtinInstalled)
+                            "跑在手机自己的 Linux 容器里，127.0.0.1 就是手机"
+                        else "下载官方 arm64 二进制装进容器；需要先装好 Linux 环境",
+                        onClick = onInstallBuiltin.takeIf { !builtinInstalled }
+                            ?: onStartBuiltin,
+                    ),
+                    MiuixNavigationItemWidget(
+                        title = "停止内置网关",
+                        description = "只在内置网关运行时有效",
+                        onClick = onStopBuiltin,
+                    ),
                             }
                         },
                     )
