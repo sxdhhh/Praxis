@@ -139,7 +139,7 @@ class GatewayProcess(
      *
      * 日志通过 [onLine] 直接进环形缓冲 —— 网关是前台进程，stdout 就是它的日志。
      */
-    fun startInContainer(
+    suspend fun startInContainer(
         envPort: dev.praxis.feature.settings.env.LinuxEnvPort,
         env: dev.praxis.core.linux.LinuxEnvironment,
     ): Result<Unit> {

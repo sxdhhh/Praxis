@@ -659,7 +659,7 @@ fun PraxisApp(
         org.koin.compose.koinInject()
     val gatewayInstaller = remember {
         dev.praxis.data.gateway.GatewayContainerInstaller()
-            .withCacheDir(java.io.File(context.cacheDir, "gateway"))
+            .withCacheDir(java.io.File(appContext.cacheDir, "gateway"))
     }
     val gatewayRootfsEnv = remember {
         gatewayEnvPort.defaultEnvironment(dev.praxis.core.linux.LinuxDistro.Ubuntu)
@@ -685,7 +685,6 @@ fun PraxisApp(
     // ── 维护页状态（导入到网关 + 保活）──
     var keepaliveJson by remember { mutableStateOf("") }
     var gatewayImportMessage by remember { mutableStateOf<String?>(null) }
-    var gatewayImportBusy by remember { mutableStateOf(false) }
     var keepaliveSaveMessage by remember { mutableStateOf<String?>(null) }
     // 取登录方式。
     LaunchedEffect(loginProviderId) {
