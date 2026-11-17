@@ -1,6 +1,6 @@
 # 当前状态指针
 
-- 轮次：**round-28（签到/积分完成；剩导入账号 + 保活 → 最终审查 → 推 CI）**
+- 轮次：**round-29（六项功能全部落地；下一步：最终审查 → 推 CI → 修红）**
 - 新方向：内置 Agent2API 网关，33 家 Agent 插件提供商全功能可用
 - 已提交：GatewayConnection 通信层 / ProviderCatalog 清理 / 登录恢复 / 上限编辑 / OkHttp 依赖
 - 用户新需求：
