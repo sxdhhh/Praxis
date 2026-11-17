@@ -1,6 +1,6 @@
 # 当前状态指针
 
-- 轮次：**round-22（网关内置方向——GatewayConnection + 登录恢复 + 上限编辑 + OkHttp 依赖已提交，待继续）**
+- 轮次：**round-25（内置网关已落地：容器内运行 + 安装/启动/停止；下一步：真机验证 + 插件自动安装）**
 - 新方向：内置 Agent2API 网关，33 家 Agent 插件提供商全功能可用
 - 已提交：GatewayConnection 通信层 / ProviderCatalog 清理 / 登录恢复 / 上限编辑 / OkHttp 依赖
 - 用户新需求：
