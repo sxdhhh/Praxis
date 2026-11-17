@@ -2,7 +2,7 @@ package dev.praxis.data.gateway
 
 import android.os.Build
 import dev.praxis.core.linux.LinuxEnvironment
-import dev.praxis.core.linux.LinuxEnvPort
+import dev.praxis.feature.settings.env.LinuxEnvPort
 import dev.praxis.core.linux.ProotCommand
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

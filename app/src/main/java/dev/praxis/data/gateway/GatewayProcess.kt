@@ -88,7 +88,7 @@ class GatewayProcess(
             processRunning.set(true)
             val command = listOf(binaryPath) + args
             val process = ProcessBuilder(command).redirectErrorStream(true).start()
-            _state.value = GatewayState.Starting(process.pid())
+            _state.value = GatewayState.Starting(null)
             thread(isDaemon = true, name = "gateway-log") {
                 runCatching {
                     process.inputStream.bufferedReader().forEachLine { line ->
@@ -107,7 +107,7 @@ class GatewayProcess(
                     addLog("[gateway] 进程退出（code=" + exitCode + "）")
                 }
             }
-            addLog("[gateway] 进程已启动 pid=" + process.pid())
+            addLog("[gateway] 进程已启动")
         }.onFailure { error ->
             processRunning.set(false)
             addLog("[gateway] 启动失败：" + (error.message ?: error.javaClass.simpleName))
@@ -125,7 +125,7 @@ class GatewayProcess(
     // ── 内置模式：跑在手机自己的 proot 容器里 ─────────────────
 
     /** 长驻会话句柄（stop 时用）。 */
-    private var containerSession: dev.praxis.core.linux.LinuxEnvPort.SessionHandle? = null
+    private var containerSession: dev.praxis.feature.settings.env.LinuxEnvPort.SessionHandle? = null
 
     /** 容器安装器（懒建 —— 它只在「启动内置网关」时用到）。 */
     var containerInstaller: GatewayContainerInstaller? = null
@@ -140,7 +140,7 @@ class GatewayProcess(
      * 日志通过 [onLine] 直接进环形缓冲 —— 网关是前台进程，stdout 就是它的日志。
      */
     fun startInContainer(
-        envPort: dev.praxis.core.linux.LinuxEnvPort,
+        envPort: dev.praxis.feature.settings.env.LinuxEnvPort,
         env: dev.praxis.core.linux.LinuxEnvironment,
     ): Result<Unit> {
         if (containerSession?.isAlive == true) return Result.success(Unit)
@@ -167,7 +167,7 @@ class GatewayProcess(
 
     /** 停止容器里的网关：先关会话（杀 proot），再补一刀 pkill 确保干净。 */
     suspend fun stopInContainer(
-        envPort: dev.praxis.core.linux.LinuxEnvPort,
+        envPort: dev.praxis.feature.settings.env.LinuxEnvPort,
         env: dev.praxis.core.linux.LinuxEnvironment,
     ) {
         stopping.set(true)
