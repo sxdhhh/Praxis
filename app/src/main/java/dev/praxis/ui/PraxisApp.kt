@@ -927,19 +927,16 @@ fun PraxisApp(
     //  1. 用户配了外部地址 → 连外部；
     //  2. 没配外部、容器里已装网关 → 自动启内置（127.0.0.1 就是手机自己）；
     //  3. 两者都没有 → 日志窗口提示怎么装。
-    LaunchedEffect(gatewayConnSettings) {
+    LaunchedEffect(gatewayProcess) {
         if (gatewayConnSettings.isConfigured) {
-        LaunchedEffect(gatewayProcess) {
             val result = gatewayProcess.connectExternal()
             result.fold(
                 onSuccess = { url ->
                     gatewayProcess.addLog("[gateway] 已连接：" + url)
-                    // 自动拉取网关模型清单（G-内置：33 家 Agent 插件提供商 + 任意 API 家）
                     runCatching {
                         val conn = gatewayProcess.connection()
                         val models = conn.fetchModels().getOrNull()
                         if (models != null && models.isNotEmpty()) {
-                            // 按 provider 分组写入 DataStore（内置家清单）
                             val grouped = models.groupBy { it.provider }
                             val caps = grouped.mapValues { (_, list) ->
                                 list.map { dev.praxis.core.gateway.BuiltinModelsCodec.from(it) }
@@ -957,7 +954,6 @@ fun PraxisApp(
                     gatewayProcess.addLog("[gateway] 自动连接失败：" + (error.message ?: "未知"))
                 },
             )
-        }
         } else if (gatewayInstaller.isInstalled(gatewayRootfsEnv)) {
             gatewayProcess.startInContainer(gatewayEnvPort, gatewayRootfsEnv)
         } else {

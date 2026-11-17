@@ -234,6 +234,18 @@ object BuiltinModelsCodec {
     /**
      * 从拉取结果构造条目（core:gateway 依赖 core:ai 是既有方向 —— AiErrorMapping 同）。
      */
+    /**
+     * 网关模型条目 → 能力位（G-内置：模型来自 /v1/models 的 owned_by 分组）。
+     * 网关能力位缺失（null）时按「缺键放行」语义传 null。
+     */
+    fun from(entry: dev.praxis.core.gateway.adapters.GatewayModelEntry): BuiltinModelCaps = BuiltinModelCaps(
+        id = entry.id,
+        supportsImages = entry.supportsImages,
+        supportsReasoning = entry.supportsReasoning,
+        supportsToolCall = entry.supportsToolCall,
+        maxInputTokens = entry.maxInputTokens,
+        maxOutputTokens = entry.maxOutputTokens,
+    )
     fun from(option: dev.praxis.core.ai.AiModelOption): BuiltinModelCaps = BuiltinModelCaps(
             id = option.id,
             supportsImages = option.supportsImages,
