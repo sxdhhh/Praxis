@@ -677,6 +677,11 @@ fun PraxisApp(
 
     // 轮询协程的句柄（取消登录时用）。
     var loginPollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    // ── 签到 / 积分状态 ──
+    var checkinMessage by remember { mutableStateOf("") }
+    var checkinTakenToday by remember { mutableStateOf(false) }
+    var creditsMessage by remember { mutableStateOf("") }
+    var checkinBusy by remember { mutableStateOf(false) }
     // 取登录方式。
     LaunchedEffect(loginProviderId) {
         if (loginProviderId.isBlank()) return@LaunchedEffect
@@ -780,6 +785,55 @@ fun PraxisApp(
         if (state.isNotBlank()) {
             coroutineScope.launch {
                 runCatching { gatewayProcess.connection().cancelLogin(state) }
+            }
+        }
+    }
+
+    // ── 签到动作 ──
+    val doClaim: () -> Unit = {
+        if (!checkinBusy) {
+            checkinBusy = true
+            coroutineScope.launch {
+                val conn = gatewayProcess.connection()
+                conn.claimCheckin().fold(
+                    onSuccess = { result ->
+                        checkinMessage = dev.praxis.core.gateway.adapters.CheckinRules.claimMessage(result)
+                        checkinTakenToday = result.takenToday
+                        gatewayProcess.addLog("[checkin] " + checkinMessage)
+                    },
+                    onFailure = { e ->
+                        checkinMessage = "签到失败：" + (e.message ?: "未知")
+                        checkinTakenToday = true
+                    },
+                )
+                checkinBusy = false
+            }
+        }
+    }
+    val doRunAuto: () -> Unit = {
+        if (!checkinBusy) {
+            checkinBusy = true
+            coroutineScope.launch {
+                gatewayProcess.connection().runAutoCheckin().fold(
+                    onSuccess = { resp -> checkinMessage = "自动签到已开始：" + resp.take(120); checkinTakenToday = false },
+                    onFailure = { e -> checkinMessage = "自动签到失败：" + (e.message ?: "未知"); checkinTakenToday = true },
+                )
+                checkinBusy = false
+            }
+        }
+    }
+    val doRefreshCredits: () -> Unit = {
+        if (!checkinBusy) {
+            checkinBusy = true
+            coroutineScope.launch {
+                val conn = gatewayProcess.connection()
+                val report = conn.claimAndReport().getOrNull()
+                creditsMessage = if (report != null) {
+                    dev.praxis.core.gateway.adapters.CheckinRules.creditsText(report) ?: report.take(160)
+                } else {
+                    conn.usageSummary().getOrNull()?.take(160) ?: "拉不到积分数据"
+                }
+                checkinBusy = false
             }
         }
     }
@@ -2371,6 +2425,13 @@ fun PraxisApp(
                     loginMethodChosen = null
                     loginPhase = dev.praxis.core.gateway.adapters.LoginPhase.Idle
                 },
+                checkinMessage = checkinMessage,
+                checkinTakenToday = checkinTakenToday,
+                creditsMessage = creditsMessage,
+                checkinBusy = checkinBusy,
+                onClaimCheckin = doClaim,
+                onRunAutoCheckin = doRunAuto,
+                onRefreshCredits = doRefreshCredits,
                     is dev.praxis.data.gateway.GatewayState.Running -> "已连接 " + gs.baseUrl
                     is dev.praxis.data.gateway.GatewayState.Starting -> "启动中…"
                     is dev.praxis.data.gateway.GatewayState.Crashed -> "崩溃（code=" + gs.exitCode + "）"

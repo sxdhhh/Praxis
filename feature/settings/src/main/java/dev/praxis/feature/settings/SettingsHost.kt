@@ -151,6 +151,14 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
     onCancelLogin: () -> Unit = {},
     /** 打开登录助手：设置 providerId 触发方式加载。 */
     onOpenLoginAssistant: (String, String) -> Unit = { _, _ -> },
+    /** 签到/积分（网关侧逻辑，Praxis 只显示与触发）。 */
+    checkinMessage: String = "",
+    checkinTakenToday: Boolean = false,
+    creditsMessage: String = "",
+    checkinBusy: Boolean = false,
+    onClaimCheckin: () -> Unit = {},
+    onRunAutoCheckin: () -> Unit = {},
+    onRefreshCredits: () -> Unit = {},
     /** 网关日志（:app 从 GatewayProcess 拉过来）。 */
     gatewayLogLines: List<String> = emptyList(),
     /** 网关状态一句话。 */
@@ -687,6 +695,14 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
     onCancelLogin: () -> Unit = {},
     /** 打开登录助手：设置 providerId 触发方式加载。 */
     onOpenLoginAssistant: (String, String) -> Unit = { _, _ -> },
+    /** 签到/积分（网关侧逻辑，Praxis 只显示与触发）。 */
+    checkinMessage: String = "",
+    checkinTakenToday: Boolean = false,
+    creditsMessage: String = "",
+    checkinBusy: Boolean = false,
+    onClaimCheckin: () -> Unit = {},
+    onRunAutoCheckin: () -> Unit = {},
+    onRefreshCredits: () -> Unit = {},
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
@@ -1120,6 +1136,15 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
                 )
             }
         }
+        PraxisRoute.SettingsGatewayCheckin -> dev.praxis.feature.gateway.GatewayCheckinScreen(
+            checkinMessage = checkinMessage,
+            checkinTakenToday = checkinTakenToday,
+            creditsMessage = creditsMessage,
+            busy = checkinBusy,
+            onClaim = onClaimCheckin,
+            onRunAuto = onRunAutoCheckin,
+            onRefreshCredits = onRefreshCredits,
+        )
         PraxisRoute.SettingsGatewayProxy -> dev.praxis.feature.gateway.GatewayProxyScreen(
             settings = gatewayProxySettings,
             accounts = gatewayProxyAccounts,

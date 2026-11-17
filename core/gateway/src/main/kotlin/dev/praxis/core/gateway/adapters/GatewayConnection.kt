@@ -210,6 +210,83 @@ class GatewayConnection(
             }
         }
 
+    // ── 签到 / 积分（文档语义来自网关 api/billing.rs，不是猜的）────
+    //
+    // **409 的语义**：POST /api/checkin 在「今天已领过」时返回
+    // 409 + success:false + msg（如「今日已签到」）—— 这是正常结果，不是失败。
+    // 面板前端按 warn 展示；Praxis 也这么对待（CheckinResult.takenToday）。
+
+    /** 签到活动状态（无活动/无数据时 data 为 null）。 */
+    suspend fun checkinStatus(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.get(url("/api/checkin/status"), authHeaders()).use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code)
+                resp.body?.string().orEmpty()
+            }
+        }
+    }
+
+    /**
+     * 领取每日签到积分。
+     * @return [CheckinResult]：takenToday=true 表示今天已经领过（409 分支）。
+     */
+    suspend fun claimCheckin(): Result<CheckinResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.postJson(url("/api/checkin"), "{}", authHeaders()).use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (resp.code == 409) {
+                    // 已领取：从 body 里把上游的 msg 抠出来给用户看。
+                    val msg = runCatching {
+                        json.parseToJsonElement(body).jsonObject["data"]?.jsonObject
+                            ?.get("msg")?.jsonPrimitive?.contentOrNull
+                    }.getOrNull()
+                    return@use CheckinResult(takenToday = true, message = msg ?: "今日已签到")
+                }
+                if (!resp.isSuccessful) error("签到失败（HTTP " + resp.code + "）：" + body.take(160))
+                CheckinResult(takenToday = false, message = body)
+            }
+        }
+    }
+
+    /** 签到 + 查余额（一次调用拿两个结果）。 */
+    suspend fun claimAndReport(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.postJson(url("/api/checkin/claim-and-report"), "{}", authHeaders()).use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code)
+                resp.body?.string().orEmpty()
+            }
+        }
+    }
+
+    /** 积分汇总（GET /api/usage）。 */
+    suspend fun usageSummary(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.get(url("/api/usage"), authHeaders()).use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code)
+                resp.body?.string().orEmpty()
+            }
+        }
+    }
+
+    /** 自动签到设置（GET /api/auto-checkin）。 */
+    suspend fun autoCheckin(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.get(url("/api/auto-checkin"), authHeaders()).use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code)
+                resp.body?.string().orEmpty()
+            }
+        }
+    }
+
+    /** 立即跑一轮自动签到（对全部目标账号）。 */
+    suspend fun runAutoCheckin(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.postJson(url("/api/auto-checkin/run"), "{}", authHeaders()).use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code)
+                resp.body?.string().orEmpty()
+            }
+        }
+    }
     /**
      * 面板首次注册（网关刚初始化、还没有管理员时用）。
      * 已注册时网关返回 409 —— 这里把它当作「已存在」的成功。
