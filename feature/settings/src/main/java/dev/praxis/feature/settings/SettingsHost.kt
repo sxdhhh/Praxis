@@ -116,6 +116,10 @@ fun SettingsHost(
     onBackupDatabase: () -> Unit = {},
     /** 上次备份的结果文案。 */
     backupMessage: String? = null,
+    /** 网关日志（:app 从 GatewayProcess 拉过来）。 */
+    gatewayLogLines: List<String> = emptyList(),
+    /** 网关状态一句话。 */
+    gatewayConnectionStatus: String = "未连接",
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
@@ -400,6 +404,8 @@ fun SettingsHost(
             onExportGateway = onExportGateway,
             onBackupDatabase = onBackupDatabase,
             backupMessage = backupMessage,
+        gatewayLogLines = gatewayLogLines,
+        gatewayConnectionStatus = gatewayConnectionStatus,
             gatewayEnabled = gatewayEnabled,
             onGatewayEnabledChange = onGatewayEnabledChange,
             gatewayModelRows = gatewayModelRows,
@@ -979,6 +985,8 @@ private fun SettingsPageBody(
             accountCount = gatewayAccountRows.size,
             onBackupDatabase = onBackupDatabase,
             backupMessage = backupMessage,
+        gatewayLogs = gatewayLogLines,
+        gatewayStatus = gatewayConnectionStatus,
             gatewayEnabled = gatewayEnabled,
             onGatewayEnabledChange = onGatewayEnabledChange,
             modifier = modifier,

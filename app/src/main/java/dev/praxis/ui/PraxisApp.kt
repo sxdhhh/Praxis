@@ -2127,6 +2127,13 @@ fun PraxisApp(
                     }
                 },
                 gatewayEnabled = gatewayEnabled,
+                gatewayLogLines = gatewayLogs.value,
+                gatewayConnectionStatus = when (val gs = gatewayState) {
+                    is dev.praxis.data.gateway.GatewayState.Running -> "已连接 " + gs.baseUrl
+                    is dev.praxis.data.gateway.GatewayState.Starting -> "启动中…"
+                    is dev.praxis.data.gateway.GatewayState.Crashed -> "崩溃（code=" + gs.exitCode + "）"
+                    dev.praxis.data.gateway.GatewayState.Stopped -> "未连接（外部网关未运行）"
+                },
                 onBackupDatabase = { backupRequest += 1 },
                 backupMessage = backupMessage,
                 onGatewayEnabledChange = { enabled ->
