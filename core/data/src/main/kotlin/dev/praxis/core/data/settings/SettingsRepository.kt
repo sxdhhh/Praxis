@@ -776,6 +776,13 @@ class SettingsRepository(
     suspend fun setGatewayBuiltinModelsFetchedAtJson(text: String) =
         put(KEY_GATEWAY_BUILTIN_MODELS_FETCHED_AT, text)
 
+
+    /** Agent2API 网关连接配置（JSON）：url/apiKey/adminUser/adminPass。 */
+    val gatewayConnectionJson: Flow<String?> =
+        dataStore.data.map { it[KEY_GATEWAY_CONNECTION] }
+
+    suspend fun setGatewayConnectionJson(text: String) =
+        put(KEY_GATEWAY_CONNECTION, text)
     suspend fun setGatewayRouteGroupsJson(text: String) =
         put(KEY_GATEWAY_ROUTE_GROUPS, text)
 
@@ -1505,6 +1512,9 @@ private val KEY_GATEWAY_BUILTIN_MODELS = stringPreferencesKey("gateway_builtin_m
 /** 内置家清单的拉取时刻，见 [SettingsRepository.gatewayBuiltinModelsFetchedAtJson]。 */
 private val KEY_GATEWAY_BUILTIN_MODELS_FETCHED_AT =
     stringPreferencesKey("gateway_builtin_models_fetched_at")
+
+/** Agent2API 网关连接配置，见 [SettingsRepository.gatewayConnectionJson]。 */
+private val KEY_GATEWAY_CONNECTION = stringPreferencesKey("gateway_connection")
 
 /** 网关系统设置，见 [SettingsRepository.gatewaySystemSettingsJson]。 */
 private val KEY_GATEWAY_SYSTEM = stringPreferencesKey("gateway_system")
