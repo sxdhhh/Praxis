@@ -701,6 +701,10 @@ private fun SettingsPageBody(
     onBackupDatabase: () -> Unit = {},
     /** 上次备份的结果文案。 */
     backupMessage: String? = null,
+    /** 网关日志（:app 从 GatewayProcess 拉过来）。 */
+    gatewayLogLines: List<String> = emptyList(),
+    /** 网关状态一句话。 */
+    gatewayConnectionStatus: String = "未连接",
     /** Agent2API 网关连接设置（G-内置）。 */
     connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
         dev.praxis.core.gateway.adapters.GatewayConnectionSettings(),
