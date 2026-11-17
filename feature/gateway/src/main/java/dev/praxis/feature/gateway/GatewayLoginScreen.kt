@@ -63,6 +63,7 @@ fun GatewayLoginScreen(
             .verticalScroll(rememberScrollState()),
     ) {
         SettingsSectionHeader(
+            icon = androidx.compose.material.icons.Icons.Outlined.Login,
             title = "登录 " + providerLabel,
             subtitle = when {
                 methodsLoading -> "正在取登录方式…"

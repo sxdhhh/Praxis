@@ -44,6 +44,7 @@ fun GatewayCheckinScreen(
             .verticalScroll(rememberScrollState()),
     ) {
         SettingsSectionHeader(
+            icon = androidx.compose.material.icons.Icons.Outlined.HowToVote,
             title = "签到与积分",
             subtitle = "数据来自网关（签到逻辑在网关里，Praxis 只管显示与触发）",
         )

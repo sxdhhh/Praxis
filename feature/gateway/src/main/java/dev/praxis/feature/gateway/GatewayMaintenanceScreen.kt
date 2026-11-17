@@ -55,6 +55,7 @@ fun GatewayMaintenanceScreen(
             .verticalScroll(rememberScrollState()),
     ) {
         SettingsSectionHeader(
+            icon = androidx.compose.material.icons.Icons.Outlined.Build,
             title = "导入账号到网关",
             subtitle = "粘贴网关导出的账号 JSON（顶层 accounts 数组）",
         )
@@ -88,6 +89,7 @@ fun GatewayMaintenanceScreen(
 
         Spacer(Modifier.height(16.dp))
         SettingsSectionHeader(
+            icon = androidx.compose.material.icons.Icons.Outlined.Autorenew,
             title = "保活配置",
             subtitle = "GET/POST /api/checkin-keepalive（网关按它维持日活）",
         )

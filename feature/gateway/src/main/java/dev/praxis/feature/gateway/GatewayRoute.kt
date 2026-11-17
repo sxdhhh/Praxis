@@ -81,10 +81,6 @@ fun GatewayRoute(
     onSetupAdmin: (String, String) -> Unit = { _, _ -> },
     /** 安装提供商插件（33 家 Agent 插件都在这一个包里）。 */
     onInstallPlugins: () -> Unit = {},
-    /** 网关日志行列表（:app 从 GatewayProcess 拉过来）。 */
-    gatewayLogs: List<String> = emptyList(),
-    /** 网关状态描述（如 "运行中 3065" / "已停止"）。 */
-    gatewayStatus: String = "未连接",
     modifier: Modifier = Modifier,
 ) {
     val navigator = LocalNavigator.current
@@ -258,6 +254,8 @@ fun GatewayRoute(
         item(key = "__gateway_connection__") {
             val urlText = remember { mutableStateOf(connectionSettings.baseUrl) }
             val keyText = remember { mutableStateOf(connectionSettings.apiKey) }
+            var adminUser by remember { mutableStateOf("") }
+            var adminPass by remember { mutableStateOf("") }
             val urlError = dev.praxis.core.gateway.adapters.GatewayAddressRules.check(urlText.value)
             Card(
                 modifier = Modifier
@@ -271,7 +269,7 @@ fun GatewayRoute(
                         value = urlText.value,
                         onValueChange = { urlText.value = it },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        label = "网关地址（http://192.168.1.80:3065）",
+                        label = "网关地址（留空 = 用内置网关 127.0.0.1:3065）",
                         useLabelAsPlaceholder = true,
                         singleLine = true,
                     )
@@ -290,13 +288,47 @@ fun GatewayRoute(
                         label = "网关 Key（面板里建的，可选）",
                         useLabelAsPlaceholder = true,
                         singleLine = true,
-                    var adminUser by remember { mutableStateOf("") }
-                    var adminPass by remember { mutableStateOf("") }
+                    )
+                    MiuixNavigationItemWidget(
+                        title = "保存连接设置",
+                        description = if (urlText.value.isBlank()) "留空即使用内置网关（推荐）"
+                            else if (urlError == null) "保存后重启 App 生效"
+                            else "地址不可用",
+                        onClick = {
+                            if (urlError == null) {
+                                onConnectionSettingsChange(
+                                    dev.praxis.core.gateway.adapters.GatewayConnectionSettings(
+                                        baseUrl = urlText.value,
+                                        apiKey = keyText.value,
+                                    ),
+                                )
+                            }
+                        },
+                    )
+                    MiuixNavigationItemWidget(
+                        title = if (builtinInstalled) "启动内置网关"
+                            else "安装内置网关（约 13 MB，装进手机容器）",
+                        description = if (builtinInstalled)
+                            "跑在手机自己的 Linux 容器里，127.0.0.1 就是手机"
+                        else "下载官方 arm64 二进制装进容器；需要先装好 Linux 环境",
+                        onClick = if (builtinInstalled) onStartBuiltin else onInstallBuiltin,
+                    )
+                    MiuixNavigationItemWidget(
+                        title = "停止内置网关",
+                        description = "只在内置网关运行时有效",
+                        onClick = onStopBuiltin,
+                    )
+                    Text(
+                        text = "首次使用内置网关：填管理员账号密码 → 初始化 → 安装 33 家插件",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
                     TextField(
                         value = adminUser,
                         onValueChange = { adminUser = it },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        label = "管理员账号（首次使用会注册；管理 API 需要）",
+                        label = "管理员账号（首次会自动注册）",
                         useLabelAsPlaceholder = true,
                         singleLine = true,
                     )
@@ -315,36 +347,6 @@ fun GatewayRoute(
                             if (adminUser.isNotBlank() && adminPass.isNotBlank()) {
                                 onSetupAdmin(adminUser, adminPass)
                                 onInstallPlugins()
-                            }
-                        },
-                    )
-                    )
-                    MiuixNavigationItemWidget(
-                        title = "保存连接设置",
-                        description = if (urlError == null && urlText.value.isNotBlank())
-                            "保存后重启 App 生效"
-                        else "地址不可用",
-                        onClick = {
-                            if (urlError == null && urlText.value.isNotBlank()) {
-                                onConnectionSettingsChange(
-                                    dev.praxis.core.gateway.adapters.GatewayConnectionSettings(
-                                        baseUrl = urlText.value,
-                                        apiKey = keyText.value,
-                                    ),
-                                )
-                    MiuixNavigationItemWidget(
-                        title = if (builtinInstalled) "启动内置网关" else "安装内置网关（约 13 MB，装进手机容器）",
-                        description = if (builtinInstalled)
-                            "跑在手机自己的 Linux 容器里，127.0.0.1 就是手机"
-                        else "下载官方 arm64 二进制装进容器；需要先装好 Linux 环境",
-                        onClick = onInstallBuiltin.takeIf { !builtinInstalled }
-                            ?: onStartBuiltin,
-                    ),
-                    MiuixNavigationItemWidget(
-                        title = "停止内置网关",
-                        description = "只在内置网关运行时有效",
-                        onClick = onStopBuiltin,
-                    ),
                             }
                         },
                     )
