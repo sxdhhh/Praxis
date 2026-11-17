@@ -57,6 +57,14 @@ fun GatewayRoute(
     onBackupDatabase: () -> Unit = {},
     /** 上次备份的结果文案（null = 还没点过）。 */
     backupMessage: String? = null,
+    /** 网关日志行列表（:app 从 GatewayProcess 拉过来）。 */
+    gatewayLogs: List<String> = emptyList(),
+    /** 网关状态描述（如 "运行中 3065" / "已停止"）。 */
+    gatewayStatus: String = "未连接",
+    /** 网关日志行列表（:app 从 GatewayProcess 拉过来）。 */
+    gatewayLogs: List<String> = emptyList(),
+    /** 网关状态描述（如 "运行中 3065" / "已停止"）。 */
+    gatewayStatus: String = "未连接",
     modifier: Modifier = Modifier,
 ) {
     val navigator = LocalNavigator.current

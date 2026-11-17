@@ -1,9 +1,15 @@
 # 当前状态指针
 
-- 轮次：**round-21（GatewayConnection 通信层已写；下一步：启动网关 + 清 ProviderCatalog）**
-- 新目标：把 Agent2API 网关内置到 Praxis，让 33 家 Agent 插件提供商全功能可用
-- 已推提交（最后一次 CI 绿）：d1bc52f / 58ea1b2 / 2f974e6
-- 上游源码已下载：C:\creat-agent\work\a2p\Agent2Providers-main\
-- 方案文档：lookme/PROPOSAL-网关内置方案.md（路径 A：proot 容器跑网关）
-- Path B 的 ProviderAdapter 接口已写：core/gateway/adapters/（可复用或重构）
-- 下一步：见 PROPOSAL 文档的 Phase 2
+- 轮次：**round-22（网关内置方向——GatewayConnection + 登录恢复 + 上限编辑 + OkHttp 依赖已提交，待继续）**
+- 新方向：内置 Agent2API 网关，33 家 Agent 插件提供商全功能可用
+- 已提交：GatewayConnection 通信层 / ProviderCatalog 清理 / 登录恢复 / 上限编辑 / OkHttp 依赖
+- 用户新需求：
+  1. 网关打开软件自启动
+  2. 添加日志窗口（和环境页的一样）
+- core:gateway 测试 433 例全绿（本轮）
+- 未推（按用户指示：全部完成后统一审查再推）
+- 下一步：
+  1. GatewayProcess（启动/停止/日志捕获）
+  2. PraxisApp 自动启动网关
+  3. 网关设置页加日志窗口
+  4. ProviderCatalog 的 33 家接上网关 API

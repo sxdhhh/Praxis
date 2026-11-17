@@ -121,6 +121,9 @@ val appModule = module {
     // 没有这份「跨请求」的表，粘性开关就是真开假效果（G6）。
     single { dev.praxis.core.gateway.StickyAccountStore() }
 
+    // Agent2API 网关进程管理（连接外部网关 / 启动本地进程）。
+    single { dev.praxis.data.gateway.GatewayProcess(port = 3065) }
+
     // QNN 运行时解压（NPU 路线；文档 §1.4）。
     single {
         dev.praxis.data.imagegen.QnnRuntimeInstaller(

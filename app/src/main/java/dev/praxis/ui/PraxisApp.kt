@@ -652,6 +652,10 @@ fun PraxisApp(
     }
     val imageGenDownloadManager: dev.praxis.data.imagegen.ImageModelDownloadManager =
         org.koin.compose.koinInject()
+    val gatewayProcess: dev.praxis.data.gateway.GatewayProcess =
+        org.koin.compose.koinInject()
+    val gatewayState by gatewayProcess.state.collectAsState()
+    val gatewayLogs = remember { mutableStateOf<List<String>>(emptyList()) }
     val imageGenDownloadState by imageGenDownloadManager.state.collectAsState()
     // 删除结果一句话（G19）；终态确认交给 manager.acknowledge()。
     var imageGenDeleteMessage by remember { mutableStateOf<String?>(null) }
@@ -693,6 +697,26 @@ fun PraxisApp(
     val imageGenCurrentTarget = imageGenTargetDecoded?.getOrNull()
     // 配置坏了 ≠ 没选过（G14）：两个态必须分开显示，否则用户以为是自己没配。
     val imageGenTargetBroken = imageGenTargetDecoded?.isFailure == true
+
+    // 网关自启动（G-内置）：App 打开时自动连接外部网关。
+    LaunchedEffect(gatewayProcess) {
+        val result = gatewayProcess.connectExternal()
+        result.fold(
+            onSuccess = { url ->
+                gatewayProcess.addLog("[gateway] 已连接：" + url)
+            },
+            onFailure = { error ->
+                gatewayProcess.addLog("[gateway] 自动连接失败：" + (error.message ?: "未知"))
+            },
+        )
+    }
+    // 定期刷新日志到 UI（日志窗口的数据源）。
+    LaunchedEffect(gatewayProcess) {
+        while (true) {
+            kotlinx.coroutines.delay(2000)
+            gatewayLogs.value = gatewayProcess.logLines()
+        }
+    }
 
     // 形态 C：随包引擎的起停（文档 §1.1 的 C + §3.1 的起法）。
     //
