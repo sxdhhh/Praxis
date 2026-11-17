@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -114,7 +115,7 @@ class GatewayConnection(
             runCatching {
                 val body = json.encodeToString(
                     kotlinx.serialization.json.JsonObject.serializer(),
-                    kotlinx.serialization.json.buildJsonObject {
+                    buildJsonObject {
                         put("method", kotlinx.serialization.json.JsonPrimitive(method))
                     }
                 )
@@ -194,7 +195,7 @@ class GatewayConnection(
                     url("/api/panel/login"),
                     Json.encodeToString(
                         kotlinx.serialization.json.JsonObject.serializer(),
-                        kotlinx.serialization.json.buildJsonObject {
+                        buildJsonObject {
                             put("username", kotlinx.serialization.json.JsonPrimitive(username))
                             put("password", kotlinx.serialization.json.JsonPrimitive(password))
                         }
@@ -218,7 +219,7 @@ class GatewayConnection(
             runCatching {
                 val body = json.encodeToString(
                     kotlinx.serialization.json.JsonObject.serializer(),
-                    kotlinx.serialization.json.buildJsonObject {
+                    buildJsonObject {
                         put("username", kotlinx.serialization.json.JsonPrimitive(username))
                         put("password", kotlinx.serialization.json.JsonPrimitive(password))
                     },
@@ -239,6 +240,112 @@ class GatewayConnection(
         }.getOrDefault(false)
     }
 
+    // ── 登录助手（33 家 Agent 提供商的登录流程）─────────────
+    //
+    // 协议对齐网关 web_shim.rs 的真实实现（不是猜的）：
+    //   methods → start(拿 authUrl) → [H5 容器打开] → wait 轮询 → callback（需要粘贴时）
+
+    /** 取该家提供商的登录方式清单。 */
+    suspend fun loginMethodsOf(provider: String): Result<LoginMethods> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                ProviderHttpClient.get(
+                    url("/api/session/login/methods?provider=" + java.net.URLEncoder.encode(provider, "UTF-8")),
+                    authHeaders(),
+                ).use { resp ->
+                    if (!resp.isSuccessful) error("取登录方式失败（HTTP " + resp.code + "）")
+                    LoginMethods.parse(resp.body?.string() ?: error("空响应"))
+                }
+            }
+        }
+
+    /**
+     * 发起登录。
+     * @param methodIndex 来自 [LoginMethod.methodIndex]（不是数组下标）
+     * @param edition "cn" 或 "intl"（各家分区不同）
+     */
+    suspend fun startLogin(
+        provider: String,
+        methodIndex: Int,
+        edition: String = "cn",
+    ): Result<LoginStart> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = json.encodeToString(
+                kotlinx.serialization.json.JsonObject.serializer(),
+                buildJsonObject {
+                    put("provider", kotlinx.serialization.json.JsonPrimitive(provider))
+                    put("edition", kotlinx.serialization.json.JsonPrimitive(edition))
+                    put("mode", kotlinx.serialization.json.JsonPrimitive("embedded"))
+                    put("methodIndex", kotlinx.serialization.json.JsonPrimitive(methodIndex))
+                    put("socialRestore", kotlinx.serialization.json.JsonPrimitive(false))
+                },
+            )
+            ProviderHttpClient.postJson(url("/api/session/login/start"), body, authHeaders()).use { resp ->
+                val text = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) error("发起登录失败（HTTP " + resp.code + "）：" + text.take(160))
+                val root = json.parseToJsonElement(text).jsonObject
+                LoginStart(
+                    state = root["state"]?.jsonPrimitive?.contentOrNull ?: error("响应缺 state"),
+                    authUrl = root["authUrl"]?.jsonPrimitive?.contentOrNull,
+                    instructions = root["instructions"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    pollIntervalMs = root["pollIntervalMs"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 3000L,
+                )
+            }
+        }
+    }
+
+    /** 轮询登录结果（一次）。 */
+    suspend fun waitLogin(state: String): Result<LoginWait> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.get(
+                url("/api/session/login/wait?state=" + java.net.URLEncoder.encode(state, "UTF-8")),
+                authHeaders(),
+            ).use { resp ->
+                if (!resp.isSuccessful) error("轮询失败（HTTP " + resp.code + "）")
+                LoginWait.parse(resp.body?.string() ?: error("空响应"))
+            }
+        }
+    }
+
+    /** 提交回调（manualCallback 的方式需要：粘贴整条回调 URL 或 code）。 */
+    suspend fun submitLoginCallback(state: String, callbackUrl: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val body = json.encodeToString(
+                    kotlinx.serialization.json.JsonObject.serializer(),
+                    buildJsonObject {
+                        put("state", kotlinx.serialization.json.JsonPrimitive(state))
+                        put("callbackUrl", kotlinx.serialization.json.JsonPrimitive(callbackUrl))
+                    },
+                )
+                ProviderHttpClient.postJson(url("/api/session/login/callback"), body, authHeaders()).use { resp ->
+                    if (!resp.isSuccessful) error("提交回调失败（HTTP " + resp.code + "）：" + (resp.body?.string()?.take(160) ?: ""))
+                }
+            }
+        }
+
+    /** 取消登录（撤掉网关侧任务；Trae 的回调端口靠这一步释放）。 */
+    suspend fun cancelLogin(state: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = json.encodeToString(
+                kotlinx.serialization.json.JsonObject.serializer(),
+                buildJsonObject { put("state", kotlinx.serialization.json.JsonPrimitive(state)) },
+            )
+            ProviderHttpClient.postJson(url("/api/session/login/cancel"), body, authHeaders()).use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code)
+            }
+        }
+    }
+
+    /** 账号列表（原始 JSON；登录成功后用它刷新 Praxis 账号页）。 */
+    suspend fun listAccounts(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.get(url("/api/accounts"), authHeaders()).use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code)
+                resp.body?.string().orEmpty()
+            }
+        }
+    }
     /**
      * 从官方发布页安装提供商插件（33 家 Agent 插件都在这一个包里）。
      * 需要先 [panelLogin]；target 不传 —— 网关自己知道自己跑在什么平台上。
@@ -248,7 +355,7 @@ class GatewayConnection(
             runCatching {
                 val body = json.encodeToString(
                     kotlinx.serialization.json.JsonObject.serializer(),
-                    kotlinx.serialization.json.buildJsonObject {
+                    buildJsonObject {
                         put("id", kotlinx.serialization.json.JsonPrimitive(pluginId))
                         put("action", kotlinx.serialization.json.JsonPrimitive("install"))
                     },
