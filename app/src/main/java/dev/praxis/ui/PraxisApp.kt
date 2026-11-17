@@ -2365,6 +2365,12 @@ fun PraxisApp(
                 onCallbackCaptured = captureLoginCallback,
                 onSubmitLoginCallback = submitManualCallback,
                 onCancelLogin = cancelLogin,
+                onOpenLoginAssistant = { id, label ->
+                    loginProviderId = id
+                    loginProviderLabel = label
+                    loginMethodChosen = null
+                    loginPhase = dev.praxis.core.gateway.adapters.LoginPhase.Idle
+                },
                     is dev.praxis.data.gateway.GatewayState.Running -> "已连接 " + gs.baseUrl
                     is dev.praxis.data.gateway.GatewayState.Starting -> "启动中…"
                     is dev.praxis.data.gateway.GatewayState.Crashed -> "崩溃（code=" + gs.exitCode + "）"

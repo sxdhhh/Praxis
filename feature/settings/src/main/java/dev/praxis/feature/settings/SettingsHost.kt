@@ -145,6 +145,8 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
     onCallbackCaptured: (String) -> Unit = {},
     onSubmitLoginCallback: (String) -> Unit = {},
     onCancelLogin: () -> Unit = {},
+    /** 打开登录助手：设置 providerId 触发方式加载。 */
+    onOpenLoginAssistant: (String, String) -> Unit = { _, _ -> },
     /** 网关日志（:app 从 GatewayProcess 拉过来）。 */
     gatewayLogLines: List<String> = emptyList(),
     /** 网关状态一句话。 */
@@ -679,6 +681,8 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
     onCallbackCaptured: (String) -> Unit = {},
     onSubmitLoginCallback: (String) -> Unit = {},
     onCancelLogin: () -> Unit = {},
+    /** 打开登录助手：设置 providerId 触发方式加载。 */
+    onOpenLoginAssistant: (String, String) -> Unit = { _, _ -> },
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
@@ -1067,20 +1071,6 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
         )
         // 账号页：账号池的存储层已经就绪，但还没有「添加账号」的界面（P1 剩余部分），
         // 所以这里传的是真实状态（空列表），不是占位数据。
-        PraxisRoute.SettingsGatewayLogin -> dev.praxis.feature.gateway.GatewayLoginScreen(
-            providerId = loginProviderId,
-            providerLabel = loginProviderLabel,
-            methods = loginMethods,
-            instructions = loginInstructions,
-            phase = loginPhase,
-            methodsLoading = loginMethodsLoading,
-            methodsError = loginMethodsError,
-            onPickMethod = onPickLoginMethod,
-            onCallbackCaptured = onCallbackCaptured,
-            onSubmitCallback = onSubmitLoginCallback,
-            onCancel = onCancelLogin,
-            onRetryMethods = onCancelLogin,
-        )
         PraxisRoute.SettingsGatewayAdd -> dev.praxis.feature.gateway.GatewayAddProviderScreen(
             providers = gatewayProviderChoices,
             onPick = { choice ->
@@ -1093,14 +1083,38 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
             val choice = gatewayProviderChoices.firstOrNull {
                 it.id == route.providerId
             }
-            dev.praxis.feature.gateway.GatewayAddLoginScreen(
-                providerId = route.providerId,
-                providerLabel = choice?.name ?: route.providerId,
-                baseUrl = choice?.baseUrl,
-                onSave = onSaveGatewayAccount,
-                saveError = gatewayAccountSaveError,
-                modifier = modifier,
-            )
+            // Agent 插件家走**登录助手**（网关的登录流程 + H5 容器）；
+            // agent2api 网关本身没有登录助手，保留直填 Key（网关 Key）。
+            if (route.providerId != "agent2api") {
+                LaunchedEffect(route.providerId) {
+                    onOpenLoginAssistant(route.providerId, choice?.name ?: route.providerId)
+                }
+                dev.praxis.feature.gateway.GatewayLoginScreen(
+                    providerId = route.providerId,
+                    providerLabel = choice?.name ?: route.providerId,
+                    methods = loginMethods,
+                    instructions = loginInstructions,
+                    phase = loginPhase,
+                    methodsLoading = loginMethodsLoading,
+                    methodsError = loginMethodsError,
+                    onPickMethod = onPickLoginMethod,
+                    onCallbackCaptured = onCallbackCaptured,
+                    onSubmitCallback = onSubmitLoginCallback,
+                    onCancel = onCancelLogin,
+                    onRetryMethods = {
+                        onOpenLoginAssistant(route.providerId, choice?.name ?: route.providerId)
+                    },
+                )
+            } else {
+                dev.praxis.feature.gateway.GatewayAddLoginScreen(
+                    providerId = route.providerId,
+                    providerLabel = choice?.name ?: route.providerId,
+                    baseUrl = choice?.baseUrl,
+                    onSave = onSaveGatewayAccount,
+                    saveError = gatewayAccountSaveError,
+                    modifier = modifier,
+                )
+            }
         }
         PraxisRoute.SettingsGatewayProxy -> dev.praxis.feature.gateway.GatewayProxyScreen(
             settings = gatewayProxySettings,
