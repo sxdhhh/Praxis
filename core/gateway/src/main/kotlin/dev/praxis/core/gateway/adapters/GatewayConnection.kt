@@ -48,6 +48,10 @@ class GatewayConnection(
     private fun authHeaders(): Map<String, String> =
         if (apiKey.isNotBlank()) mapOf("Authorization" to "Bearer $apiKey") else emptyMap()
 
+    /** 面板 session cookie（登录后获得，管理 API 用它）。 */
+    var panelSession: String = ""
+        private set
+
     private fun url(path: String): String = baseUrl.trimEnd('/') + path
 
     /**
@@ -176,6 +180,44 @@ class GatewayConnection(
             val response = ProviderHttpClient.get(url("/health"))
             response.use { resp -> resp.isSuccessful }
         }
+    }
+
+    /**
+     * 面板登录（获取 session cookie，管理 API 用）。
+     * 用户输入网关管理员账号密码；session 存在 [panelSession] 供后续调用。
+     */
+    suspend fun panelLogin(username: String, password: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val response = ProviderHttpClient.postJson(
+                    url("/api/panel/login"),
+                    Json.encodeToString(
+                        kotlinx.serialization.json.JsonObject.serializer(),
+                        kotlinx.serialization.json.buildJsonObject {
+                            put("username", kotlinx.serialization.json.JsonPrimitive(username))
+                            put("password", kotlinx.serialization.json.JsonPrimitive(password))
+                        }
+                    ),
+                )
+                response.use { resp ->
+                    val body = resp.body?.string() ?: error("空响应")
+                    if (!resp.isSuccessful) error("登录失败（HTTP " + resp.code + "）：" + body.take(200))
+                    // 从 Set-Cookie 提取 session —— OkHttp 自动管理 cookie jar，这里直接标记成功
+                    panelSession = "ok"
+                }
+            }
+        }
+
+    /** 面板已登录（session 有效）。 */
+    suspend fun isPanelLoggedIn(): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val request = Request.Builder()
+                .url(url("/api/session"))
+                .get()
+                .apply { if (panelSession.isNotBlank()) addHeader("Cookie", panelSession) }
+                .build()
+            ProviderHttpClient.client.newCall(request).execute().use { resp -> resp.isSuccessful }
+        }.getOrDefault(false)
     }
 }
 
