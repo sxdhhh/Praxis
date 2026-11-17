@@ -9,6 +9,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import okhttp3.Request
 
 /**
@@ -208,6 +209,77 @@ class GatewayConnection(
             }
         }
 
+    /**
+     * 面板首次注册（网关刚初始化、还没有管理员时用）。
+     * 已注册时网关返回 409 —— 这里把它当作「已存在」的成功。
+     */
+    suspend fun panelSetup(username: String, password: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val body = json.encodeToString(
+                    kotlinx.serialization.json.JsonObject.serializer(),
+                    kotlinx.serialization.json.buildJsonObject {
+                        put("username", kotlinx.serialization.json.JsonPrimitive(username))
+                        put("password", kotlinx.serialization.json.JsonPrimitive(password))
+                    },
+                )
+                ProviderHttpClient.postJson(url("/api/panel/setup"), body).use { resp ->
+                    if (resp.code == 409) return@use  // 已注册：等同成功
+                    if (!resp.isSuccessful) error("初始化失败（HTTP " + resp.code + "）：" + (resp.body?.string()?.take(160) ?: ""))
+                }
+            }
+        }
+
+    /** 面板是否已经注册过管理员。 */
+    suspend fun isPanelRegistered(): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.get(url("/api/panel/status")).use { resp ->
+                resp.isSuccessful && (resp.body?.string() ?: "").contains("\"registered\":true")
+            }
+        }.getOrDefault(false)
+    }
+
+    /**
+     * 从官方发布页安装提供商插件（33 家 Agent 插件都在这一个包里）。
+     * 需要先 [panelLogin]；target 不传 —— 网关自己知道自己跑在什么平台上。
+     */
+    suspend fun installPluginsFromRelease(pluginId: String = "agent2api-providers"): Result<String> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val body = json.encodeToString(
+                    kotlinx.serialization.json.JsonObject.serializer(),
+                    kotlinx.serialization.json.buildJsonObject {
+                        put("id", kotlinx.serialization.json.JsonPrimitive(pluginId))
+                        put("action", kotlinx.serialization.json.JsonPrimitive("install"))
+                    },
+                )
+                ProviderHttpClient.postJson(url("/api/plugins/install-from-release"), body).use { resp ->
+                    val text = resp.body?.string().orEmpty()
+                    if (!resp.isSuccessful) error("安装请求失败（HTTP " + resp.code + "）：" + text.take(160))
+                    text
+                }
+            }
+        }
+
+    /** 插件安装进度（轮询用；返回原始 JSON）。 */
+    suspend fun pluginProgress(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.get(url("/api/plugins/progress")).use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code)
+                resp.body?.string().orEmpty()
+            }
+        }
+    }
+
+    /** 已安装的插件清单（原始 JSON）。 */
+    suspend fun listPlugins(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.get(url("/api/plugins")).use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code)
+                resp.body?.string().orEmpty()
+            }
+        }
+    }
     /** 面板已登录（session 有效）。 */
     suspend fun isPanelLoggedIn(): Boolean = withContext(Dispatchers.IO) {
         runCatching {

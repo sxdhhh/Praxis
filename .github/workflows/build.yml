@@ -436,7 +436,10 @@ jobs:
             exit 1
           fi
 
+      # lint 很贵（约 3-6 分钟），每次 push 都跑不划算（用户反馈检查太久）。
+      # 改为手动触发（workflow_dispatch 勾选 lint）或在 inputs.task 里点名时才跑。
       - name: Lint
+        if: github.event_name == 'workflow_dispatch' && (github.event.inputs.task == 'lint' || github.event.inputs.task == 'lintDebug')
         run: ./gradlew lintDebug --stacktrace
 
       - name: Upload reports

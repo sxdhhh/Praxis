@@ -124,9 +124,30 @@ android {
                 keyPassword = keyPass
             }
         } else {
-            // 缺料就不建签名配置；release 产物保持未签名，
-            // 让「忘了配签名」在安装阶段暴露，而不是产出一个看起来正常的包。
-            null
+            // 回落：用 debug keystore 给 release 签名。
+            //
+            // ## 为什么这样改（用户反馈「debug 包性能没有 release 好」）
+            //
+            // 旧逻辑下本机没有 CI 签名环境变量时，assembleRelease 产出**未签名**
+            // 的包 —— 装不上，用户只能天天用 debug 包；而 debug 没有 R8、
+            // 带 Compose 调试钩子，性能明显差一截。让 release 用 debug 签名
+            // 之后，assembleRelease 产出的就是「可直接安装的优化包」，
+            // 日常使用体验立刻对齐正式包。
+            //
+            // debug.keystore 由 AGP 在第一次 debug 构建时生成（密码是固定的
+            // android/androiddebugkey）。文件不存在（全新环境直接 assembleRelease）
+            // 时保持 null：release 未签名，让缺失在安装阶段暴露 —— 与旧行为一致。
+            val debugStore = File(System.getProperty("user.home"), ".android/debug.keystore")
+            if (debugStore.isFile) {
+                signingConfigs.create("release") {
+                    storeFile = debugStore
+                    storePassword = "android"
+                    keyAlias = "androiddebugkey"
+                    keyPassword = "android"
+                }
+            } else {
+                null
+            }
         }
     }
 
