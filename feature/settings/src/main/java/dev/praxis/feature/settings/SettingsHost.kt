@@ -1,6 +1,7 @@
 package dev.praxis.feature.settings
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import dev.praxis.core.data.settings.SettingsRepository
 import dev.praxis.core.model.settings.TerminalSettings
