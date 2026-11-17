@@ -1,12 +1,15 @@
 package dev.praxis.feature.gateway
 
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +34,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 「点一下就走完」是这里的目标：选方式 → 网关给 authUrl → H5 容器打开 →
  * 用户在页面里登录 → 容器把回调 URL 交回来 → 自动提交给网关 → 轮询到成功。
  * 需要粘回调的家（浏览器与网关不同机）在 20 秒后自动亮出粘贴框。
+ *
+ * 骨架与全站一致：LazyColumn + LocalTopBarInset（顶部渐变模糊下滚）+ LocalScrollBottomLimit。
  */
 @Composable
 fun GatewayLoginScreen(
@@ -41,43 +46,39 @@ fun GatewayLoginScreen(
     phase: LoginPhase = LoginPhase.Idle,
     methodsLoading: Boolean = false,
     methodsError: String? = null,
-    /** 用户在 H5 容器/浏览器里登录时，容器把回调 URL 交回来。 */
     onCallbackCaptured: (String) -> Unit = {},
-    /** 手动粘回调（manualCallback 的家）。 */
     onSubmitCallback: (String) -> Unit = {},
     onPickMethod: (Int) -> Unit = {},
     onCancel: () -> Unit = {},
     onRetryMethods: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val topInset = dev.praxis.ui.design.component.LocalTopBarInset.current
+    val scrollLimit = dev.praxis.ui.design.component.LocalScrollBottomLimit.current
     var manualInput by remember(providerId) { mutableStateOf("") }
-    val waiting = phase as? LoginPhase.Waiting
-    val needCallback = phase as? LoginPhase.NeedCallback
     // H5 容器：有 authUrl 就打开；成功/失败自动收起。
     var browserUrl by remember(providerId) { mutableStateOf<String?>(null) }
     if (phase is LoginPhase.Succeeded || phase is LoginPhase.Failed) browserUrl = null
 
-    val topInset = dev.praxis.ui.design.component.LocalTopBarInset.current
-    val scrollLimit = dev.praxis.ui.design.component.LocalScrollBottomLimit.current
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = topInset, bottom = 24.dp + scrollLimit),
     ) {
-        item(key = "__login_body__") {
-        Column(modifier = Modifier.fillMaxWidth()) {
-        SettingsSectionHeader(
-            icon = androidx.compose.material.icons.Icons.Outlined.Login,
-            title = "登录 " + providerLabel,
-            subtitle = when {
-                methodsLoading -> "正在取登录方式…"
-                methodsError != null -> methodsError
-                methods.isEmpty() -> "这家没有可用的登录助手"
-                else -> instructions.ifBlank { "选一种登录方式" }
-            },
-        )
+        item(key = "__login_header__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.AccountCircle,
+                title = "登录 " + providerLabel,
+                subtitle = when {
+                    methodsLoading -> "正在取登录方式…"
+                    methodsError != null -> methodsError
+                    methods.isEmpty() -> "这家没有可用的登录助手"
+                    else -> instructions.ifBlank { "选一种登录方式" }
+                },
+            )
+        }
 
         when (val current = phase) {
-            is LoginPhase.Succeeded -> {
+            is LoginPhase.Succeeded -> item(key = "__login_ok__") {
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("登录成功", style = MiuixTheme.textStyles.body1)
@@ -94,7 +95,7 @@ fun GatewayLoginScreen(
                 }
             }
 
-            is LoginPhase.Failed -> {
+            is LoginPhase.Failed -> item(key = "__login_fail__") {
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
@@ -108,7 +109,7 @@ fun GatewayLoginScreen(
                 }
             }
 
-            is LoginPhase.Waiting -> {
+            is LoginPhase.Waiting -> item(key = "__login_wait__") {
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
@@ -135,7 +136,7 @@ fun GatewayLoginScreen(
                 }
             }
 
-            is LoginPhase.NeedCallback -> {
+            is LoginPhase.NeedCallback -> item(key = "__login_cb__") {
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
@@ -171,25 +172,29 @@ fun GatewayLoginScreen(
 
             LoginPhase.Idle, LoginPhase.Starting -> {
                 methods.forEach { method ->
-                    MiuixNavigationItemWidget(
-                        title = method.label,
-                        description = buildString {
-                            append("方式索引 ").append(method.methodIndex)
-                            if (method.manualCallback) append(" · 需要粘回调")
-                            if (method.localOnly) append(" · 仅回环地址")
-                            if (method.instructions.isNotBlank()) append(" · ").append(method.instructions);
-                        },
-                        onClick = { onPickMethod(method.methodIndex) },
-                    )
+                    item(key = "__login_method_" + method.methodIndex + "__") {
+                        MiuixNavigationItemWidget(
+                            title = method.label,
+                            description = buildString {
+                                append("方式索引 ").append(method.methodIndex)
+                                if (method.manualCallback) append(" · 需要粘回调")
+                                if (method.localOnly) append(" · 仅回环地址")
+                                if (method.instructions.isNotBlank()) append(" · ").append(method.instructions);
+                            },
+                            onClick = { onPickMethod(method.methodIndex) },
+                        )
+                    }
                 }
                 if (methods.isEmpty() && !methodsLoading && methodsError == null) {
-                    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-                        Text(
-                            text = "这家没有登录助手（可能需要先装插件，或在网关面板里登录）",
-                            style = MiuixTheme.textStyles.footnote1,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.padding(16.dp),
-                        )
+                    item(key = "__login_none__") {
+                        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                            Text(
+                                text = "这家没有登录助手（可能需要先装插件，或在网关面板里登录）",
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.padding(16.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -203,9 +208,7 @@ fun GatewayLoginScreen(
                 PraxisWebViewSheet(
                     url = browserUrl ?: "",
                     onClose = { browserUrl = null },
-                    onUrlChanged = { url ->
-                        onCallbackCaptured(url);
-                    },
+                    onUrlChanged = { url -> onCallbackCaptured(url) },
                 )
             }
         }
