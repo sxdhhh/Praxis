@@ -74,6 +74,10 @@ fun GatewayRoute(
     onStartBuiltin: () -> Unit = {},
     /** 停止内置网关。 */
     onStopBuiltin: () -> Unit = {},
+    /** 初始化网关管理员（首次启动）：参数 用户名/密码。 */
+    onSetupAdmin: (String, String) -> Unit = { _, _ -> },
+    /** 安装提供商插件（33 家 Agent 插件都在这一个包里）。 */
+    onInstallPlugins: () -> Unit = {},
     /** 网关日志行列表（:app 从 GatewayProcess 拉过来）。 */
     gatewayLogs: List<String> = emptyList(),
     /** 网关状态描述（如 "运行中 3065" / "已停止"）。 */
@@ -283,6 +287,34 @@ fun GatewayRoute(
                         label = "网关 Key（面板里建的，可选）",
                         useLabelAsPlaceholder = true,
                         singleLine = true,
+                    var adminUser by remember { mutableStateOf("") }
+                    var adminPass by remember { mutableStateOf("") }
+                    TextField(
+                        value = adminUser,
+                        onValueChange = { adminUser = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        label = "管理员账号（首次使用会注册；管理 API 需要）",
+                        useLabelAsPlaceholder = true,
+                        singleLine = true,
+                    )
+                    TextField(
+                        value = adminPass,
+                        onValueChange = { adminPass = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        label = "管理员密码",
+                        useLabelAsPlaceholder = true,
+                        singleLine = true,
+                    )
+                    MiuixNavigationItemWidget(
+                        title = "初始化管理员并安装提供商插件",
+                        description = "把 33 家 Agent 插件装进网关（需要网关已启动）",
+                        onClick = {
+                            if (adminUser.isNotBlank() && adminPass.isNotBlank()) {
+                                onSetupAdmin(adminUser, adminPass)
+                                onInstallPlugins()
+                            }
+                        },
+                    )
                     )
                     MiuixNavigationItemWidget(
                         title = "保存连接设置",

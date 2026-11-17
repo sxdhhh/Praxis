@@ -2203,6 +2203,36 @@ fun PraxisApp(
                         gatewayProcess.stopInContainer(gatewayEnvPort, gatewayRootfsEnv)
                     }
                 },
+                onSetupAdmin = { user, pass ->
+                    coroutineScope.launch {
+                        val conn = gatewayProcess.connection()
+                        runCatching {
+                            if (!conn.isPanelRegistered()) {
+                                conn.panelSetup(user, pass)
+                            }
+                            conn.panelLogin(user, pass)
+                        }.fold(
+                            onSuccess = { gatewayProcess.addLog("[gateway] 管理员就绪") },
+                            onFailure = { e -> gatewayProcess.addLog("[gateway] 管理员初始化失败：" + (e.message ?: "未知")) },
+                        )
+                    }
+                },
+                onInstallPlugins = {
+                    coroutineScope.launch {
+                        val conn = gatewayProcess.connection()
+                        conn.installPluginsFromRelease().fold(
+                            onSuccess = { resp ->
+                                gatewayProcess.addLog("[gateway] 插件安装已开始，轮询进度…")
+                                repeat(30) {
+                                    kotlinx.coroutines.delay(3000)
+                                    val progress = conn.pluginProgress().getOrNull() ?: "?"
+                                    gatewayProcess.addLog("[gateway] 插件进度：" + progress.take(120))
+                                }
+                            },
+                            onFailure = { e -> gatewayProcess.addLog("[gateway] 插件安装失败：" + (e.message ?: "未知")) },
+                        )
+                    }
+                },
                     is dev.praxis.data.gateway.GatewayState.Running -> "已连接 " + gs.baseUrl
                     is dev.praxis.data.gateway.GatewayState.Starting -> "启动中…"
                     is dev.praxis.data.gateway.GatewayState.Crashed -> "崩溃（code=" + gs.exitCode + "）"

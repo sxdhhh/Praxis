@@ -129,6 +129,10 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
     onStartBuiltin: () -> Unit = {},
     /** 停止内置网关。 */
     onStopBuiltin: () -> Unit = {},
+    /** 初始化网关管理员（首次）。 */
+    onSetupAdmin: (String, String) -> Unit = { _, _ -> },
+    /** 安装提供商插件。 */
+    onInstallPlugins: () -> Unit = {},
     /** 网关日志（:app 从 GatewayProcess 拉过来）。 */
     gatewayLogLines: List<String> = emptyList(),
     /** 网关状态一句话。 */
@@ -425,6 +429,8 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
             onInstallBuiltin = onInstallBuiltin,
             onStartBuiltin = onStartBuiltin,
             onStopBuiltin = onStopBuiltin,
+            onSetupAdmin = onSetupAdmin,
+            onInstallPlugins = onInstallPlugins,
             gatewayEnabled = gatewayEnabled,
             onGatewayEnabledChange = onGatewayEnabledChange,
             gatewayModelRows = gatewayModelRows,
@@ -645,6 +651,10 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
     onStartBuiltin: () -> Unit = {},
     /** 停止内置网关。 */
     onStopBuiltin: () -> Unit = {},
+    /** 初始化网关管理员（首次）。 */
+    onSetupAdmin: (String, String) -> Unit = { _, _ -> },
+    /** 安装提供商插件。 */
+    onInstallPlugins: () -> Unit = {},
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
@@ -1025,6 +1035,8 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
             onInstallBuiltin = onInstallBuiltin,
             onStartBuiltin = onStartBuiltin,
             onStopBuiltin = onStopBuiltin,
+            onSetupAdmin = onSetupAdmin,
+            onInstallPlugins = onInstallPlugins,
             gatewayEnabled = gatewayEnabled,
             onGatewayEnabledChange = onGatewayEnabledChange,
             modifier = modifier,
