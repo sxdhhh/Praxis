@@ -674,6 +674,115 @@ fun PraxisApp(
     var loginMethodsError by remember { mutableStateOf<String?>(null) }
     var loginMethodChosen by remember { mutableStateOf<dev.praxis.core.gateway.adapters.LoginMethod?>(null) }
     var loginState by remember { mutableStateOf("") }
+
+    // 轮询协程的句柄（取消登录时用）。
+    var loginPollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    // 取登录方式。
+    LaunchedEffect(loginProviderId) {
+        if (loginProviderId.isBlank()) return@LaunchedEffect
+        loginMethodsLoading = true
+        loginMethodsError = null
+        loginMethods = emptyList()
+        loginPhase = dev.praxis.core.gateway.adapters.LoginPhase.Idle
+        val conn = gatewayProcess.connection()
+        conn.loginMethodsOf(loginProviderId).fold(
+            onSuccess = { loaded ->
+                loginMethods = loaded.methods
+                loginInstructions = loaded.instructions
+                if (loaded.methods.isEmpty()) {
+                    loginMethodsError = "这家没有登录助手（可能还没装插件）"
+                }
+            },
+            onFailure = { e -> loginMethodsError = e.message ?: "取登录方式失败" },
+        )
+        loginMethodsLoading = false
+    }
+
+    // 选一种方式 → 发起 → 轮询（H5 容器或粘回调两条路都汇到 loginState）。
+    LaunchedEffect(loginMethodChosen) {
+        val method = loginMethodChosen ?: return@LaunchedEffect
+        loginPollJob?.cancel()
+        loginPhase = dev.praxis.core.gateway.adapters.LoginPhase.Starting
+        val conn = gatewayProcess.connection()
+        val startResult = conn.startLogin(loginProviderId, method.methodIndex)
+        val started = startResult.getOrElse { e ->
+            loginPhase = dev.praxis.core.gateway.adapters.LoginPhase.Failed(e.message ?: "发起登录失败")
+            return@LaunchedEffect
+        }
+        loginState = started.state
+        loginPhase = dev.praxis.core.gateway.adapters.LoginPhase.Waiting(
+            state = started.state,
+            url = started.authUrl,
+            hint = started.instructions.ifBlank { null },
+            elapsedSeconds = 0L,
+        )
+        gatewayProcess.addLog("[login] 已发起 " + loginProviderId + " 方式 " + method.methodIndex)
+        val began = System.currentTimeMillis()
+        loginPollJob = coroutineScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(started.pollIntervalMs.coerceAtLeast(1500L))
+                val elapsed = System.currentTimeMillis() - began
+                val wait = conn.waitLogin(started.state).getOrNull()
+                if (wait == null) continue
+                val next = dev.praxis.core.gateway.adapters.LoginFlowRules.next(
+                    wait = wait, method = method, state = started.state, elapsedMs = elapsed,
+                )
+                // Waiting 状态要保留 authUrl（重开容器用）
+                loginPhase = if (next is dev.praxis.core.gateway.adapters.LoginPhase.Waiting) {
+                    next.copy(url = started.authUrl)
+                } else {
+                    next
+                }
+                if (next is dev.praxis.core.gateway.adapters.LoginPhase.Succeeded) {
+                    gatewayProcess.addLog("[login] 成功：" + (next.accountId ?: "?"))
+                    break
+                }
+                if (next is dev.praxis.core.gateway.adapters.LoginPhase.Failed) {
+                    gatewayProcess.addLog("[login] 失败：" + next.message)
+                    break
+                }
+            }
+        }
+    }
+
+    // H5 容器捕获到回调 URL：manualCallback 的家在页面跳到回调地址时（页面上没有服务听那个端口，会白屏）
+    // 由这里截获并交给网关换码 —— 用户全程不用复制粘贴。
+    val captureLoginCallback: (String) -> Unit = { url ->
+        val state = loginState
+        if (state.isNotBlank() && (url.contains("callback") || url.contains("code="))) {
+            coroutineScope.launch {
+                val conn = gatewayProcess.connection()
+                conn.submitLoginCallback(state, url).fold(
+                    onSuccess = { gatewayProcess.addLog("[login] 回调已提交，等待网关处理…") },
+                    onFailure = { e -> gatewayProcess.addLog("[login] 回调提交失败：" + (e.message ?: "未知")) },
+                )
+            }
+        }
+    }
+    // 手动粘回调。
+    val submitManualCallback: (String) -> Unit = { text ->
+        val state = loginState
+        if (state.isNotBlank()) {
+            coroutineScope.launch {
+                gatewayProcess.connection().submitLoginCallback(state, text).fold(
+                    onSuccess = { gatewayProcess.addLog("[login] 已提交粘贴内容") },
+                    onFailure = { e -> gatewayProcess.addLog("[login] 提交失败：" + (e.message ?: "未知")) },
+                )
+            }
+        }
+    }
+    // 取消：停轮询 + 通知网关。
+    val cancelLogin: () -> Unit = {
+        loginPollJob?.cancel()
+        val state = loginState
+        loginPhase = dev.praxis.core.gateway.adapters.LoginPhase.Idle
+        loginMethodChosen = null
+        if (state.isNotBlank()) {
+            coroutineScope.launch {
+                runCatching { gatewayProcess.connection().cancelLogin(state) }
+            }
+        }
+    }
     val gatewayLogs = remember { mutableStateOf<List<String>>(emptyList()) }
     val gatewayConnJson by settingsRepository.gatewayConnectionJson
         .collectAsState(initial = null)
@@ -2243,6 +2352,19 @@ fun PraxisApp(
                         )
                     }
                 },
+                loginProviderId = loginProviderId,
+                loginProviderLabel = loginProviderLabel,
+                loginMethods = loginMethods,
+                loginInstructions = loginInstructions,
+                loginPhase = loginPhase,
+                loginMethodsLoading = loginMethodsLoading,
+                loginMethodsError = loginMethodsError,
+                onPickLoginMethod = { methodIndex ->
+                    loginMethodChosen = loginMethods.find { it.methodIndex == methodIndex }
+                },
+                onCallbackCaptured = captureLoginCallback,
+                onSubmitLoginCallback = submitManualCallback,
+                onCancelLogin = cancelLogin,
                     is dev.praxis.data.gateway.GatewayState.Running -> "已连接 " + gs.baseUrl
                     is dev.praxis.data.gateway.GatewayState.Starting -> "启动中…"
                     is dev.praxis.data.gateway.GatewayState.Crashed -> "崩溃（code=" + gs.exitCode + "）"
