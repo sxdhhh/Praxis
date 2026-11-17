@@ -194,13 +194,13 @@ data object SettingsGatewayAdd : PraxisRoute
  */
 data class SettingsGatewayAddLogin(val providerId: String) : PraxisRoute
 
-/**
 /** 签到与积分（设置 -> 网关 -> 签到）。 */
 data object SettingsGatewayCheckin : PraxisRoute
 
 /** 维护：导入账号到网关 + 保活配置（设置 -> 网关 -> 维护）。 */
 data object SettingsGatewayMaintenance : PraxisRoute
 
+/**
  * 代理池页（设置 -> 网关 -> 代理，文档 §5.9）。
  */
 data object SettingsGatewayProxy : PraxisRoute
