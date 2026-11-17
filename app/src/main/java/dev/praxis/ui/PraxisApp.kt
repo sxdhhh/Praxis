@@ -2154,6 +2154,14 @@ fun PraxisApp(
                 gatewayEnabled = gatewayEnabled,
                 gatewayLogLines = gatewayLogs.value,
                 gatewayConnectionStatus = when (val gs = gatewayState) {
+                connectionSettings = gatewayConnSettings,
+                onConnectionSettingsChange = { updated ->
+                    coroutineScope.launch {
+                        settingsRepository.setGatewayConnectionJson(
+                            dev.praxis.core.gateway.adapters.GatewayConnectionCodec.encode(updated),
+                        )
+                    }
+                },
                     is dev.praxis.data.gateway.GatewayState.Running -> "已连接 " + gs.baseUrl
                     is dev.praxis.data.gateway.GatewayState.Starting -> "启动中…"
                     is dev.praxis.data.gateway.GatewayState.Crashed -> "崩溃（code=" + gs.exitCode + "）"
