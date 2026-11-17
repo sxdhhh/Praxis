@@ -1,6 +1,6 @@
 # 当前状态指针
 
-- 轮次：**round-26（内置网关闭环完成；待真机验收 + 登录 UI + 签到/积分页面）**
+- 轮次：**round-27（登录 UI 完成；下一步：签到/积分页面 → 最终审查 → 推 CI）**
 - 新方向：内置 Agent2API 网关，33 家 Agent 插件提供商全功能可用
 - 已提交：GatewayConnection 通信层 / ProviderCatalog 清理 / 登录恢复 / 上限编辑 / OkHttp 依赖
 - 用户新需求：
