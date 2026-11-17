@@ -121,6 +121,68 @@ class GatewayProcess(
         addLog("[gateway] 已停止")
     }
 
+
+    // ── 内置模式：跑在手机自己的 proot 容器里 ─────────────────
+
+    /** 长驻会话句柄（stop 时用）。 */
+    private var containerSession: dev.praxis.core.linux.LinuxEnvPort.SessionHandle? = null
+
+    /** 容器安装器（懒建 —— 它只在「启动内置网关」时用到）。 */
+    var containerInstaller: GatewayContainerInstaller? = null
+
+    /**
+     * 在容器里启动网关（长驻 proot 会话）。
+     *
+     * 前置条件：
+     *  1. rootfs 已装（Linux 环境页装过 Ubuntu/Kali）；
+     *  2. [GatewayContainerInstaller.install] 已把二进制放进容器。
+     *
+     * 日志通过 [onLine] 直接进环形缓冲 —— 网关是前台进程，stdout 就是它的日志。
+     */
+    fun startInContainer(
+        envPort: dev.praxis.core.linux.LinuxEnvPort,
+        env: dev.praxis.core.linux.LinuxEnvironment,
+    ): Result<Unit> {
+        if (containerSession?.isAlive == true) return Result.success(Unit)
+        val installer = containerInstaller
+        if (installer == null || !installer.isInstalled(env)) {
+            return Result.failure(IllegalStateException("网关还没装进容器（先点安装）"))
+        }
+        return runCatching {
+            stopping.set(false)
+            val args = GatewayContainerInstaller.runArgs(env)
+            val handle = envPort.startSession(env, args) { line -> addLog("[gateway] " + line) }
+            containerSession = handle
+            if (!handle.isAlive) error("网关进程启动后立刻退出（看日志窗口找原因）")
+            _state.value = GatewayState.Running(
+                pid = 0,
+                port = port,
+                baseUrl = "http://127.0.0.1:" + port,
+            )
+            addLog("[gateway] 内置网关已启动（容器内 " + installer.binaryPath() + "）")
+        }.onFailure { error ->
+            addLog("[gateway] 容器启动失败：" + (error.message ?: error.javaClass.simpleName))
+        }
+    }
+
+    /** 停止容器里的网关：先关会话（杀 proot），再补一刀 pkill 确保干净。 */
+    suspend fun stopInContainer(
+        envPort: dev.praxis.core.linux.LinuxEnvPort,
+        env: dev.praxis.core.linux.LinuxEnvironment,
+    ) {
+        stopping.set(true)
+        containerSession?.stop()
+        containerSession = null
+        runCatching {
+            envPort.exec(env, "pkill -f agent2api-server", timeoutSeconds = 15L) { }
+        }
+        processRunning.set(false)
+        _state.value = GatewayState.Stopped
+        addLog("[gateway] 内置网关已停止")
+    }
+
+    /** 内置网关是否在跑。 */
+    fun isContainerRunning(): Boolean = containerSession?.isAlive == true
     fun connection(apiKey: String = ""): dev.praxis.core.gateway.adapters.GatewayConnection {
         val base = when (val s = _state.value) {
             is GatewayState.Running -> s.baseUrl
