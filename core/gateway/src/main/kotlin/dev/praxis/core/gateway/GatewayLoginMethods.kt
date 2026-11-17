@@ -101,8 +101,20 @@ object GatewayLoginMethods {
 
         val methods = mutableListOf(credentialMethod)
 
-        // 只有**确认存在网页登录**、且手上有一个像样地址时，才给「打开登录页」。
-        // 两个条件缺一不可：少一个都会变成打开空白页 / 打开一个没有授权入口的首页。
+        // 「打开控制台页面」：只要有一个像样地址就给 —— 用户打开官网/控制台，
+        // 在里面建 Key 或登录后把令牌粘回来。这是 H5 容器的正当用途。
+        // Agent 插件家（loginKind == GatewayPlugin）不给这个入口：它们的登录
+        // 流程在网关侧，Praxis 打开官网也登录不了（没有客户端伪装）。
+        if (loginKind != ProviderLoginKind.Unknown && landing != null &&
+            loginKind != ProviderLoginKind.WebLogin) {
+            methods += GatewayLoginMethod(
+                type = GatewayLoginType.OAuth,
+                label = "打开 " + providerLabel + " 官网",
+                instructions = "在打开的页面里登录/新建 Key，然后复制回来粘贴。",
+                landingUrl = landing,
+            )
+        }
+        // 确认有网页登录的家：给「打开登录页」（语义跟上面不同 —— 这是官方授权页）。
         if (loginKind == ProviderLoginKind.WebLogin && landing != null) {
             methods += GatewayLoginMethod(
                 type = GatewayLoginType.OAuth,
