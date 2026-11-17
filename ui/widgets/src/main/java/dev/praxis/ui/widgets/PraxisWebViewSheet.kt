@@ -90,6 +90,17 @@ import androidx.compose.ui.viewinterop.AndroidView
 fun PraxisWebViewSheet(
     url: String,
     onClose: () -> Unit,
+    /**
+     * 每次导航开始的 URL（登录用：从这里捕获 OAuth 回调地址）。
+     *
+     * ## 为什么登录必须有它
+     *
+     * 走 loopback 回调的家，授权完成后浏览器会跳到
+     * `http://127.0.0.1:PORT/oauth-callback?code=...` —— 那个地址属于**手机**，
+     * 手机上没有服务在听（网关在容器里，端口不同）时页面会白屏，
+     * 但只要把这个 URL 拿到，就能交给网关的 /api/session/login/callback 换码。
+     */
+    onUrlChanged: (String) -> Unit = {},
     onCallbackUrl: (String) -> Unit = {},
     allowedHosts: List<String> = emptyList(),
     userAgentSuffix: String? = null,
@@ -193,6 +204,7 @@ fun PraxisWebViewSheet(
                             }
 
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                    url?.let(onUrlChanged)
                                 currentUrl = url ?: currentUrl
                                 // 有些跳转走 302，不经过 shouldOverrideUrlLoading，这里再查一次。
                                 if (isCallback(url)) onCallbackUrl(url!!)

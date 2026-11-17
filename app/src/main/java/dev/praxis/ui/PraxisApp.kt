@@ -664,6 +664,16 @@ fun PraxisApp(
     val gatewayRootfsEnv = remember {
         gatewayEnvPort.defaultEnvironment(dev.praxis.core.linux.LinuxDistro.Ubuntu)
     }
+    // ── 登录助手状态（33 家 Agent 提供商的登录流程）──
+    var loginProviderId by remember { mutableStateOf("") }
+    var loginProviderLabel by remember { mutableStateOf("") }
+    var loginMethods by remember { mutableStateOf<List<dev.praxis.core.gateway.adapters.LoginMethod>>(emptyList()) }
+    var loginInstructions by remember { mutableStateOf("") }
+    var loginPhase by remember { mutableStateOf<dev.praxis.core.gateway.adapters.LoginPhase>(dev.praxis.core.gateway.adapters.LoginPhase.Idle) }
+    var loginMethodsLoading by remember { mutableStateOf(false) }
+    var loginMethodsError by remember { mutableStateOf<String?>(null) }
+    var loginMethodChosen by remember { mutableStateOf<dev.praxis.core.gateway.adapters.LoginMethod?>(null) }
+    var loginState by remember { mutableStateOf("") }
     val gatewayLogs = remember { mutableStateOf<List<String>>(emptyList()) }
     val gatewayConnJson by settingsRepository.gatewayConnectionJson
         .collectAsState(initial = null)
