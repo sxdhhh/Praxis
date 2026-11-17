@@ -704,6 +704,24 @@ fun PraxisApp(
         result.fold(
             onSuccess = { url ->
                 gatewayProcess.addLog("[gateway] 已连接：" + url)
+                // 自动拉取网关模型清单（G-内置：33 家 Agent 插件提供商 + 任意 API 家）
+                runCatching {
+                    val conn = gatewayProcess.connection()
+                    val models = conn.fetchModels().getOrNull()
+                    if (models != null && models.isNotEmpty()) {
+                        // 按 provider 分组写入 DataStore（内置家清单）
+                        val grouped = models.groupBy { it.provider }
+                        val caps = grouped.mapValues { (_, list) ->
+                            list.map { dev.praxis.core.gateway.BuiltinModelsCodec.from(it) }
+                        }
+                        settingsRepository.setGatewayBuiltinModelsJson(
+                            dev.praxis.core.gateway.BuiltinModelsCodec.encodeDetailed(caps)
+                        )
+                        gatewayProcess.addLog("[gateway] 拉到 " + models.size + " 个模型（" + grouped.size + " 家）")
+                    } else {
+                        gatewayProcess.addLog("[gateway] 拉模型失败或为空")
+                    }
+                }
             },
             onFailure = { error ->
                 gatewayProcess.addLog("[gateway] 自动连接失败：" + (error.message ?: "未知"))
