@@ -2405,7 +2405,9 @@ fun PraxisApp(
                     }
                 },
                 onStartBuiltin = {
-                    gatewayProcess.startInContainer(gatewayEnvPort, gatewayRootfsEnv)
+                    coroutineScope.launch {
+                        gatewayProcess.startInContainer(gatewayEnvPort, gatewayRootfsEnv)
+                    }
                 },
                 onStopBuiltin = {
                     coroutineScope.launch {
