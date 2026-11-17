@@ -159,6 +159,14 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
     onClaimCheckin: () -> Unit = {},
     onRunAutoCheckin: () -> Unit = {},
     onRefreshCredits: () -> Unit = {},
+    /** 维护页：导入到网关 + 保活。 */
+    keepaliveJson: String = "",
+    gatewayImportMessage: String? = null,
+    gatewayImportBusy: Boolean = false,
+    keepaliveSaveMessage: String? = null,
+    onImportAccountsToGateway: (String) -> Unit = {},
+    onRefreshKeepalive: () -> Unit = {},
+    onSaveKeepalive: (String) -> Unit = {}
     /** 网关日志（:app 从 GatewayProcess 拉过来）。 */
     gatewayLogLines: List<String> = emptyList(),
     /** 网关状态一句话。 */
@@ -703,6 +711,14 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
     onClaimCheckin: () -> Unit = {},
     onRunAutoCheckin: () -> Unit = {},
     onRefreshCredits: () -> Unit = {},
+    /** 维护页：导入到网关 + 保活。 */
+    keepaliveJson: String = "",
+    gatewayImportMessage: String? = null,
+    gatewayImportBusy: Boolean = false,
+    keepaliveSaveMessage: String? = null,
+    onImportAccountsToGateway: (String) -> Unit = {},
+    onRefreshKeepalive: () -> Unit = {},
+    onSaveKeepalive: (String) -> Unit = {}
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
@@ -1136,6 +1152,15 @@ connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
                 )
             }
         }
+        PraxisRoute.SettingsGatewayMaintenance -> dev.praxis.feature.gateway.GatewayMaintenanceScreen(
+            keepaliveJson = keepaliveJson,
+            importResult = gatewayImportMessage,
+            importBusy = gatewayImportBusy,
+            keepaliveResult = keepaliveSaveMessage,
+            onImportAccounts = onImportAccountsToGateway,
+            onRefreshKeepalive = onRefreshKeepalive,
+            onSaveKeepalive = onSaveKeepalive,
+        )
         PraxisRoute.SettingsGatewayCheckin -> dev.praxis.feature.gateway.GatewayCheckinScreen(
             checkinMessage = checkinMessage,
             checkinTakenToday = checkinTakenToday,

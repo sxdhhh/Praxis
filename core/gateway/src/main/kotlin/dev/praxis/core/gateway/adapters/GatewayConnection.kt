@@ -210,6 +210,67 @@ class GatewayConnection(
             }
         }
 
+    // ── 账号导入 / 保活（语义来自 api/accounts.rs 与 api/billing.rs）──
+
+    /**
+     * 把一份账号 JSON 导入网关。
+     *
+     * 接受的就是网关「导出」的原样文件：顶层 `{accounts:[...], customProviders:[...]}`。
+     * 网关还兼容 `{success, data:{accounts}}` 这种信封壳（旧版网页导出把信封存成了文件），
+     * 所以 Praxis 不需要先拆包 —— 原样转交即可。
+     */
+    suspend fun importAccounts(json: String): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.postJson(url("/api/accounts/import"), json, authHeaders()).use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) error("导入失败（HTTP " + resp.code + "）：" + body.take(200))
+                body
+            }
+        }
+    }
+
+    /** 保活配置（读）。 */
+    suspend fun keepaliveState(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.get(url("/api/checkin-keepalive"), authHeaders()).use { resp ->
+                if (!resp.isSuccessful) error("HTTP " + resp.code)
+                resp.body?.string().orEmpty()
+            }
+        }
+    }
+
+    /** 保活配置（写）。body 就是 GET 拿到的那份 JSON（改完再传回）。 */
+    suspend fun saveKeepalive(json: String): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            ProviderHttpClient.postJson(url("/api/checkin-keepalive"), json, authHeaders()).use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) error("保存失败（HTTP " + resp.code + "）：" + body.take(200))
+                body
+            }
+        }
+    }
+
+    /**
+     * 手动跑某个账号的活跃任务。
+     * @param mode "full" | "claim" | "keepalive"（网关 api/billing.rs 的粒度）
+     */
+    suspend fun runActivity(accountId: String, mode: String = "keepalive"): Result<String> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val body = json.encodeToString(
+                    kotlinx.serialization.json.JsonObject.serializer(),
+                    buildJsonObject {
+                        put("id", kotlinx.serialization.json.JsonPrimitive(accountId))
+                        put("mode", kotlinx.serialization.json.JsonPrimitive(mode))
+                    },
+                )
+                ProviderHttpClient.postJson(url("/api/checkin-activity"), body, authHeaders()).use { resp ->
+                    val text = resp.body?.string().orEmpty()
+                    if (!resp.isSuccessful) error("活跃任务失败（HTTP " + resp.code + "）：" + text.take(200))
+                    text
+                }
+            }
+        }
     // ── 签到 / 积分（文档语义来自网关 api/billing.rs，不是猜的）────
     //
     // **409 的语义**：POST /api/checkin 在「今天已领过」时返回

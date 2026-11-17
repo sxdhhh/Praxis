@@ -682,6 +682,11 @@ fun PraxisApp(
     var checkinTakenToday by remember { mutableStateOf(false) }
     var creditsMessage by remember { mutableStateOf("") }
     var checkinBusy by remember { mutableStateOf(false) }
+    // ── 维护页状态（导入到网关 + 保活）──
+    var keepaliveJson by remember { mutableStateOf("") }
+    var gatewayImportMessage by remember { mutableStateOf<String?>(null) }
+    var gatewayImportBusy by remember { mutableStateOf(false) }
+    var keepaliveSaveMessage by remember { mutableStateOf<String?>(null) }
     // 取登录方式。
     LaunchedEffect(loginProviderId) {
         if (loginProviderId.isBlank()) return@LaunchedEffect
@@ -835,6 +840,37 @@ fun PraxisApp(
                 }
                 checkinBusy = false
             }
+        }
+    }
+
+    // ── 维护动作 ──
+    val doImportToGateway: (String) -> Unit = { json ->
+        if (!gatewayImportBusy) {
+            gatewayImportBusy = true
+            gatewayImportMessage = null
+            coroutineScope.launch {
+                gatewayProcess.connection().importAccounts(json).fold(
+                    onSuccess = { resp -> gatewayImportMessage = "导入完成：" + resp.take(300) },
+                    onFailure = { e -> gatewayImportMessage = "导入失败：" + (e.message ?: "未知") },
+                )
+                gatewayImportBusy = false
+            }
+        }
+    }
+    val doRefreshKeepalive: () -> Unit = {
+        coroutineScope.launch {
+            gatewayProcess.connection().keepaliveState().fold(
+                onSuccess = { json -> keepaliveJson = json; keepaliveSaveMessage = "已读取" },
+                onFailure = { e -> keepaliveSaveMessage = "读取失败：" + (e.message ?: "未知") },
+            )
+        }
+    }
+    val doSaveKeepalive: (String) -> Unit = { json ->
+        coroutineScope.launch {
+            gatewayProcess.connection().saveKeepalive(json).fold(
+                onSuccess = { resp -> keepaliveSaveMessage = "已保存：" + resp.take(200) },
+                onFailure = { e -> keepaliveSaveMessage = "保存失败：" + (e.message ?: "未知") },
+            )
         }
     }
     val gatewayLogs = remember { mutableStateOf<List<String>>(emptyList()) }
@@ -2432,6 +2468,13 @@ fun PraxisApp(
                 onClaimCheckin = doClaim,
                 onRunAutoCheckin = doRunAuto,
                 onRefreshCredits = doRefreshCredits,
+                keepaliveJson = keepaliveJson,
+                gatewayImportMessage = gatewayImportMessage,
+                gatewayImportBusy = gatewayImportBusy,
+                keepaliveSaveMessage = keepaliveSaveMessage,
+                onImportAccountsToGateway = doImportToGateway,
+                onRefreshKeepalive = doRefreshKeepalive,
+                onSaveKeepalive = doSaveKeepalive,
                     is dev.praxis.data.gateway.GatewayState.Running -> "已连接 " + gs.baseUrl
                     is dev.praxis.data.gateway.GatewayState.Starting -> "启动中…"
                     is dev.praxis.data.gateway.GatewayState.Crashed -> "崩溃（code=" + gs.exitCode + "）"
