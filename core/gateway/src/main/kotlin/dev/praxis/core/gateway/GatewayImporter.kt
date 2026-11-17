@@ -85,8 +85,7 @@ object GatewayImporter {
         val pack = GatewayAccountsPackCodec.decode(text).getOrNull()
         val entries = pack?.accounts
         require(!entries.isNullOrEmpty()) {
-            "既不是网关账号文件（缺 format），也不是批量导出（缺 accounts 数组）。" +
-                "文件开头 200 字：\" + text.take(200) + "\""
+            "既不是网关账号文件（缺 format），也不是批量导出（缺 accounts 数组）。开头 200 字：" + text.take(200)
         }
         val accounts = entries.mapIndexed { index, entry ->
             require(entry.id.isNotBlank()) { "批量导出第 " + (index + 1) + " 条缺 id" }

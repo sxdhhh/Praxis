@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Request
 
@@ -22,8 +23,8 @@ import okhttp3.Request
  *
  * | 操作 | 网关端点 | 说明 |
  * |---|---|---|
- * | 拉模型清单 | GET /v1/models | 含能力位 |
- * | 发消息 | POST /v1/chat/completions | OpenAI 兼容 SSE |
+ * | 拉模型清单 | GET 〔v1〕models | 含能力位 |
+ * | 发消息 | POST 〔v1〕chat completions | OpenAI 兼容 SSE |
  * | 登录（获取方式列表） | GET /api/providers/{id}/login-methods | 每家不同 |
  * | 登录（启动流程） | POST /api/providers/{id}/login/start | 返回 URL 或状态 |
  * | 登录（轮询结果） | GET /api/providers/{id}/login/poll/{sessionId} | 设备码/轮询型 |
@@ -34,7 +35,7 @@ import okhttp3.Request
  * ## 认证
  *
  * 网关 Key（面板里建的）放在 `Authorization: Bearer <key>` 头里。
- * 没配 Key 时网关处于 fail-closed 状态，所有 /v1/* 请求返回 403。
+ * 没配 Key 时网关处于 fail-closed 状态，所有 〔v1〕* 请求返回 403。
  */
 class GatewayConnection(
     /** 网关地址（如 http://127.0.0.1:3065 或 https://xxx/a2a/v1）。 */

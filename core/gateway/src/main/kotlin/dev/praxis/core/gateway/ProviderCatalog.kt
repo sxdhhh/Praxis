@@ -95,38 +95,17 @@ data class ProviderEntry(
  */
 object ProviderCatalog {
 
-    /** API 家：Praxis 直接连。顺序即上游 preset 目录顺序。 */
+    /**
+     * agent2api 网关入口：地址由用户填（网关的 /v1）；Key 用面板里建的网关密钥。
+     * 33 家 Agent 插件提供商 + 4 家网页提供商的模型全部经它可选。
+     * API preset 家已删除 —— 模型配置页本来就能填任意 API 地址和 Key。
+     */
     private val API: List<ProviderEntry> = listOf(
-        ProviderEntry("openai", "OpenAI", 0, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("anthropic", "Anthropic", 1, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("openrouter", "OpenRouter", 2, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("huggingface", "HuggingFace", 3, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("nvidia", "NVIDIA", 4, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("deepseek", "DeepSeek", 5, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("glm", "GLM Coding", 6, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("glm-cn", "GLM 中国", 7, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("minimax", "Minimax Coding", 8, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("minimax-cn", "Minimax 中国", 9, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("siliconflow", "SiliconFlow", 10, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("volcengine-ark", "火山方舟", 11, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("alicode", "Alibaba", 12, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("alicode-intl", "Alibaba Coding", 13, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("alims-intl", "Alibaba Studio", 14, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("alitp-intl", "Alibaba Token Plan", 15, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("xiaomi-tokenplan", "小米 MiMo (Token Plan)", 16, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("opencode-go", "OpenCode Go", 17, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("opencode-zen", "OpenCode Zen", 18, ProviderKind.Api, ProviderLoginKind.ApiKey, "免费档无需鉴权"),
-        ProviderEntry("clinepass", "Cline Pass", 19, ProviderKind.Api, ProviderLoginKind.ApiKey),
-        ProviderEntry("ollama-local", "Ollama（本地）", 20, ProviderKind.Api, ProviderLoginKind.ApiKey, "本机服务，无需鉴权"),
-        ProviderEntry("sub2api", "Sub2API", 21, ProviderKind.Api, ProviderLoginKind.ApiKey, "自建面板，地址由用户填"),
-        ProviderEntry("newapi", "NewAPI", 22, ProviderKind.Api, ProviderLoginKind.ApiKey, "自建面板，地址由用户填"),
-        ProviderEntry("sensenova", "商汤日日新", 23, ProviderKind.Api, ProviderLoginKind.ApiKey),
         ProviderEntry(
-            "agent2api", "Agent2API 网关", 24, ProviderKind.Api, ProviderLoginKind.ApiKey,
+            "agent2api", "Agent2API 网关", 0, ProviderKind.Api, ProviderLoginKind.ApiKey,
             "地址由用户填（网关的 /v1）；Key 用面板里建的网关密钥",
         ),
     )
-
     /**
      * Agent 插件家：登录与客户端伪装都在网关的插件进程里。
      *

@@ -1,5 +1,7 @@
 package dev.praxis.core.gateway.adapters
 
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -34,7 +36,7 @@ object ProviderHttpClient {
     fun postJson(url: String, json: String, headers: Map<String, String> = emptyMap()): Response {
         val builder = Request.Builder().url(url)
             .post(okhttp3.RequestBody.create(
-                okhttp3.MediaType.parse("application/json; charset=utf-8"), json))
+                "application/json; charset=utf-8".toMediaType(), json))
         headers.forEach { (k, v) -> builder.addHeader(k, v) }
         return client.newCall(builder.build()).execute()
     }
@@ -47,7 +49,7 @@ object ProviderHttpClient {
         }
         val builder = Request.Builder().url(url)
             .post(okhttp3.RequestBody.create(
-                okhttp3.MediaType.parse("application/x-www-form-urlencoded"), body))
+                "application/x-www-form-urlencoded".toMediaType(), body))
         headers.forEach { (k, v) -> builder.addHeader(k, v) }
         return client.newCall(builder.build()).execute()
     }

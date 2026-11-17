@@ -8,14 +8,18 @@ import org.junit.Test
 class GatewayLoginMethodsTest {
 
     @Test
-    fun `只有 API Key 的家不给网页登录`() {
-        // 这就是那条「扯」的修复：api.openai.com 没有网页登录这回事，
-        // 旧实现只要有地址就挂一条「打开登录页」，点开是官网首页。
-        listOf("https://api.openai.com", "https://api.deepseek.com", "https://api.z.ai/api/anthropic")
+    fun `API Key 家给「打开官网」但不给「网页授权登录」`() {
+        // 用户打开官网控制台、建 Key、粘回来 —— 这是 H5 容器的正当用途。
+        // 但「网页授权登录」这个语义只给真的用 OAuth 的家。
+        listOf("https://api.openai.com", "https://api.deepseek.com")
             .forEach { url ->
                 val methods = GatewayLoginMethods.forProvider("某 API 家", url)
-                assertEquals("不该有第二种入口：" + url, 1, methods.size)
+                assertTrue("应有 2 个入口（直填 Key + 打开官网）：" + url, methods.size >= 2)
                 assertEquals(GatewayLoginType.Api, methods.first().type)
+                val oauth = methods.find { it.type == GatewayLoginType.OAuth }
+                assertTrue("应有「打开官网」入口", oauth != null)
+                assertTrue("文案是「打开官网」而不是「网页授权」",
+                    oauth!!.label.contains("官网"))
             }
     }
 

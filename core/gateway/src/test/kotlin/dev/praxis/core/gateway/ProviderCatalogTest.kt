@@ -19,13 +19,13 @@ class ProviderCatalogTest {
     @Test
     fun `三类家的数量与上游一致`() {
         val counts = ProviderCatalog.counts()
-        // 25 = 上游 preset 24 家 + agent2api（经网关入口）；
+        // 1 = agent2api（经网关入口，API preset 已删）；
         // 33 = agent2api-providers 插件包声明 34 个里去掉 `demo`（示例，hidden 且默认停用）；
         // 4  = agent2api-web-providers 网页插件包。
-        assertEquals(25, counts[ProviderKind.Api])
+        assertEquals(1, counts[ProviderKind.Api])
         assertEquals(33, counts[ProviderKind.AgentPlugin])
         assertEquals(4, counts[ProviderKind.WebPlugin])
-        assertEquals(62, ProviderCatalog.all().size)
+        assertEquals(38, ProviderCatalog.all().size)
     }
 
     @Test
@@ -64,7 +64,7 @@ class ProviderCatalogTest {
     fun `id 唯一且大小写不敏感地可查`() {
         val ids = ProviderCatalog.all().map { it.id.lowercase() }
         assertEquals("id 有重复", ids.size, ids.toSet().size)
-        assertEquals("OpenAI", ProviderCatalog.of("OPENAI")?.label)
+        assertEquals("Agent2API 网关", ProviderCatalog.of("AGENT2API")?.label)
     }
 
     @Test
@@ -106,7 +106,7 @@ class ProviderCatalogTest {
 
     @Test
     fun `登录方式的人话只有一处`() {
-        assertEquals("直填 API Key", ProviderCatalog.loginLabel("openai"))
+        assertEquals("直填 API Key", ProviderCatalog.loginLabel("agent2api"))
         assertEquals("网页登录", ProviderCatalog.loginLabel("kiro"))
         assertEquals("官方设备授权", ProviderCatalog.loginLabel("qwenwork"))
         assertEquals("网页 Cookie / userToken", ProviderCatalog.loginLabel("deepseek-web"))
@@ -122,6 +122,6 @@ class ProviderCatalogTest {
         assertNull(ProviderCatalog.of("my-own-home"))
         assertEquals(ProviderLoginKind.ApiKey, ProviderCatalog.loginOf("my-own-home"))
         assertEquals("my-own-home", ProviderCatalog.labelOf("my-own-home"))
-        assertEquals(ProviderKind.Api, ProviderCatalog.kindOf("openai"))
+        assertNull(ProviderCatalog.kindOf("unknown-home"))
     }
 }
