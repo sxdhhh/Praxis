@@ -2675,7 +2675,7 @@ fun PraxisApp(
                     }
                 },
                 gatewayAccountNames = gatewayAccountRows.associate { it.id to it.name },
-                gatewayMaintenanceImportBusy = gatewayImportBusy,
+                gatewayImportBusy = gatewayImportBusy,
                 gatewayImportReport = gatewayImportReport,
                 gatewayImportResult = gatewayImportResult,
                 gatewayImportError = gatewayImportError
