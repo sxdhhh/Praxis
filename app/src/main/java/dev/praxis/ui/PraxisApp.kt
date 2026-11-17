@@ -656,6 +656,13 @@ fun PraxisApp(
         org.koin.compose.koinInject()
     val gatewayState by gatewayProcess.state.collectAsState()
     val gatewayLogs = remember { mutableStateOf<List<String>>(emptyList()) }
+    val gatewayConnJson by settingsRepository.gatewayConnectionJson
+        .collectAsState(initial = null)
+    val gatewayConnSettings = remember(gatewayConnJson) {
+        dev.praxis.core.gateway.adapters.GatewayConnectionCodec
+            .decode(gatewayConnJson)?.getOrNull()
+            ?: dev.praxis.core.gateway.adapters.GatewayConnectionSettings()
+    }
     val imageGenDownloadState by imageGenDownloadManager.state.collectAsState()
     // 删除结果一句话（G19）；终态确认交给 manager.acknowledge()。
     var imageGenDeleteMessage by remember { mutableStateOf<String?>(null) }

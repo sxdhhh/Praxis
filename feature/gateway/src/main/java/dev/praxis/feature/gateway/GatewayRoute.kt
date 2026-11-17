@@ -61,6 +61,11 @@ fun GatewayRoute(
     gatewayLogs: List<String> = emptyList(),
     /** 网关状态描述（如 "运行中 3065" / "已停止"）。 */
     gatewayStatus: String = "未连接",
+    /** 当前连接设置（:app 从 DataStore 读出来传进来）。 */
+    connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
+        dev.praxis.core.gateway.adapters.GatewayConnectionSettings(),
+    /** 连接设置变更回调。 */
+    onConnectionSettingsChange: (dev.praxis.core.gateway.adapters.GatewayConnectionSettings) -> Unit = {},
     /** 网关日志行列表（:app 从 GatewayProcess 拉过来）。 */
     gatewayLogs: List<String> = emptyList(),
     /** 网关状态描述（如 "运行中 3065" / "已停止"）。 */
@@ -235,6 +240,84 @@ fun GatewayRoute(
             }
         }
 
+        item(key = "__gateway_connection__") {
+            val urlText = remember { mutableStateOf(connectionSettings.baseUrl) }
+            val keyText = remember { mutableStateOf(connectionSettings.apiKey) }
+            val urlError = dev.praxis.core.gateway.adapters.GatewayAddressRules.check(urlText.value)
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(text = "网关连接", style = MiuixTheme.textStyles.body2)
+                    TextField(
+                        value = urlText.value,
+                        onValueChange = { urlText.value = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        label = "网关地址（http://192.168.1.80:3065）",
+                        useLabelAsPlaceholder = true,
+                        singleLine = true,
+                    )
+                    if (urlError != null && urlText.value.isNotBlank()) {
+                        Text(
+                            text = urlError,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    TextField(
+                        value = keyText.value,
+                        onValueChange = { keyText.value = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        label = "网关 Key（面板里建的，可选）",
+                        useLabelAsPlaceholder = true,
+                        singleLine = true,
+                    )
+                    MiuixNavigationItemWidget(
+                        title = "保存连接设置",
+                        description = if (urlError == null && urlText.value.isNotBlank())
+                            "保存后重启 App 生效"
+                        else "地址不可用",
+                        onClick = {
+                            if (urlError == null && urlText.value.isNotBlank()) {
+                                onConnectionSettingsChange(
+                                    dev.praxis.core.gateway.adapters.GatewayConnectionSettings(
+                                        baseUrl = urlText.value,
+                                        apiKey = keyText.value,
+                                    ),
+                                )
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        item(key = "__gateway_status__") {
+            SettingsSectionHeader(
+                icon = Icons.Outlined.Hub,
+                title = "Agent2API 网关",
+                subtitle = gatewayStatus,
+            )
+        }
+        item(key = "__gateway_logs__") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                Text(
+                    text = if (gatewayLogs.isEmpty()) "（暂无日志）"
+                          else gatewayLogs.takeLast(50).joinToString("\n"),
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
+        }
         item(key = "__backup_card__") {
             Card(
                 modifier = Modifier

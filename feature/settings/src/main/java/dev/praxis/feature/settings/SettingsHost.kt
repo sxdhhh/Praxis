@@ -116,6 +116,11 @@ fun SettingsHost(
     onBackupDatabase: () -> Unit = {},
     /** 上次备份的结果文案。 */
     backupMessage: String? = null,
+    /** Agent2API 网关连接设置（G-内置）。 */
+connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
+        dev.praxis.core.gateway.adapters.GatewayConnectionSettings(),
+    /** 连接设置变更。 */
+    onConnectionSettingsChange: (dev.praxis.core.gateway.adapters.GatewayConnectionSettings) -> Unit = {},
     /** 网关日志（:app 从 GatewayProcess 拉过来）。 */
     gatewayLogLines: List<String> = emptyList(),
     /** 网关状态一句话。 */
@@ -613,6 +618,11 @@ private fun SettingsPageBody(
     onBackupDatabase: () -> Unit = {},
     /** 上次备份的结果文案。 */
     backupMessage: String? = null,
+    /** Agent2API 网关连接设置（G-内置）。 */
+connectionSettings: dev.praxis.core.gateway.adapters.GatewayConnectionSettings =
+        dev.praxis.core.gateway.adapters.GatewayConnectionSettings(),
+    /** 连接设置变更。 */
+    onConnectionSettingsChange: (dev.praxis.core.gateway.adapters.GatewayConnectionSettings) -> Unit = {},
     onGatewayEnabledChange: (Boolean) -> Unit = {},
     /** 模型管理页的结构化条目（gateway_model）。 */
     gatewayModelRows: List<dev.praxis.core.gateway.GatewayModelRow> = emptyList(),
@@ -987,6 +997,8 @@ private fun SettingsPageBody(
             backupMessage = backupMessage,
         gatewayLogs = gatewayLogLines,
         gatewayStatus = gatewayConnectionStatus,
+            connectionSettings = connectionSettings,
+            onConnectionSettingsChange = onConnectionSettingsChange,
             gatewayEnabled = gatewayEnabled,
             onGatewayEnabledChange = onGatewayEnabledChange,
             modifier = modifier,
